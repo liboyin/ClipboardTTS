@@ -33,13 +33,8 @@ class AudioPlayerManager: ObservableObject {
         engine.attach(timePitch)
         
         
-        // Define format for buffer allocation
-        audioFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)
-        
-        // Define format for connecting nodes (standard format with standard sample rate)
-        // Note: Using custom format (e.g. PCM Int16) directly in connection causes error -10868 on macOS.
-        // Connecting with standard float format works, and AVFoundation handles the conversion from the buffer's format.
         let standardFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)
+        audioFormat = standardFormat
         
         if let standardFormat = standardFormat {
             engine.connect(playerNode, to: timePitch, format: standardFormat)
@@ -59,11 +54,11 @@ class AudioPlayerManager: ObservableObject {
         accumulatedData.append(data)
         unprocessedData.append(data)
         
-        let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
-        let frameCapacity = AVAudioFrameCount(unprocessedData.count / bytesPerFrame)
+        let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
+        let frameCapacity = AVAudioFrameCount(unprocessedData.count / bytesPerNetworkFrame)
         guard frameCapacity > 0 else { return }
         
-        let bytesToProcess = Int(frameCapacity) * bytesPerFrame
+        let bytesToProcess = Int(frameCapacity) * bytesPerNetworkFrame
         let dataToProcess = unprocessedData.prefix(bytesToProcess)
         unprocessedData.removeFirst(bytesToProcess)
         
@@ -71,8 +66,11 @@ class AudioPlayerManager: ObservableObject {
         buffer.frameLength = frameCapacity
         
         dataToProcess.withUnsafeBytes { rawBufferPointer in
-            if let ptr = rawBufferPointer.bindMemory(to: Int16.self).baseAddress {
-                buffer.int16ChannelData?.pointee.update(from: ptr, count: Int(frameCapacity))
+            let int16Pointer = rawBufferPointer.bindMemory(to: Int16.self)
+            if let floatChannelData = buffer.floatChannelData?[0] {
+                for i in 0..<Int(frameCapacity) {
+                    floatChannelData[i] = Float(int16Pointer[i]) / 32768.0
+                }
             }
         }
         
@@ -130,22 +128,25 @@ class AudioPlayerManager: ObservableObject {
         guard let format = audioFormat else { return }
         
         let sampleRate = format.sampleRate
-        let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
-        let byteOffset = Int(progress * sampleRate) * bytesPerFrame
+        let bytesPerNetworkFrame = 2
+        let byteOffset = Int(progress * sampleRate) * bytesPerNetworkFrame
         
         // Align to frame boundary
-        let alignedOffset = byteOffset - (byteOffset % bytesPerFrame)
+        let alignedOffset = byteOffset - (byteOffset % bytesPerNetworkFrame)
         
         guard alignedOffset < accumulatedData.count else { return }
         
         let remainingData = accumulatedData.subdata(in: alignedOffset..<accumulatedData.count)
-        let frameCapacity = AVAudioFrameCount(remainingData.count) / format.streamDescription.pointee.mBytesPerFrame
+        let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
         guard frameCapacity > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else { return }
         
         buffer.frameLength = frameCapacity
         remainingData.withUnsafeBytes { rawBufferPointer in
-            if let ptr = rawBufferPointer.bindMemory(to: Int16.self).baseAddress {
-                buffer.int16ChannelData?.pointee.update(from: ptr, count: Int(frameCapacity))
+            let int16Pointer = rawBufferPointer.bindMemory(to: Int16.self)
+            if let floatChannelData = buffer.floatChannelData?[0] {
+                for i in 0..<Int(frameCapacity) {
+                    floatChannelData[i] = Float(int16Pointer[i]) / 32768.0
+                }
             }
         }
         
