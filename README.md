@@ -1,144 +1,22 @@
-# TTS Service for macOS
-
-Stream OpenAI TTS on selected text with real-time playback — accessible from the right-click context menu or the menu bar app. Supports pause/resume, stop, voice selection, and playback speed control.
-
----
+# Advanced TTS App
 
 ## Architecture
+The application is structured as a native macOS menu bar app utilizing SwiftUI. The core rationale for this architecture is to provide an unobtrusive, easily accessible global tool for Text-to-Speech (TTS) functionality.
 
-```
-Selected Text
-     │
-     ├─► Right-click → Services → "Speak with TTS"   (Automator Quick Action)
-     └─► Menu Bar App → "Speak Selected Text"         (rumps + AppleScript)
-          │
-          ▼
-   tts_client.py  ──── Unix socket (/tmp/tts_daemon.sock) ────►  tts_daemon.py
-                                                                       │
-                                                              OpenAI /v1/audio/speech
-                                                              (streaming PCM, 24kHz)
-                                                                       │
-                                                              sounddevice RawOutputStream
-                                                              (chunk-by-chunk playback)
-```
+- **UI Layer**: SwiftUI is chosen for its declarative syntax and modern approach to building macOS interfaces, allowing seamless integration with `MenuBarExtra`. A secondary SwiftUI `Window` is utilized for settings management to keep the main menu bar interface uncluttered.
+- **Audio Engine**: `AVAudioEngine` and `AVAudioPlayerNode` are used instead of `AVPlayer` to allow for precise real-time control over the audio stream, specifically the ability to manipulate playback speed via `AVAudioUnitTimePitch` without affecting pitch.
+- **Text Extraction**: The app relies primarily on `AXUIElement` to interact directly with the frontmost application's accessibility tree. This allows grabbing selected text instantly without polluting the user's clipboard. A fallback to `NSPasteboard` exists for applications that do not properly implement the accessibility API.
+- **Networking**: `URLSession` is employed to handle HTTP chunked streaming of the TTS audio payload from OpenAI-compatible APIs (such as Gemini TTS). This ensures that audio playback can begin before the entire payload is downloaded, minimizing latency.
 
-**Key design decisions:**
-- **Streaming PCM** — `response_format: pcm` gives raw 16-bit audio with no container overhead; playback starts within ~300ms of the first chunk arriving.
-- **Unix socket IPC** — lightweight, low-latency communication between the client, menu bar app, and daemon.
-- **Pause via Event** — the playback loop calls `pause_event.wait()` between chunks; clearing the event freezes audio immediately without dropping buffered data.
-- **Stop via Event** — sets `stop_event` and unblocks the pause event so the thread exits cleanly.
-- **Playback speed via sample rate** — speed is applied by opening `sounddevice.RawOutputStream` at `24000 × speed` Hz. Speed changes take effect within one chunk (~170ms) mid-playback, with no re-encoding required.
+## Dataflow
+1. **User Action**: The user highlights text in any application and triggers the app (either via a global shortcut, NSService, or menu bar click).
+2. **Text Acquisition**: `TextExtractionManager` queries the active window via `AXUIElement` or `NSPasteboard` to retrieve the target text.
+3. **API Request**: `TTSNetworkManager` submits the text to the configured `/v1/audio/speech` endpoint using the credentials stored securely by the app.
+4. **Streaming Response**: The API responds with an audio stream. `TTSNetworkManager` passes incoming data chunks to `AudioPlayerManager`.
+5. **Playback**: `AudioPlayerManager` schedules the audio buffers via `AVAudioEngine` and adjusts the timing/pitch according to the user's slider preferences.
 
----
-
-## Installation
-
-```bash
-# Copy this folder somewhere, then:
-bash install.sh
-```
-
-You'll be prompted for your OpenAI API key. The script:
-1. Copies files to `~/.tts-service/`
-2. Locates your conda installation and creates a `tts-service` env (Python 3.13)
-3. Installs all dependencies (most via conda-forge, PyObjC framework via pip)
-4. Registers a launchd agent that auto-starts the menu bar app on login
-5. Prints instructions for the one manual step (Automator)
-
-### Manual step — Automator Service
-
-1. Open **Automator** → File → New → **Quick Action**
-2. Set "Workflow receives current" = **text** in **any application**
-3. Add action: **Run Shell Script** — shell `/bin/bash`, pass input **as stdin**
-4. Script body:
-   ```bash
-   bash ~/.tts-service/service/tts_service.sh
-   ```
-5. Save as **"Speak with TTS"**
-
-After saving, it appears in **right-click → Services → Speak with TTS**.
-
-> You may need to grant the service permission under **System Settings → Privacy & Security → Automation**.
-
----
-
-## Controls
-
-| Action | Trigger |
-|---|---|
-| Speak selected text | Right-click → Services → Speak with TTS |
-| Speak selected text | Menu bar → Speak Selected Text |
-| Pause / Resume | Menu bar → Pause / Resume |
-| Stop | Menu bar → Stop |
-| Change speed | Menu bar → Speed → [0.5× / 0.75× / 1× / 1.25× / 1.5× / 2×] |
-| Change voice | Menu bar → Voice → [alloy / echo / fable / onyx / nova / shimmer] |
-
-The menu bar icon reflects current state (🔊 playing, ⏸ paused, 🔇 idle) and shows the active speed when it is not 1×, e.g. `🔊 1.5×`.
-
----
-
-## File Layout
-
-```
-~/.tts-service/
-├── daemon/
-│   ├── tts_daemon.py        Streaming TTS engine + Unix socket server
-│   └── tts_client.py        CLI client for sending commands to the daemon
-├── menubar/
-│   └── tts_menubar.py       Menu bar app (rumps): status, controls, voice & speed
-└── service/
-    └── tts_service.sh       Shell script invoked by the Automator Quick Action
-
-~/miniconda3/envs/tts-service/   Conda environment (path varies by conda install)
-
-~/Library/LaunchAgents/
-└── com.tts-service.menubar.plist   Launches menu bar app on login via launchd
-
-~/Library/Logs/
-├── TTSDaemon.log
-└── TTSMenuBar.log
-```
-
----
-
-## Troubleshooting
-
-**No audio / daemon not starting**
-```bash
-tail -f ~/Library/Logs/TTSDaemon.log
-```
-
-**Service not appearing in right-click menu**
-→ System Settings → Privacy & Security → **Extensions → Finder** — ensure "Speak with TTS" is enabled.
-→ Or verify: `ls ~/Library/Services/`
-
-**Restart the menu bar app**
-```bash
-launchctl kickstart -k gui/$(id -u)/com.tts-service.menubar
-```
-
-**Stop everything**
-```bash
-launchctl unload ~/Library/LaunchAgents/com.tts-service.menubar.plist
-conda run -n tts-service python ~/.tts-service/daemon/tts_client.py quit
-```
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `portaudio` | Audio I/O backend |
-| `rumps` | macOS menu bar app framework |
-| `sounddevice` | Real-time audio output (PortAudio bindings) |
-| `soundfile` | Audio format support |
-| `pyobjc-framework-Cocoa` | macOS native APIs |
-
-All installed automatically into the `tts-service` conda environment by `install.sh`.
-
-To manage the environment manually:
-```bash
-conda activate tts-service
-conda env remove -n tts-service   # to uninstall
-```
+## Design Decisions & Assumptions
+- **OpenAI-Compatible Endpoint Requirement**: We assume the target TTS engine (online or local) exposes an OpenAI-compatible `/v1/audio/speech` endpoint. This simplifies the network layer and allows users to flexibly swap between engines (e.g., local models or cloud-based Gemini/OpenAI).
+- **No Direct Environment Modification**: It is assumed that tools like `xcodegen` are either already installed or managed by the user outside of this agent context. This maintains system integrity.
+- **Streaming over Pre-generation**: The system is designed to stream audio rather than waiting for the entire file to generate. The design assumes that low latency (Time-To-First-Byte) is critical for a smooth user experience.
+- **State Segregation**: All settings are managed in a separate `SettingsView` window to keep the menu bar dropdown focused purely on real-time playback controls (play/pause, progress, speed).

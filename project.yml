@@ -1,0 +1,19 @@
+name: AdvancedTTSApp
+options:
+  bundleIdPrefix: com.advancedtts
+targets:
+  AdvancedTTSApp:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources: [Sources]
+    info:
+      properties:
+        LSUIElement: true
+        NSServices:
+          - NSMenuItem:
+              default: "Speak Selected Text"
+            NSMessage: "handleServices"
+            NSPortName: "AdvancedTTSApp"
+            NSSendTypes:
+              - "public.plain-text"
