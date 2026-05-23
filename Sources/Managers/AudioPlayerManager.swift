@@ -19,6 +19,7 @@ class AudioPlayerManager: ObservableObject {
     
     private var audioFormat: AVAudioFormat?
     private var accumulatedData = Data()
+    private var unprocessedData = Data()
     private var baseProgressOffset: Double = 0.0
     
     private var progressTimer: Timer?
@@ -56,14 +57,20 @@ class AudioPlayerManager: ObservableObject {
         guard let format = audioFormat else { return }
         
         accumulatedData.append(data)
+        unprocessedData.append(data)
         
-        let frameCapacity = AVAudioFrameCount(data.count) / format.streamDescription.pointee.mBytesPerFrame
+        let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
+        let frameCapacity = AVAudioFrameCount(unprocessedData.count / bytesPerFrame)
         guard frameCapacity > 0 else { return }
+        
+        let bytesToProcess = Int(frameCapacity) * bytesPerFrame
+        let dataToProcess = unprocessedData.prefix(bytesToProcess)
+        unprocessedData.removeFirst(bytesToProcess)
         
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else { return }
         buffer.frameLength = frameCapacity
         
-        data.withUnsafeBytes { rawBufferPointer in
+        dataToProcess.withUnsafeBytes { rawBufferPointer in
             if let ptr = rawBufferPointer.bindMemory(to: Int16.self).baseAddress {
                 buffer.int16ChannelData?.pointee.update(from: ptr, count: Int(frameCapacity))
             }
@@ -103,6 +110,7 @@ class AudioPlayerManager: ObservableObject {
     func stop() {
         playerNode.stop()
         accumulatedData.removeAll()
+        unprocessedData.removeAll()
         baseProgressOffset = 0.0
         
         DispatchQueue.main.async {
