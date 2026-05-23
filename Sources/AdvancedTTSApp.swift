@@ -20,7 +20,7 @@ struct AdvancedTTSApp: App {
         .menuBarExtraStyle(.window)
         
         Window("Settings", id: "settings") {
-            SettingsView(networkManager: networkManager)
+            SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
         }
     }
 }

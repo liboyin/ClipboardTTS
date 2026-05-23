@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var networkManager: TTSNetworkManager
+    @ObservedObject var audioPlayer: AudioPlayerManager
     
     @AppStorage("apiBaseURL") private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
     @AppStorage("apiKey") private var apiKey: String = ""
@@ -28,6 +29,21 @@ struct SettingsView: View {
             }
             
             HStack {
+                Button("Test Voice") {
+                    networkManager.updateSettings(
+                        baseURL: apiBaseURL,
+                        apiKey: apiKey,
+                        model: ttsModel,
+                        voice: ttsVoice
+                    )
+                    networkManager.stopStreaming()
+                    audioPlayer.stop()
+                    networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
+                        audioPlayer.scheduleAudio(data: data)
+                    }
+                }
+                .buttonStyle(.bordered)
+                
                 Spacer()
                 Button("Save") {
                     networkManager.updateSettings(
