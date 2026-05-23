@@ -38,14 +38,25 @@ struct MenuBarView: View {
                         networkManager.stopStreaming()
                         audioPlayer.stop()
                     } else {
-                        if let text = textExtraction.getSelectedText() {
-                            networkManager.streamTTS(text: text) { data in
-                                audioPlayer.scheduleAudio(data: data)
+                        print("Speak Copied Text button clicked")
+                        
+                        // Deactivate our app to return focus to the previously active application
+                        NSApp.deactivate()
+                        
+                        // Wait a brief moment for the OS to switch focus back
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            if let text = textExtraction.getCopiedText() {
+                                print("Extracted text successfully, length: \(text.count)")
+                                networkManager.streamTTS(text: text) { data in
+                                    audioPlayer.scheduleAudio(data: data)
+                                }
+                            } else {
+                                print("Failed to extract any text")
                             }
                         }
                     }
                 }) {
-                    Text((networkManager.isStreaming || audioPlayer.isPlaying) ? "Stop" : "Speak Selected Text")
+                    Text((networkManager.isStreaming || audioPlayer.isPlaying) ? "Stop" : "Speak Copied Text")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

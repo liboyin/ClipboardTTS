@@ -3,10 +3,10 @@ import Foundation
 class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     @Published var isStreaming = false
     
-    private var baseURL: String = ""
-    private var apiKey: String = ""
-    private var model: String = ""
-    private var voice: String = ""
+    private var baseURL: String
+    private var apiKey: String
+    private var model: String
+    private var voice: String
     
     private var session: URLSession!
     private var currentTask: URLSessionDataTask?
@@ -16,6 +16,11 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var errorData = Data()
     
     init(configuration: URLSessionConfiguration = .default) {
+        self.baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/audio/speech"
+        self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+        self.model = UserDefaults.standard.string(forKey: "ttsModel") ?? "tts-1"
+        self.voice = UserDefaults.standard.string(forKey: "ttsVoice") ?? "alloy"
+        
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }
@@ -28,7 +33,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     }
     
     func streamTTS(text: String, dataHandler: @escaping (Data) -> Void) {
-        guard let url = URL(string: baseURL) else { return }
+        guard let url = URL(string: baseURL) else {
+            print("TTSNetworkManager Error: Invalid or missing baseURL (\(baseURL))")
+            return
+        }
         
         self.dataHandler = dataHandler
         

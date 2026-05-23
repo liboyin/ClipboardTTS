@@ -4,7 +4,7 @@
 
 - The app should reside in the menu bar, with a macOS native look and feel (built using Native Swift/SwiftUI).
 - Clicking on the app button in the menu bar should open a drop-down menu with the following options:
-    - Speak Selected Text/Stop
+    - Speak Copied Text/Stop
     - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically. Once the entire audio is buffered, also start showing remaining time. All times should be precise to the second.
     - Pause/Resume
     - Playback Speed (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2.0x, 2.5x)
@@ -15,10 +15,9 @@
 ## Starting Playback
 
 - The user should be able to select text in any application and right-click -> Services -> click "Speak Selected Text with Advanced TTS" to send to TTS engine for playback. Note that Services is not available in all applications, so there is also the next item.
-- The user should be able to select text in any application and click "Speak Selected Text" from the menu bar app to send to TTS engine for playback. 
-  - *Fallback Mechanism*: The app will request Accessibility permissions to read the selected text directly. If permission is denied, it will fall back to reading text from the system clipboard (requiring the user to Cmd+C first).
+- The user should be able to copy text in any application and click "Speak Copied Text" from the menu bar app to send to TTS engine for playback. 
 - The app should start streaming audio within 2 seconds after the user clicks the button.
-- If the user triggers "Speak Selected Text" while audio is already playing, the app should interrupt the current playback and immediately start playing the new text.
+- If the user triggers "Speak Copied Text" while audio is already playing, the app should interrupt the current playback and immediately start playing the new text.
 
 ### Control & Navigation During Playback
 - The user should be able to pause and resume the currently playing audio from the menu bar.

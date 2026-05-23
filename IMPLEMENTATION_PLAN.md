@@ -7,7 +7,7 @@ We will build "Advanced TTS" as a native macOS application using Swift and Swift
 We will create a new Xcode project using `xcodegen`.
 - **UI**: SwiftUI with a `MenuBarExtra` scene for the drop-down and a separate `Window` for settings.
 - **Audio Engine**: `AVAudioEngine` for streaming audio chunks and adjusting playback speed using `AVAudioUnitTimePitch`.
-- **Text Extraction**: Uses `AXUIElement` for accessibility, falling back to `NSPasteboard` for clipboard text if accessibility is not granted.
+- **Text Extraction**: Reads copied text directly from `NSPasteboard`.
 - **Network**: Standard `URLSession` data tasks to stream JSON audio data from the OpenAI-compatible `/v1/audio/speech` endpoints.
 
 ## Proposed Components
@@ -20,7 +20,7 @@ The main entry point using SwiftUI's `@main`. It will use `MenuBarExtra` to defi
 
 ### 3. `Sources/Views/MenuBarView.swift`
 The SwiftUI view for the drop-down menu. It will contain:
-- "Speak Selected Text" / "Stop" buttons
+- "Speak Copied Text" / "Stop" buttons
 - Custom Slider for playback progress & buffering (Slider max value grows dynamically as chunks buffer).
 - Play/Pause toggle
 - Playback speed picker (0.5x to 2.5x)
@@ -33,9 +33,8 @@ A separate window for configuration:
 - Model/Voice selection
 
 ### 5. `Sources/Managers/TextExtractionManager.swift`
-Handles extracting selected text:
-- Tries using `AXUIElement` (Accessibility) to get the highlighted text of the frontmost application.
-- Falls back to `NSPasteboard` if accessibility permissions are missing.
+Handles extracting copied text:
+- Reads copied text directly from `NSPasteboard`.
 - Handles the `NSService` callback from the macOS right-click menu.
 
 ### 6. `Sources/Managers/TTSNetworkManager.swift`
