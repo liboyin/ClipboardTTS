@@ -31,11 +31,18 @@ class AudioPlayerManager: ObservableObject {
         engine.attach(playerNode)
         engine.attach(timePitch)
         
+        
+        // Define format for buffer allocation
         audioFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)
         
-        if let format = audioFormat {
-            engine.connect(playerNode, to: timePitch, format: format)
-            engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+        // Define format for connecting nodes (standard format with standard sample rate)
+        // Note: Using custom format (e.g. PCM Int16) directly in connection causes error -10868 on macOS.
+        // Connecting with standard float format works, and AVFoundation handles the conversion from the buffer's format.
+        let standardFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)
+        
+        if let standardFormat = standardFormat {
+            engine.connect(playerNode, to: timePitch, format: standardFormat)
+            engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
         }
         
         do {

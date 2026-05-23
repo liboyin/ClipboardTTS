@@ -20,7 +20,25 @@ final class TTSNetworkManagerTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret_token")
             
-            if let bodyData = request.httpBody {
+            var extractedData: Data? = request.httpBody
+            if extractedData == nil, let stream = request.httpBodyStream {
+                stream.open()
+                let bufferSize = 1024
+                var buffer = [UInt8](repeating: 0, count: bufferSize)
+                var data = Data()
+                while stream.hasBytesAvailable {
+                    let bytesRead = stream.read(&buffer, maxLength: bufferSize)
+                    if bytesRead > 0 {
+                        data.append(buffer, count: bytesRead)
+                    } else {
+                        break
+                    }
+                }
+                stream.close()
+                extractedData = data
+            }
+            
+            if let bodyData = extractedData, !bodyData.isEmpty {
                 let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
                 XCTAssertEqual(json?["model"] as? String, "tts-test")
                 XCTAssertEqual(json?["input"] as? String, "Hello world")
@@ -67,8 +85,15 @@ final class TTSNetworkManagerTests: XCTestCase {
         // WHY: Users might interrupt TTS playback. The network manager must cancel the ongoing network request
         // to save bandwidth and instantly transition the state.
         
-        let manager = TTSNetworkManager()
-        manager.updateSettings(baseURL: "https://mock.api", apiKey: "test", model: "test", voice: "test")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        
+        MockURLProtocol.requestHandler = { request in
+            Thread.sleep(forTimeInterval: 0.5)
+            return (HTTPURLResponse(), Data())
+        }
         
         manager.streamTTS(text: "Test cancel") { _ in }
         
