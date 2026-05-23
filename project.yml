@@ -17,3 +17,11 @@ targets:
             NSPortName: "AdvancedTTSApp"
             NSSendTypes:
               - "public.plain-text"
+
+  AdvancedTTSAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources: [Tests]
+    dependencies:
+      - target: AdvancedTTSApp

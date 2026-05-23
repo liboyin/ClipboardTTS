@@ -12,9 +12,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var currentTask: URLSessionDataTask?
     private var dataHandler: ((Data) -> Void)?
     
-    override init() {
+    init(configuration: URLSessionConfiguration = .default) {
         super.init()
-        let configuration = URLSessionConfiguration.default
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }
     
