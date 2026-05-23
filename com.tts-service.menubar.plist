@@ -8,8 +8,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <!-- Updated by install.sh to absolute venv python path -->
-        <string>PYTHON_PLACEHOLDER</string>
+        <!-- Updated by install.sh to absolute binary path -->
         <string>MENUBAR_PLACEHOLDER</string>
     </array>
 

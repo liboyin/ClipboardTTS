@@ -24,14 +24,10 @@ info "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 # Copy source files
-cp -r "$SCRIPT_DIR/daemon"   "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/menubar"  "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/service"  "$INSTALL_DIR/"
-cp -r "$SCRIPT_DIR/scripts"  "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/service/tts_service.sh"
-chmod +x "$INSTALL_DIR/daemon/tts_daemon.py"
-chmod +x "$INSTALL_DIR/daemon/tts_client.py"
-chmod +x "$INSTALL_DIR/menubar/tts_menubar.py"
+cp "$SCRIPT_DIR/tts_service.sh"  "$INSTALL_DIR/"
+cp -r "$SCRIPT_DIR/src" "$INSTALL_DIR/"
+cp "$SCRIPT_DIR/pyproject.toml" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/tts_service.sh"
 
 # ── 2. Locate conda ───────────────────────────────────────────────────────────
 info "Locating conda…"
@@ -77,35 +73,26 @@ fi
 
 info "Installing Python dependencies into '$CONDA_ENV_NAME'…"
 # Install most dependencies via conda, apart from PyObjC framework which is only available on pip
-conda install -y -c conda-forge portaudio rumps python-sounddevice pysoundfile -q
+conda install -y -c conda-forge portaudio -q
 pip install --upgrade pip -q
-pip install pyobjc-framework-Cocoa pyobjc-framework-AppKit -q
+pip install "$INSTALL_DIR" -q
 
 info "Conda environment ready ✓  (python: $CONDA_PY)"
 
 # ── 4. Update service script paths ───────────────────────────────────────────
 info "Patching service script paths…"
-sed -i '' \
-    "s|PYTHON=\".*\"|PYTHON=\"$CONDA_PY\"|" \
-    "$INSTALL_DIR/service/tts_service.sh"
-sed -i '' \
-    "s|CLIENT=\".*\"|CLIENT=\"$INSTALL_DIR/daemon/tts_client.py\"|" \
-    "$INSTALL_DIR/service/tts_service.sh"
-sed -i '' \
-    "s|DAEMON=\".*\"|DAEMON=\"$INSTALL_DIR/daemon/tts_daemon.py\"|" \
-    "$INSTALL_DIR/service/tts_service.sh"
+CONDA_BIN="$CONDA_BASE/envs/$CONDA_ENV_NAME/bin"
+sed -i '' "s|CONDA_BIN_PLACEHOLDER|$CONDA_BIN|" "$INSTALL_DIR/tts_service.sh"
 
 # ── 5. launchd plist ─────────────────────────────────────────────────────────
 info "Installing launchd service…"
-PLIST_SRC="$INSTALL_DIR/scripts/com.tts-service.menubar.plist"
+PLIST_SRC="$SCRIPT_DIR/com.tts-service.menubar.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/com.tts-service.menubar.plist"
 
-sed -i '' "s|PYTHON_PLACEHOLDER|$CONDA_PY|g"                          "$PLIST_SRC"
-sed -i '' "s|MENUBAR_PLACEHOLDER|$INSTALL_DIR/menubar/tts_menubar.py|g" "$PLIST_SRC"
-sed -i '' "s|OPENAI_KEY_PLACEHOLDER|$OPENAI_API_KEY|g"                "$PLIST_SRC"
-sed -i '' "s|HOMEDIR_PLACEHOLDER|$HOME|g"                             "$PLIST_SRC"
-
 cp "$PLIST_SRC" "$PLIST_DST"
+sed -i '' "s|MENUBAR_PLACEHOLDER|$CONDA_BIN/tts-menubar|g" "$PLIST_DST"
+sed -i '' "s|OPENAI_KEY_PLACEHOLDER|$OPENAI_API_KEY|g"      "$PLIST_DST"
+sed -i '' "s|HOMEDIR_PLACEHOLDER|$HOME|g"                  "$PLIST_DST"
 
 # Unload old instance if exists
 launchctl unload "$PLIST_DST" 2>/dev/null || true
@@ -123,7 +110,7 @@ echo "  4. Add action: Library → Utilities → Run Shell Script"
 echo "  5. Shell: /bin/bash   |   Pass input: as stdin"
 echo "  6. Paste this script body:"
 echo ""
-echo "     bash $INSTALL_DIR/service/tts_service.sh"
+echo "     bash $INSTALL_DIR/tts_service.sh"
 echo ""
 echo "  7. File → Save → name it 'Speak with TTS'"
 echo "  8. It will appear in right-click → Services → Speak with TTS"

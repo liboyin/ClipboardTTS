@@ -9,9 +9,8 @@
 
 # ── Config ─────────────────────────────────────────────────────────────────
 # Update these paths after installation:
-PYTHON="$HOME/.tts-service/venv/bin/python3"
-CLIENT="$HOME/.tts-service/daemon/tts_client.py"
-DAEMON="$HOME/.tts-service/daemon/tts_daemon.py"
+CONDA_BIN="CONDA_BIN_PLACEHOLDER"
+export PATH="$CONDA_BIN:$PATH"
 SOCKET="/tmp/tts_daemon.sock"
 VOICE="${TTS_VOICE:-alloy}"
 
@@ -25,12 +24,12 @@ fi
 
 # ── Ensure daemon is running ───────────────────────────────────────────────
 if ! [ -S "$SOCKET" ]; then
-    nohup "$PYTHON" "$DAEMON" \
+    nohup tts-daemon \
         >> "$HOME/Library/Logs/TTSDaemon.log" 2>&1 &
     sleep 1.5
 fi
 
 # ── Send speak command ─────────────────────────────────────────────────────
-"$PYTHON" "$CLIENT" speak "$TEXT" "$VOICE"
+tts-client speak "$TEXT" "$VOICE"
 
 osascript -e "display notification \"Speaking selected text…\" with title \"TTS\" subtitle \"Voice: $VOICE\""

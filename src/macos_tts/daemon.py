@@ -340,6 +340,9 @@ class TTSDaemon:
                 os.unlink(SOCKET_PATH)
 
 
-if __name__ == "__main__":
+def main():
     daemon = TTSDaemon()
     daemon.run()
+
+if __name__ == "__main__":
+    main()

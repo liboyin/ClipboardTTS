@@ -20,10 +20,8 @@ from pathlib import Path
 import rumps
 
 # ── Path resolution ───────────────────────────────────────────────────────────
-SCRIPT_DIR = Path(__file__).parent.resolve()
-CLIENT_PATH = SCRIPT_DIR.parent / "daemon" / "tts_client.py"
-DAEMON_PATH = SCRIPT_DIR.parent / "daemon" / "tts_daemon.py"
-PYTHON_BIN = sys.executable
+BIN_DIR = Path(sys.executable).parent
+DAEMON_EXEC = BIN_DIR / "tts-daemon"
 SOCKET_PATH = "/tmp/tts_daemon.sock"
 
 
@@ -75,7 +73,7 @@ def ensure_daemon_running():
         sock.close()
     except Exception:
         subprocess.Popen(
-            [PYTHON_BIN, str(DAEMON_PATH)],
+            [str(DAEMON_EXEC)],
             stdout=open(Path.home() / "Library/Logs/TTSDaemon.log", "a"),
             stderr=subprocess.STDOUT,
         )
@@ -175,5 +173,8 @@ class TTSMenuBar(rumps.App):
         self.status_item.title = label + (f"  —  {speed}×" if speed != 1.0 else "")
 
 
-if __name__ == "__main__":
+def main():
     TTSMenuBar().run()
+
+if __name__ == "__main__":
+    main()
