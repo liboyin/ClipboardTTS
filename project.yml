@@ -8,6 +8,7 @@ targets:
     deploymentTarget: "13.0"
     sources: [Sources]
     info:
+      path: Sources/Info.plist
       properties:
         LSUIElement: true
         NSServices:
