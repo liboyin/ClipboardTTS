@@ -12,6 +12,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var currentTask: URLSessionDataTask?
     private var dataHandler: ((Data) -> Void)?
     
+    private var isErrorResponse = false
+    private var errorData = Data()
+    
     init(configuration: URLSessionConfiguration = .default) {
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
@@ -50,10 +53,14 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         
         currentTask?.cancel()
         
+        isErrorResponse = false
+        errorData.removeAll()
+        
         DispatchQueue.main.async {
             self.isStreaming = true
         }
         
+        print("Starting TTS stream to \(baseURL) with model: \(model), voice: \(voice)")
         currentTask = session.dataTask(with: request)
         currentTask?.resume()
     }
@@ -66,13 +73,41 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         }
     }
     
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        if let httpResponse = response as? HTTPURLResponse {
+            print("Received HTTP Status Code: \(httpResponse.statusCode)")
+            if !(200...299).contains(httpResponse.statusCode) {
+                isErrorResponse = true
+            }
+        }
+        completionHandler(.allow)
+    }
+    
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        dataHandler?(data)
+        if isErrorResponse {
+            errorData.append(data)
+        } else {
+            dataHandler?(data)
+        }
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         DispatchQueue.main.async {
             self.isStreaming = false
+        }
+        
+        if isErrorResponse {
+            if let errorString = String(data: errorData, encoding: .utf8) {
+                print("API Error Response: \(errorString)")
+            } else {
+                print("API Error Response: (unable to decode data)")
+            }
+        }
+        
+        if let error = error {
+            print("Task completed with error: \(error.localizedDescription)")
+        } else if !isErrorResponse {
+            print("Task completed successfully.")
         }
     }
 }
