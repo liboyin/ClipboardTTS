@@ -26,3 +26,5 @@ targets:
     sources: [Tests]
     dependencies:
       - target: AdvancedTTSApp
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
