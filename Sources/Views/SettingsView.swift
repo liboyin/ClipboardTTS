@@ -18,6 +18,11 @@ struct SettingsView: View {
         return customAPIKey
     }
     
+    private var currentBaseURL: String {
+        if ttsProvider == "OpenAI" { return "https://api.openai.com/v1/audio/speech" }
+        if ttsProvider == "Gemini" { return "https://generativelanguage.googleapis.com/v1beta" }
+        return apiBaseURL
+    }
     let providers = ["OpenAI", "Gemini", "Custom"]
     
     var body: some View {
@@ -30,20 +35,20 @@ struct SettingsView: View {
                 }
                 .onChange(of: ttsProvider) { newValue in
                     if newValue == "OpenAI" {
-                        apiBaseURL = "https://api.openai.com/v1/audio/speech"
                         ttsModel = "tts-1"
                         ttsVoice = "alloy"
                     } else if newValue == "Gemini" {
-                        apiBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
                         ttsModel = "gemini-3.1-flash"
                         ttsVoice = "Aoede"
                     }
                     fetchMetadata()
                 }
 
-                TextField("Base URL", text: $apiBaseURL)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: apiBaseURL) { _ in fetchMetadata() }
+                if ttsProvider == "Custom" {
+                    TextField("Base URL", text: $apiBaseURL)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: apiBaseURL) { _ in fetchMetadata() }
+                }
                 
                 if ttsProvider == "OpenAI" {
                     SecureField("API Key", text: $openaiAPIKey)
@@ -96,7 +101,7 @@ struct SettingsView: View {
             HStack {
                 Button("Test Voice") {
                     networkManager.updateSettings(
-                        baseURL: apiBaseURL,
+                        baseURL: currentBaseURL,
                         apiKey: currentAPIKey,
                         model: ttsModel,
                         voice: ttsVoice
@@ -112,7 +117,7 @@ struct SettingsView: View {
                 Spacer()
                 Button("Save") {
                     networkManager.updateSettings(
-                        baseURL: apiBaseURL,
+                        baseURL: currentBaseURL,
                         apiKey: currentAPIKey,
                         model: ttsModel,
                         voice: ttsVoice
@@ -126,7 +131,7 @@ struct SettingsView: View {
         .frame(width: 400, height: 280)
         .onAppear {
             networkManager.updateSettings(
-                baseURL: apiBaseURL,
+                baseURL: currentBaseURL,
                 apiKey: currentAPIKey,
                 model: ttsModel,
                 voice: ttsVoice
@@ -137,7 +142,7 @@ struct SettingsView: View {
     
     private func fetchMetadata() {
         if ttsProvider == "Custom" { return }
-        networkManager.fetchAvailableModels(baseURL: apiBaseURL, apiKey: currentAPIKey)
-        networkManager.fetchAvailableVoices(baseURL: apiBaseURL, apiKey: currentAPIKey)
+        networkManager.fetchAvailableModels(baseURL: currentBaseURL, apiKey: currentAPIKey)
+        networkManager.fetchAvailableVoices(baseURL: currentBaseURL, apiKey: currentAPIKey)
     }
 }
