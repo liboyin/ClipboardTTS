@@ -14,6 +14,7 @@ struct MenuBarView: View {
                     .font(.headline)
                 Spacer()
                 Button(action: {
+                    NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: "settings")
                 }) {
                     Image(systemName: "gearshape")
