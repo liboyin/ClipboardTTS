@@ -47,4 +47,37 @@ final class AudioPlayerManagerTests: XCTestCase {
         player.playbackRate = 1.5
         XCTAssertEqual(player.playbackRate, 1.5)
     }
+    
+    func testScheduleAudio() {
+        // WHY: Ensure that providing valid PCM data increments bufferDuration and correctly changes the state.
+        let player = AudioPlayerManager()
+        let sampleData = Data(repeating: 0, count: 1024)
+        
+        player.scheduleAudio(data: sampleData)
+        
+        let expectation = XCTestExpectation(description: "Audio scheduled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertTrue(player.hasAudio)
+            XCTAssertGreaterThan(player.bufferDuration, 0.0)
+            XCTAssertTrue(player.isPlaying)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+    
+    func testSeek() {
+        // WHY: User seeking the slider should change playbackProgress and restart playing.
+        let player = AudioPlayerManager()
+        let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
+        player.scheduleAudio(data: sampleData)
+        
+        let expectation = XCTestExpectation(description: "Wait for audio schedule")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            player.seek(to: 0.5)
+            
+            XCTAssertEqual(player.playbackProgress, 0.5)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
 }

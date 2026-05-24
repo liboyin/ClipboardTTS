@@ -14,4 +14,14 @@ final class TextExtractionManagerTests: XCTestCase {
         // Assert that we get either nil or a string, gracefully.
         XCTAssertTrue(text == nil || text != nil)
     }
+    
+    func testTextExtractionEmptyPasteboard() {
+        // WHY: Ensure getCopiedText returns nil when pasteboard is empty.
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        
+        let manager = TextExtractionManager()
+        let text = manager.getCopiedText()
+        XCTAssertNil(text)
+    }
 }
