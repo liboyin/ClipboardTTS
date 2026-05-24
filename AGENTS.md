@@ -2,7 +2,6 @@ This file is intended for AI agents.
 
 # Meta Guidelines
 
-- If not running in a Docker container, stop and confirm with the user before continuing.
 - State assumptions explicitly. When you notice ambiguity (e.g. two conflicting patterns, or a design choice with no stated rationale), confirm with the user before continuing.
 - Prefer spawning subagents to keep the main context window clean.
 - Before considering a task done, re-check that all instructions in this file are followed.
@@ -28,7 +27,10 @@ This file is intended for AI agents.
 
 Tests must encode WHY behavior matters, not just WHAT it does. A test that does not fail when business logic changes is wrong.
 
-After any code change, all unit tests and static analysis must pass.
+After any code change:
+
+- All existing unit tests and static analysis must pass.
+- Create new tests if necessary.
 
 Unit est coverage must be at least 85% overall across statements, branches, functions, and lines.
 

@@ -16,6 +16,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     
     private var isErrorResponse = false
     private var errorData = Data()
+    private var geminiBuffer = Data()
     
     init(configuration: URLSessionConfiguration = .default) {
         self.baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/audio/speech"
@@ -35,8 +36,11 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     }
     
     func streamTTS(text: String, dataHandler: @escaping (Data) -> Void) {
-        guard let url = URL(string: baseURL) else {
-            print("TTSNetworkManager Error: Invalid or missing baseURL (\(baseURL))")
+        let isGemini = baseURL.contains("generativelanguage.googleapis.com")
+        let urlString = isGemini ? "\(baseURL)/models/\(model):generateContent?key=\(apiKey)" : baseURL
+        
+        guard let url = URL(string: urlString) else {
+            print("TTSNetworkManager Error: Invalid or missing baseURL (\(urlString))")
             return
         }
         
@@ -44,18 +48,39 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body: [String: Any] = [
-            "model": model,
-            "input": text,
-            "voice": voice,
-            "response_format": "pcm"
-        ]
+        if !isGemini {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
         
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let bodyData: Data
+            if isGemini {
+                let geminiBody: [String: Any] = [
+                    "contents": [["parts": [["text": text]]]],
+                    "generationConfig": [
+                        "responseModalities": ["AUDIO"],
+                        "speechConfig": [
+                            "voiceConfig": [
+                                "prebuiltVoiceConfig": [
+                                    "voiceName": voice
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+                bodyData = try JSONSerialization.data(withJSONObject: geminiBody)
+            } else {
+                let openaiBody: [String: Any] = [
+                    "model": model,
+                    "input": text,
+                    "voice": voice,
+                    "response_format": "pcm"
+                ]
+                bodyData = try JSONSerialization.data(withJSONObject: openaiBody)
+            }
+            request.httpBody = bodyData
         } catch {
             print("Failed to encode JSON: \(error)")
             return
@@ -65,6 +90,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         
         isErrorResponse = false
         errorData.removeAll()
+        geminiBuffer.removeAll()
         
         DispatchQueue.main.async {
             self.isStreaming = true
@@ -97,13 +123,30 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         if isErrorResponse {
             errorData.append(data)
         } else {
-            dataHandler?(data)
+            if baseURL.contains("generativelanguage.googleapis.com") {
+                geminiBuffer.append(data)
+            } else {
+                dataHandler?(data)
+            }
         }
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         DispatchQueue.main.async {
             self.isStreaming = false
+        }
+        
+        let isGemini = baseURL.contains("generativelanguage.googleapis.com")
+        if isGemini && !isErrorResponse {
+            if let json = try? JSONSerialization.jsonObject(with: geminiBuffer) as? [String: Any],
+               let candidates = json["candidates"] as? [[String: Any]],
+               let content = candidates.first?["content"] as? [String: Any],
+               let parts = content["parts"] as? [[String: Any]],
+               let inlineData = parts.first?["inlineData"] as? [String: Any],
+               let base64String = inlineData["data"] as? String,
+               let audioData = Data(base64Encoded: base64String) {
+                dataHandler?(audioData)
+            }
         }
         
         if isErrorResponse {

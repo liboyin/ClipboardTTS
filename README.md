@@ -16,7 +16,7 @@ The application is structured as a native macOS menu bar app utilizing SwiftUI. 
 5. **Playback**: `AudioPlayerManager` schedules the audio buffers via `AVAudioEngine` and adjusts the timing/pitch according to the user's slider preferences.
 
 ## Design Decisions & Assumptions
-- **OpenAI-Compatible Endpoint Requirement**: We assume the target TTS engine (online or local) exposes an OpenAI-compatible `/v1/audio/speech` endpoint. This simplifies the network layer and allows users to flexibly swap between engines (e.g., local models or cloud-based Gemini/OpenAI).
+- **OpenAI-Compatible Endpoint Requirement**: We assume local TTS engines must provide an OpenAI-compatible `/v1/audio/speech` endpoint. This simplifies the network layer and allows users to flexibly swap between local engines, while native cloud APIs like Google's Gemini are handled with dedicated payload formatters.
 - **No Direct Environment Modification**: It is assumed that tools like `xcodegen` are either already installed or managed by the user outside of this agent context. This maintains system integrity.
 - **Streaming over Pre-generation**: The system is designed to stream audio rather than waiting for the entire file to generate. The design assumes that low latency (Time-To-First-Byte) is critical for a smooth user experience.
 - **State Segregation**: All settings are managed in a separate `SettingsView` window to keep the menu bar dropdown focused purely on real-time playback controls (play/pause, progress, speed). The settings window also provides a test mechanism to verify endpoint configurations before full use.
