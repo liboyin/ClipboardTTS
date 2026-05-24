@@ -2,6 +2,8 @@ import Foundation
 
 class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     @Published var isStreaming = false
+    @Published var availableModels: [String] = []
+    @Published var availableVoices: [String] = []
     
     private var baseURL: String
     private var apiKey: String
@@ -117,5 +119,69 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         } else if !isErrorResponse {
             print("Task completed successfully.")
         }
+    }
+    
+    struct OpenAIModelsResponse: Decodable {
+        struct Model: Decodable {
+            let id: String
+        }
+        let data: [Model]
+    }
+    
+    func fetchAvailableModels(baseURL: String, apiKey: String) {
+        let modelsURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/models")
+        guard let url = URL(string: modelsURLString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else { return }
+            do {
+                let res = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
+                DispatchQueue.main.async {
+                    self.availableModels = res.data.map { $0.id }
+                }
+            } catch {
+                print("Failed to decode models: \(error)")
+            }
+        }.resume()
+    }
+    
+    func fetchAvailableVoices(baseURL: String, apiKey: String) {
+        if baseURL.contains("api.openai.com") {
+            DispatchQueue.main.async {
+                self.availableVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+            }
+            return
+        }
+        
+        let voicesURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/audio/voices")
+        guard let url = URL(string: voicesURLString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else { return }
+            do {
+                if let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                    var fetchedVoices: [String] = []
+                    if let dataArray = dict["data"] as? [[String: Any]] {
+                        fetchedVoices = dataArray.compactMap { $0["id"] as? String ?? $0["name"] as? String }
+                    } else if let voicesArray = dict["voices"] as? [String] {
+                        fetchedVoices = voicesArray
+                    }
+                    
+                    if !fetchedVoices.isEmpty {
+                        DispatchQueue.main.async {
+                            self.availableVoices = fetchedVoices
+                        }
+                    }
+                }
+            } catch {
+                print("Failed to decode voices: \(error)")
+            }
+        }.resume()
     }
 }

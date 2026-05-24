@@ -4,35 +4,100 @@ struct SettingsView: View {
     @ObservedObject var networkManager: TTSNetworkManager
     @ObservedObject var audioPlayer: AudioPlayerManager
     
+    @AppStorage("ttsProvider") private var ttsProvider: String = "OpenAI"
     @AppStorage("apiBaseURL") private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
-    @AppStorage("apiKey") private var apiKey: String = ""
+    @AppStorage("apiKey") private var openaiAPIKey: String = ""
+    @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
+    @AppStorage("customAPIKey") private var customAPIKey: String = ""
     @AppStorage("ttsModel") private var ttsModel: String = "tts-1"
     @AppStorage("ttsVoice") private var ttsVoice: String = "alloy"
+    
+    private var currentAPIKey: String {
+        if ttsProvider == "OpenAI" { return openaiAPIKey }
+        if ttsProvider == "Gemini" { return geminiAPIKey }
+        return customAPIKey
+    }
+    
+    let providers = ["OpenAI", "Gemini", "Custom"]
     
     var body: some View {
         Form {
             Section(header: Text("API Configuration").font(.headline)) {
+                Picker("Provider", selection: $ttsProvider) {
+                    ForEach(providers, id: \.self) { provider in
+                        Text(provider).tag(provider)
+                    }
+                }
+                .onChange(of: ttsProvider) { newValue in
+                    if newValue == "OpenAI" {
+                        apiBaseURL = "https://api.openai.com/v1/audio/speech"
+                        ttsModel = "tts-1"
+                        ttsVoice = "alloy"
+                    } else if newValue == "Gemini" {
+                        apiBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai/audio/speech"
+                        ttsModel = "gemini-3.1-flash"
+                        ttsVoice = "Aoede"
+                    }
+                    fetchMetadata()
+                }
+
                 TextField("Base URL", text: $apiBaseURL)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: apiBaseURL) { _ in fetchMetadata() }
                 
-                SecureField("API Key", text: $apiKey)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                if ttsProvider == "OpenAI" {
+                    SecureField("API Key", text: $openaiAPIKey)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: openaiAPIKey) { _ in fetchMetadata() }
+                } else if ttsProvider == "Gemini" {
+                    SecureField("API Key", text: $geminiAPIKey)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: geminiAPIKey) { _ in fetchMetadata() }
+                } else {
+                    SecureField("API Key", text: $customAPIKey)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: customAPIKey) { _ in fetchMetadata() }
+                }
             }
             .padding(.bottom, 10)
             
             Section(header: Text("Model & Voice").font(.headline)) {
-                TextField("Model (e.g., tts-1)", text: $ttsModel)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                HStack {
+                    TextField("Model (e.g., tts-1)", text: $ttsModel)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    
+                    if ttsProvider != "Custom" && !networkManager.availableModels.isEmpty {
+                        Picker("", selection: $ttsModel) {
+                            ForEach(networkManager.availableModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 30)
+                    }
+                }
                 
-                TextField("Voice (e.g., alloy, echo, fable)", text: $ttsVoice)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                HStack {
+                    TextField("Voice (e.g., alloy)", text: $ttsVoice)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    
+                    if ttsProvider != "Custom" && !networkManager.availableVoices.isEmpty {
+                        Picker("", selection: $ttsVoice) {
+                            ForEach(networkManager.availableVoices, id: \.self) { voice in
+                                Text(voice).tag(voice)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 30)
+                    }
+                }
             }
             
             HStack {
                 Button("Test Voice") {
                     networkManager.updateSettings(
                         baseURL: apiBaseURL,
-                        apiKey: apiKey,
+                        apiKey: currentAPIKey,
                         model: ttsModel,
                         voice: ttsVoice
                     )
@@ -48,7 +113,7 @@ struct SettingsView: View {
                 Button("Save") {
                     networkManager.updateSettings(
                         baseURL: apiBaseURL,
-                        apiKey: apiKey,
+                        apiKey: currentAPIKey,
                         model: ttsModel,
                         voice: ttsVoice
                     )
@@ -62,10 +127,17 @@ struct SettingsView: View {
         .onAppear {
             networkManager.updateSettings(
                 baseURL: apiBaseURL,
-                apiKey: apiKey,
+                apiKey: currentAPIKey,
                 model: ttsModel,
                 voice: ttsVoice
             )
+            fetchMetadata()
         }
+    }
+    
+    private func fetchMetadata() {
+        if ttsProvider == "Custom" { return }
+        networkManager.fetchAvailableModels(baseURL: apiBaseURL, apiKey: currentAPIKey)
+        networkManager.fetchAvailableVoices(baseURL: apiBaseURL, apiKey: currentAPIKey)
     }
 }
