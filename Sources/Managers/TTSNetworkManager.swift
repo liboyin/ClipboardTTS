@@ -19,8 +19,17 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var geminiBuffer = Data()
     
     init(configuration: URLSessionConfiguration = .default) {
-        self.baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/audio/speech"
-        self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+        let provider = UserDefaults.standard.string(forKey: "ttsProvider") ?? "OpenAI"
+        if provider == "OpenAI" {
+            self.baseURL = "https://api.openai.com/v1/audio/speech"
+            self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
+        } else if provider == "Gemini" {
+            self.baseURL = "https://generativelanguage.googleapis.com/v1beta"
+            self.apiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
+        } else {
+            self.baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/audio/speech"
+            self.apiKey = UserDefaults.standard.string(forKey: "customAPIKey") ?? ""
+        }
         self.model = UserDefaults.standard.string(forKey: "ttsModel") ?? "tts-1"
         self.voice = UserDefaults.standard.string(forKey: "ttsVoice") ?? "alloy"
         
@@ -172,6 +181,13 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     }
     
     func fetchAvailableModels(baseURL: String, apiKey: String) {
+        if baseURL.contains("generativelanguage.googleapis.com") {
+            DispatchQueue.main.async {
+                self.availableModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-3.1-flash"]
+            }
+            return
+        }
+        
         let modelsURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/models")
         guard let url = URL(string: modelsURLString) else { return }
         
@@ -195,6 +211,13 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         if baseURL.contains("api.openai.com") {
             DispatchQueue.main.async {
                 self.availableVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+            }
+            return
+        }
+        
+        if baseURL.contains("generativelanguage.googleapis.com") {
+            DispatchQueue.main.async {
+                self.availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
             }
             return
         }

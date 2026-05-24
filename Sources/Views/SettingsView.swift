@@ -41,27 +41,27 @@ struct SettingsView: View {
                         ttsModel = "gemini-3.1-flash"
                         ttsVoice = "Aoede"
                     }
-                    fetchMetadata()
+                    syncSettings()
                 }
 
                 if ttsProvider == "Custom" {
                     TextField("Base URL", text: $apiBaseURL)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: apiBaseURL) { _ in fetchMetadata() }
+                        .onChange(of: apiBaseURL) { _ in syncSettings() }
                 }
                 
                 if ttsProvider == "OpenAI" {
                     SecureField("API Key", text: $openaiAPIKey)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: openaiAPIKey) { _ in fetchMetadata() }
+                        .onChange(of: openaiAPIKey) { _ in syncSettings() }
                 } else if ttsProvider == "Gemini" {
                     SecureField("API Key", text: $geminiAPIKey)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: geminiAPIKey) { _ in fetchMetadata() }
+                        .onChange(of: geminiAPIKey) { _ in syncSettings() }
                 } else {
                     SecureField("API Key", text: $customAPIKey)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: customAPIKey) { _ in fetchMetadata() }
+                        .onChange(of: customAPIKey) { _ in syncSettings() }
                 }
             }
             .padding(.bottom, 10)
@@ -70,6 +70,7 @@ struct SettingsView: View {
                 HStack {
                     TextField("Model (e.g., tts-1)", text: $ttsModel)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: ttsModel) { _ in syncSettings() }
                     
                     if ttsProvider != "Custom" && !networkManager.availableModels.isEmpty {
                         Picker("", selection: $ttsModel) {
@@ -79,12 +80,14 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .frame(width: 30)
+                        .onChange(of: ttsModel) { _ in syncSettings() }
                     }
                 }
                 
                 HStack {
                     TextField("Voice (e.g., alloy)", text: $ttsVoice)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: ttsVoice) { _ in syncSettings() }
                     
                     if ttsProvider != "Custom" && !networkManager.availableVoices.isEmpty {
                         Picker("", selection: $ttsVoice) {
@@ -94,6 +97,7 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .frame(width: 30)
+                        .onChange(of: ttsVoice) { _ in syncSettings() }
                     }
                 }
             }
@@ -130,14 +134,18 @@ struct SettingsView: View {
         .padding()
         .frame(width: 400, height: 280)
         .onAppear {
-            networkManager.updateSettings(
-                baseURL: currentBaseURL,
-                apiKey: currentAPIKey,
-                model: ttsModel,
-                voice: ttsVoice
-            )
-            fetchMetadata()
+            syncSettings()
         }
+    }
+    
+    private func syncSettings() {
+        networkManager.updateSettings(
+            baseURL: currentBaseURL,
+            apiKey: currentAPIKey,
+            model: ttsModel,
+            voice: ttsVoice
+        )
+        fetchMetadata()
     }
     
     private func fetchMetadata() {
