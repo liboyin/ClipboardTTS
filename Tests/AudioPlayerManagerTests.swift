@@ -4,7 +4,7 @@ import XCTest
 final class AudioPlayerManagerTests: XCTestCase {
     
     func testAudioPlayerStateTransitions() {
-        // WHY: The UI elements (Play/Pause, Stop) rely on accurate state representation in the AudioPlayerManager.
+        // WHY: The UI elements (Play/Pause, Clear Buffer) rely on accurate state representation in the AudioPlayerManager.
         // We must verify that calling play(), pause(), and stop() correctly sets the `isPlaying` flag.
         
         let player = AudioPlayerManager()

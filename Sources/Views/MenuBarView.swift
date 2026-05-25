@@ -35,7 +35,7 @@ struct MenuBarView: View {
             
             HStack {
                 Button(action: {
-                    if networkManager.isStreaming || audioPlayer.isPlaying {
+                    if networkManager.isStreaming || audioPlayer.hasAudio {
                         networkManager.stopStreaming()
                         audioPlayer.stop()
                     } else {
@@ -57,7 +57,7 @@ struct MenuBarView: View {
                         }
                     }
                 }) {
-                    Text((networkManager.isStreaming || audioPlayer.isPlaying) ? "Stop" : "Speak Copied Text")
+                    Text((networkManager.isStreaming || audioPlayer.hasAudio) ? "Clear Buffer" : "Speak Copied Text")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
