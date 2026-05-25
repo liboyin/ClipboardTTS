@@ -183,7 +183,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     func fetchAvailableModels(baseURL: String, apiKey: String) {
         if baseURL.contains("generativelanguage.googleapis.com") {
             DispatchQueue.main.async {
-                self.availableModels = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-3.1-flash"]
+                self.availableModels = ["gemini-3.1-flash-tts-preview"]
             }
             return
         }

@@ -38,7 +38,7 @@ struct SettingsView: View {
                         ttsModel = "tts-1"
                         ttsVoice = "alloy"
                     } else if newValue == "Gemini" {
-                        ttsModel = "gemini-3.1-flash"
+                        ttsModel = "gemini-3.1-flash-tts-preview"
                         ttsVoice = "Aoede"
                     }
                     syncSettings()
