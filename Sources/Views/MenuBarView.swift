@@ -35,27 +35,7 @@ struct MenuBarView: View {
             
             HStack {
                 Button(action: {
-                    if networkManager.isStreaming || audioPlayer.hasAudio {
-                        networkManager.stopStreaming()
-                        audioPlayer.stop()
-                    } else {
-                        print("Speak Copied Text button clicked")
-                        
-                        // Deactivate our app to return focus to the previously active application
-                        NSApp.deactivate()
-                        
-                        // Wait a brief moment for the OS to switch focus back
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            if let text = textExtraction.getCopiedText() {
-                                print("Extracted text successfully, length: \(text.count)")
-                                networkManager.streamTTS(text: text) { data in
-                                    audioPlayer.scheduleAudio(data: data)
-                                }
-                            } else {
-                                print("Failed to extract any text")
-                            }
-                        }
-                    }
+                    speakCopiedText()
                 }) {
                     Text((networkManager.isStreaming || audioPlayer.hasAudio) ? "Clear Buffer" : "Speak Copied Text")
                         .frame(maxWidth: .infinity)
@@ -66,11 +46,7 @@ struct MenuBarView: View {
             
             HStack {
                 Button(action: {
-                    if audioPlayer.isPlaying {
-                        audioPlayer.pause()
-                    } else {
-                        audioPlayer.play()
-                    }
+                    togglePlayPause()
                 }) {
                     Image(systemName: audioPlayer.isPlaying ? "pause.fill" : "play.fill")
                         .font(.title2)
@@ -106,4 +82,29 @@ struct MenuBarView: View {
             }
         }
     }
+    
+    func speakCopiedText() {
+        if networkManager.isStreaming || audioPlayer.hasAudio {
+            networkManager.stopStreaming()
+            audioPlayer.stop()
+        } else {
+            NSApp.deactivate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                if let text = textExtraction.getCopiedText() {
+                    networkManager.streamTTS(text: text) { data in
+                        audioPlayer.scheduleAudio(data: data)
+                    }
+                }
+            }
+        }
+    }
+
+    func togglePlayPause() {
+        if audioPlayer.isPlaying {
+            audioPlayer.pause()
+        } else {
+            audioPlayer.play()
+        }
+    }
 }
+

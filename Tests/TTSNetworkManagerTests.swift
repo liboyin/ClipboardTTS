@@ -114,4 +114,132 @@ final class TTSNetworkManagerTests: XCTestCase {
         }
         wait(for: [expectation2], timeout: 1.0)
     }
+    
+    func testNetworkManagerFormatsGeminiRequestCorrectly() {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        
+        manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token", model: "gemini-tts", voice: "Aoede")
+        
+        let expectation = XCTestExpectation(description: "Wait for Gemini request")
+        
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent?key=gemini_token")
+            XCTAssertEqual(request.httpMethod, "POST")
+            
+            var extractedData: Data? = request.httpBody
+            if extractedData == nil, let stream = request.httpBodyStream {
+                stream.open()
+                let bufferSize = 1024
+                var buffer = [UInt8](repeating: 0, count: bufferSize)
+                var data = Data()
+                while stream.hasBytesAvailable {
+                    let bytesRead = stream.read(&buffer, maxLength: bufferSize)
+                    if bytesRead > 0 { data.append(buffer, count: bytesRead) } else { break }
+                }
+                stream.close()
+                extractedData = data
+            }
+            
+            if let bodyData = extractedData, !bodyData.isEmpty {
+                let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+                let contents = json?["contents"] as? [[String: Any]]
+                let parts = contents?.first?["parts"] as? [[String: Any]]
+                XCTAssertEqual(parts?.first?["text"] as? String, "Hello Gemini")
+            } else {
+                XCTFail("No request body")
+            }
+            
+            expectation.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        
+        manager.streamTTS(text: "Hello Gemini") { _ in }
+        wait(for: [expectation], timeout: 2.0)
+    }
+
+    func testNetworkManagerHandlesAPIError() {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        
+        let expectation = XCTestExpectation(description: "Wait for error completion")
+        
+        MockURLProtocol.requestHandler = { request in
+            let errorData = "{\"error\": \"Unauthorized\"}".data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
+            return (response, errorData)
+        }
+        
+        manager.streamTTS(text: "Test error") { _ in }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            XCTAssertFalse(manager.isStreaming)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+    }
+    
+    func testFetchAvailableModels() {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        
+        // Test Gemini (returns hardcoded instantly)
+        manager.fetchAvailableModels(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token")
+        XCTAssertEqual(manager.availableModels.first, "gemini-3.1-flash-tts-preview")
+        
+        // Test OpenAI (requires mock request)
+        let expectation = XCTestExpectation(description: "Wait for models fetch")
+        MockURLProtocol.requestHandler = { request in
+            let mockResponse = """
+            { "data": [ {"id": "tts-1"}, {"id": "tts-1-hd"}, {"id": "gpt-4"} ] }
+            """.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, mockResponse)
+        }
+        
+        manager.fetchAvailableModels(baseURL: "https://api.openai.com/v1/audio/speech", apiKey: "test")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            XCTAssertTrue(manager.availableModels.contains("tts-1"))
+            XCTAssertTrue(manager.availableModels.contains("tts-1-hd"))
+            XCTAssertFalse(manager.availableModels.contains("gpt-4"))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+    }
+    
+    func testFetchAvailableVoices() {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        
+        // Test OpenAI (hardcoded)
+        manager.fetchAvailableVoices(baseURL: "https://api.openai.com/v1/audio/speech", apiKey: "test")
+        XCTAssertTrue(manager.availableVoices.contains("alloy"))
+        
+        // Test Gemini (hardcoded)
+        manager.fetchAvailableVoices(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "test")
+        XCTAssertTrue(manager.availableVoices.contains("Aoede"))
+        
+        // Test Custom (requires mock request)
+        let expectation = XCTestExpectation(description: "Wait for voices fetch")
+        MockURLProtocol.requestHandler = { request in
+            let mockResponse = """
+            { "voices": ["custom-voice-1", "custom-voice-2"] }
+            """.data(using: .utf8)!
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, mockResponse)
+        }
+        
+        manager.fetchAvailableVoices(baseURL: "https://custom.api/v1/audio/speech", apiKey: "test")
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            XCTAssertTrue(manager.availableVoices.contains("custom-voice-1"))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+    }
 }

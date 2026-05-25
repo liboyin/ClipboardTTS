@@ -90,7 +90,14 @@ class AudioPlayerManager: ObservableObject {
         if !engine.isRunning {
             try? engine.start()
         }
-        playerNode.play()
+        
+        if playbackProgress >= bufferDuration && bufferDuration > 0 {
+            seek(to: 0.0)
+            playerNode.play()
+        } else {
+            playerNode.play()
+        }
+        
         DispatchQueue.main.async {
             self.isPlaying = true
         }
@@ -166,6 +173,12 @@ class AudioPlayerManager: ObservableObject {
                     let newProgress = self.baseProgressOffset + Double(playerTime.sampleTime) / format.sampleRate
                     if newProgress > 0 && newProgress <= self.bufferDuration {
                         self.playbackProgress = newProgress
+                    } else if newProgress > self.bufferDuration {
+                        self.playbackProgress = self.bufferDuration
+                    }
+                    
+                    if self.isPlaying && self.playbackProgress >= self.bufferDuration && self.bufferDuration > 0 {
+                        self.pause()
                     }
                 }
             }

@@ -8,12 +8,10 @@ The application is structured as a native macOS menu bar app utilizing SwiftUI. 
 - **Text Extraction**: The app directly accesses `NSPasteboard` to read text copied by the user.
 - **Networking**: `URLSession` is employed to handle HTTP chunked streaming of the TTS audio payload from OpenAI-compatible APIs (such as Gemini TTS). This ensures that audio playback can begin before the entire payload is downloaded, minimizing latency.
 
-## Dataflow
-1. **User Action**: The user highlights text in any application and triggers the app (either via a global shortcut, NSService, or menu bar click).
-2. **Text Acquisition**: `TextExtractionManager` queries `NSPasteboard` to retrieve the copied text.
-3. **API Request**: `TTSNetworkManager` submits the text to the configured `/v1/audio/speech` endpoint using the credentials stored securely by the app.
-4. **Streaming Response**: The API responds with an audio stream. `TTSNetworkManager` passes incoming data chunks to `AudioPlayerManager`.
-5. **Playback**: `AudioPlayerManager` schedules the audio buffers via `AVAudioEngine` and adjusts the timing/pitch according to the user's slider preferences.
+## Dataflow Strategy
+The dataflow architecture is designed strictly around minimizing Time-To-First-Byte (TTFB) and ensuring zero UI blocking during execution.
+- **Decoupled Text Acquisition**: Text extraction from the system pasteboard is kept asynchronous to prevent freezing the active application the user is reading from.
+- **Immediate Streaming Pipeline**: Rather than downloading a complete audio payload before playback (which would introduce significant latency for long text), the HTTP layer is configured for chunked streaming. This guarantees that audio playback commences the exact millisecond the first bytes arrive from the TTS provider, creating a real-time responsive feel.
 
 ## Design Decisions & Assumptions
 - **OpenAI-Compatible Endpoint Requirement**: We assume local TTS engines must provide an OpenAI-compatible `/v1/audio/speech` endpoint. This simplifies the network layer and allows users to flexibly swap between local engines, while native cloud APIs like Google's Gemini are handled with dedicated payload formatters.

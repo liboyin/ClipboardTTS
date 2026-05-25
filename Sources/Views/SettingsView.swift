@@ -9,19 +9,32 @@ struct SettingsView: View {
     @AppStorage("apiKey") private var openaiAPIKey: String = ""
     @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
     @AppStorage("customAPIKey") private var customAPIKey: String = ""
-    @AppStorage("ttsModel") private var ttsModel: String = "tts-1"
-    @AppStorage("ttsVoice") private var ttsVoice: String = "alloy"
-    
-    private var currentAPIKey: String {
+    @AppStorage("openaiModel") private var openaiModel: String = "tts-1"
+    @AppStorage("openaiVoice") private var openaiVoice: String = "alloy"
+    @AppStorage("geminiModel") private var geminiModel: String = "gemini-3.1-flash-tts-preview"
+    @AppStorage("geminiVoice") private var geminiVoice: String = "Aoede"
+    var currentAPIKey: String {
         if ttsProvider == "OpenAI" { return openaiAPIKey }
         if ttsProvider == "Gemini" { return geminiAPIKey }
         return customAPIKey
     }
     
-    private var currentBaseURL: String {
+    var currentBaseURL: String {
         if ttsProvider == "OpenAI" { return "https://api.openai.com/v1/audio/speech" }
         if ttsProvider == "Gemini" { return "https://generativelanguage.googleapis.com/v1beta" }
         return apiBaseURL
+    }
+    
+    var currentModel: String {
+        if ttsProvider == "OpenAI" { return openaiModel }
+        if ttsProvider == "Gemini" { return geminiModel }
+        return ""
+    }
+    
+    var currentVoice: String {
+        if ttsProvider == "OpenAI" { return openaiVoice }
+        if ttsProvider == "Gemini" { return geminiVoice }
+        return ""
     }
     
     var body: some View {
@@ -34,14 +47,7 @@ struct SettingsView: View {
             .listStyle(.sidebar)
             .frame(width: 150)
             .onChange(of: ttsProvider) { newValue in
-                if newValue == "OpenAI" {
-                    ttsModel = "tts-1"
-                    ttsVoice = "alloy"
-                } else if newValue == "Gemini" {
-                    ttsModel = "gemini-3.1-flash-tts-preview"
-                    ttsVoice = "Aoede"
-                }
-                syncSettings()
+                providerDidChange(to: newValue)
             }
             
             Divider()
@@ -72,41 +78,7 @@ struct SettingsView: View {
                     .onChange(of: openaiAPIKey) { _ in syncSettings() }
             }
             
-            Section(header: Text("Model & Voice").font(.headline)) {
-                HStack {
-                    TextField("Model", text: $ttsModel)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: ttsModel) { _ in syncSettings() }
-                    
-                    if !networkManager.availableModels.isEmpty {
-                        Picker("", selection: $ttsModel) {
-                            ForEach(networkManager.availableModels, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 30)
-                        .onChange(of: ttsModel) { _ in syncSettings() }
-                    }
-                }
-                
-                HStack {
-                    TextField("Voice", text: $ttsVoice)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: ttsVoice) { _ in syncSettings() }
-                    
-                    if !networkManager.availableVoices.isEmpty {
-                        Picker("", selection: $ttsVoice) {
-                            ForEach(networkManager.availableVoices, id: \.self) { voice in
-                                Text(voice).tag(voice)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 30)
-                        .onChange(of: ttsVoice) { _ in syncSettings() }
-                    }
-                }
-            }
+            ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice, networkManager: networkManager, onSync: syncSettings)
             
             testVoiceButton
         }
@@ -120,41 +92,7 @@ struct SettingsView: View {
                     .onChange(of: geminiAPIKey) { _ in syncSettings() }
             }
             
-            Section(header: Text("Model & Voice").font(.headline)) {
-                HStack {
-                    TextField("Model", text: $ttsModel)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: ttsModel) { _ in syncSettings() }
-                    
-                    if !networkManager.availableModels.isEmpty {
-                        Picker("", selection: $ttsModel) {
-                            ForEach(networkManager.availableModels, id: \.self) { model in
-                                Text(model).tag(model)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 30)
-                        .onChange(of: ttsModel) { _ in syncSettings() }
-                    }
-                }
-                
-                HStack {
-                    TextField("Voice", text: $ttsVoice)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: ttsVoice) { _ in syncSettings() }
-                    
-                    if !networkManager.availableVoices.isEmpty {
-                        Picker("", selection: $ttsVoice) {
-                            ForEach(networkManager.availableVoices, id: \.self) { voice in
-                                Text(voice).tag(voice)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 30)
-                        .onChange(of: ttsVoice) { _ in syncSettings() }
-                    }
-                }
-            }
+            ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice, networkManager: networkManager, onSync: syncSettings)
             
             testVoiceButton
         }
@@ -179,17 +117,7 @@ struct SettingsView: View {
     private var testVoiceButton: some View {
         HStack {
             Button("Test Voice") {
-                networkManager.updateSettings(
-                    baseURL: currentBaseURL,
-                    apiKey: currentAPIKey,
-                    model: ttsModel,
-                    voice: ttsVoice
-                )
-                networkManager.stopStreaming()
-                audioPlayer.stop()
-                networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
-                    audioPlayer.scheduleAudio(data: data)
-                }
+                runTestVoice()
             }
             .buttonStyle(.bordered)
             
@@ -198,20 +126,82 @@ struct SettingsView: View {
         .padding(.top)
     }
     
-    private func syncSettings() {
+    func runTestVoice() {
         networkManager.updateSettings(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
-            model: ttsModel,
-            voice: ttsVoice
+            model: currentModel,
+            voice: currentVoice
+        )
+        networkManager.stopStreaming()
+        audioPlayer.stop()
+        networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
+            audioPlayer.scheduleAudio(data: data)
+        }
+    }
+    
+    func providerDidChange(to newValue: String) {
+        syncSettings()
+    }
+    
+    func syncSettings() {
+        networkManager.updateSettings(
+            baseURL: currentBaseURL,
+            apiKey: currentAPIKey,
+            model: currentModel,
+            voice: currentVoice
         )
         fetchMetadata()
     }
     
-    private func fetchMetadata() {
+    func fetchMetadata() {
         if ttsProvider == "Custom" { return }
         networkManager.fetchAvailableModels(baseURL: currentBaseURL, apiKey: currentAPIKey)
         networkManager.fetchAvailableVoices(baseURL: currentBaseURL, apiKey: currentAPIKey)
     }
 }
 
+struct ModelVoiceConfigurationView: View {
+    @Binding var ttsModel: String
+    @Binding var ttsVoice: String
+    @ObservedObject var networkManager: TTSNetworkManager
+    var onSync: () -> Void
+    
+    var body: some View {
+        Section(header: Text("Model & Voice").font(.headline)) {
+            HStack {
+                TextField("Model", text: $ttsModel)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: ttsModel) { _ in onSync() }
+                
+                if !networkManager.availableModels.isEmpty {
+                    Picker("", selection: $ttsModel) {
+                        ForEach(networkManager.availableModels, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 30)
+                    .onChange(of: ttsModel) { _ in onSync() }
+                }
+            }
+            
+            HStack {
+                TextField("Voice", text: $ttsVoice)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: ttsVoice) { _ in onSync() }
+                
+                if !networkManager.availableVoices.isEmpty {
+                    Picker("", selection: $ttsVoice) {
+                        ForEach(networkManager.availableVoices, id: \.self) { voice in
+                            Text(voice).tag(voice)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 30)
+                    .onChange(of: ttsVoice) { _ in onSync() }
+                }
+            }
+        }
+    }
+}

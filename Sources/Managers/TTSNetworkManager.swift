@@ -192,7 +192,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        self.session.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else { return }
             
             if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
@@ -228,7 +228,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        self.session.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else { return }
             
             if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
