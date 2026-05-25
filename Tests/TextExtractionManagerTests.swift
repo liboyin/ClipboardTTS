@@ -1,6 +1,6 @@
 import XCTest
 import AppKit
-@testable import AdvancedTTSApp
+@testable import ClipboardTTSApp
 
 final class TextExtractionManagerTests: XCTestCase {
     

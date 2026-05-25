@@ -10,7 +10,7 @@ struct MenuBarView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Advanced TTS")
+                Text("Clipboard TTS")
                     .font(.headline)
                 Spacer()
                 Button(action: {

@@ -1,4 +1,4 @@
-# Advanced TTS: An Improved macOS TTS Service
+# Clipboard TTS: An Improved macOS TTS Service
 
 ## App Appearance
 
@@ -14,7 +14,7 @@
 
 ## Starting Playback
 
-- The user should be able to select text in any application and right-click -> Services -> click "Speak Selected Text with Advanced TTS" to send to TTS engine for playback. Note that Services is not available in all applications, so there is also the next item.
+- The user should be able to select text in any application and right-click -> Services -> click "Speak Selected Text with Clipboard TTS" to send to TTS engine for playback. Note that Services is not available in all applications, so there is also the next item.
 - The user should be able to copy text in any application and click "Speak Copied Text" from the menu bar app to send to TTS engine for playback. 
 - The app should start streaming audio within 2 seconds after the user clicks the button.
 - If the user triggers "Speak Copied Text" while audio is already playing, the app should interrupt the current playback and immediately start playing the new text.

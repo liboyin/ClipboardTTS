@@ -31,7 +31,7 @@
 			<key>NSMessage</key>
 			<string>handleServices</string>
 			<key>NSPortName</key>
-			<string>AdvancedTTSApp</string>
+			<string>ClipboardTTSApp</string>
 			<key>NSSendTypes</key>
 			<array>
 				<string>public.plain-text</string>

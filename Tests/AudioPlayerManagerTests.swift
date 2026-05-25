@@ -1,5 +1,5 @@
 import XCTest
-@testable import AdvancedTTSApp
+@testable import ClipboardTTSApp
 
 final class AudioPlayerManagerTests: XCTestCase {
     

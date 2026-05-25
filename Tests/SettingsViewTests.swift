@@ -1,6 +1,6 @@
 import XCTest
 import SwiftUI
-@testable import AdvancedTTSApp
+@testable import ClipboardTTSApp
 
 final class SettingsViewTests: XCTestCase {
     

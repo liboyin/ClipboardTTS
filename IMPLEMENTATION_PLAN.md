@@ -1,6 +1,6 @@
-# Advanced TTS App Implementation Plan
+# Clipboard TTS App Implementation Plan
 
-We will build "Advanced TTS" as a native macOS application using Swift and SwiftUI. The app will live entirely in the menu bar and support streaming audio from either an online API (like Gemini TTS) or a local API that is compatible with the OpenAI TTS format.
+We will build "Clipboard TTS" as a native macOS application using Swift and SwiftUI. The app will live entirely in the menu bar and support streaming audio from either an online API (like Gemini TTS) or a local API that is compatible with the OpenAI TTS format.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ We will create a new Xcode project using `xcodegen`.
 ### 1. `project.yml`
 Configuration file for `xcodegen` to generate the `.xcodeproj`. It will define the macOS App target, `Info.plist` settings (including the `NSServices` and `LSUIElement` for the menu bar app).
 
-### 2. `Sources/AdvancedTTSApp.swift`
+### 2. `Sources/ClipboardTTSApp.swift`
 The main entry point using SwiftUI's `@main`. It will use `MenuBarExtra` to define the menu bar icon and drop-down menu.
 
 ### 3. `Sources/Views/MenuBarView.swift`

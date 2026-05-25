@@ -1,4 +1,4 @@
-# Advanced TTS App
+# Clipboard TTS App
 
 ## Architecture
 The application is structured as a native macOS menu bar app utilizing SwiftUI. The core rationale for this architecture is to provide an unobtrusive, easily accessible global tool for Text-to-Speech (TTS) functionality.

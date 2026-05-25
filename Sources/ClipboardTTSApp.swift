@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 @main
-struct AdvancedTTSApp: App {
+struct ClipboardTTSApp: App {
     @StateObject private var audioPlayer = AudioPlayerManager()
     @StateObject private var textExtraction = TextExtractionManager()
     @StateObject private var networkManager = TTSNetworkManager()
@@ -10,7 +10,7 @@ struct AdvancedTTSApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        MenuBarExtra("Advanced TTS", systemImage: "waveform.circle") {
+        MenuBarExtra("Clipboard TTS", systemImage: "waveform.circle") {
             MenuBarView(
                 audioPlayer: audioPlayer,
                 textExtraction: textExtraction,
