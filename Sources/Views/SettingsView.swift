@@ -23,56 +23,62 @@ struct SettingsView: View {
         if ttsProvider == "Gemini" { return "https://generativelanguage.googleapis.com/v1beta" }
         return apiBaseURL
     }
-    let providers = ["OpenAI", "Gemini", "Custom"]
     
     var body: some View {
-        Form {
-            Section(header: Text("API Configuration").font(.headline)) {
-                Picker("Provider", selection: $ttsProvider) {
-                    ForEach(providers, id: \.self) { provider in
-                        Text(provider).tag(provider)
-                    }
+        HStack(spacing: 0) {
+            List(selection: $ttsProvider) {
+                Text("OpenAI").tag("OpenAI")
+                Text("Gemini").tag("Gemini")
+                Text("Custom").tag("Custom")
+            }
+            .listStyle(.sidebar)
+            .frame(width: 150)
+            .onChange(of: ttsProvider) { newValue in
+                if newValue == "OpenAI" {
+                    ttsModel = "tts-1"
+                    ttsVoice = "alloy"
+                } else if newValue == "Gemini" {
+                    ttsModel = "gemini-3.1-flash-tts-preview"
+                    ttsVoice = "Aoede"
                 }
-                .onChange(of: ttsProvider) { newValue in
-                    if newValue == "OpenAI" {
-                        ttsModel = "tts-1"
-                        ttsVoice = "alloy"
-                    } else if newValue == "Gemini" {
-                        ttsModel = "gemini-3.1-flash-tts-preview"
-                        ttsVoice = "Aoede"
-                    }
-                    syncSettings()
-                }
-
-                if ttsProvider == "Custom" {
-                    TextField("Base URL", text: $apiBaseURL)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: apiBaseURL) { _ in syncSettings() }
-                }
-                
+                syncSettings()
+            }
+            
+            Divider()
+            
+            Form {
                 if ttsProvider == "OpenAI" {
-                    SecureField("API Key", text: $openaiAPIKey)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: openaiAPIKey) { _ in syncSettings() }
+                    openAISettings
                 } else if ttsProvider == "Gemini" {
-                    SecureField("API Key", text: $geminiAPIKey)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: geminiAPIKey) { _ in syncSettings() }
+                    geminiSettings
                 } else {
-                    SecureField("API Key", text: $customAPIKey)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: customAPIKey) { _ in syncSettings() }
+                    customSettings
                 }
             }
-            .padding(.bottom, 10)
+            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 600, height: 350)
+        .onAppear {
+            syncSettings()
+        }
+    }
+    
+    private var openAISettings: some View {
+        Group {
+            Section(header: Text("OpenAI Configuration").font(.headline)) {
+                SecureField("API Key", text: $openaiAPIKey)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: openaiAPIKey) { _ in syncSettings() }
+            }
             
             Section(header: Text("Model & Voice").font(.headline)) {
                 HStack {
-                    TextField("Model (e.g., tts-1)", text: $ttsModel)
+                    TextField("Model", text: $ttsModel)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .onChange(of: ttsModel) { _ in syncSettings() }
                     
-                    if ttsProvider != "Custom" && !networkManager.availableModels.isEmpty {
+                    if !networkManager.availableModels.isEmpty {
                         Picker("", selection: $ttsModel) {
                             ForEach(networkManager.availableModels, id: \.self) { model in
                                 Text(model).tag(model)
@@ -85,11 +91,11 @@ struct SettingsView: View {
                 }
                 
                 HStack {
-                    TextField("Voice (e.g., alloy)", text: $ttsVoice)
+                    TextField("Voice", text: $ttsVoice)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .onChange(of: ttsVoice) { _ in syncSettings() }
                     
-                    if ttsProvider != "Custom" && !networkManager.availableVoices.isEmpty {
+                    if !networkManager.availableVoices.isEmpty {
                         Picker("", selection: $ttsVoice) {
                             ForEach(networkManager.availableVoices, id: \.self) { voice in
                                 Text(voice).tag(voice)
@@ -102,40 +108,94 @@ struct SettingsView: View {
                 }
             }
             
-            HStack {
-                Button("Test Voice") {
-                    networkManager.updateSettings(
-                        baseURL: currentBaseURL,
-                        apiKey: currentAPIKey,
-                        model: ttsModel,
-                        voice: ttsVoice
-                    )
-                    networkManager.stopStreaming()
-                    audioPlayer.stop()
-                    networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
-                        audioPlayer.scheduleAudio(data: data)
+            testVoiceButton
+        }
+    }
+    
+    private var geminiSettings: some View {
+        Group {
+            Section(header: Text("Gemini Configuration").font(.headline)) {
+                SecureField("API Key", text: $geminiAPIKey)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: geminiAPIKey) { _ in syncSettings() }
+            }
+            
+            Section(header: Text("Model & Voice").font(.headline)) {
+                HStack {
+                    TextField("Model", text: $ttsModel)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: ttsModel) { _ in syncSettings() }
+                    
+                    if !networkManager.availableModels.isEmpty {
+                        Picker("", selection: $ttsModel) {
+                            ForEach(networkManager.availableModels, id: \.self) { model in
+                                Text(model).tag(model)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 30)
+                        .onChange(of: ttsModel) { _ in syncSettings() }
                     }
                 }
-                .buttonStyle(.bordered)
                 
-                Spacer()
-                Button("Save") {
-                    networkManager.updateSettings(
-                        baseURL: currentBaseURL,
-                        apiKey: currentAPIKey,
-                        model: ttsModel,
-                        voice: ttsVoice
-                    )
+                HStack {
+                    TextField("Voice", text: $ttsVoice)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .onChange(of: ttsVoice) { _ in syncSettings() }
+                    
+                    if !networkManager.availableVoices.isEmpty {
+                        Picker("", selection: $ttsVoice) {
+                            ForEach(networkManager.availableVoices, id: \.self) { voice in
+                                Text(voice).tag(voice)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 30)
+                        .onChange(of: ttsVoice) { _ in syncSettings() }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
             }
-            .padding(.top)
+            
+            testVoiceButton
         }
-        .padding()
-        .frame(width: 400, height: 280)
-        .onAppear {
-            syncSettings()
+    }
+    
+    private var customSettings: some View {
+        Group {
+            Section(header: Text("Custom Configuration").font(.headline)) {
+                TextField("Base URL", text: $apiBaseURL)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: apiBaseURL) { _ in syncSettings() }
+                
+                SecureField("API Key", text: $customAPIKey)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: customAPIKey) { _ in syncSettings() }
+            }
+            
+            testVoiceButton
         }
+    }
+    
+    private var testVoiceButton: some View {
+        HStack {
+            Button("Test Voice") {
+                networkManager.updateSettings(
+                    baseURL: currentBaseURL,
+                    apiKey: currentAPIKey,
+                    model: ttsModel,
+                    voice: ttsVoice
+                )
+                networkManager.stopStreaming()
+                audioPlayer.stop()
+                networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
+                    audioPlayer.scheduleAudio(data: data)
+                }
+            }
+            .buttonStyle(.bordered)
+            
+            Spacer()
+        }
+        .padding(.top)
     }
     
     private func syncSettings() {
@@ -154,3 +214,4 @@ struct SettingsView: View {
         networkManager.fetchAvailableVoices(baseURL: currentBaseURL, apiKey: currentAPIKey)
     }
 }
+

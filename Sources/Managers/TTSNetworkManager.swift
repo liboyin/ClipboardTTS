@@ -199,7 +199,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             do {
                 let res = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
                 DispatchQueue.main.async {
-                    self.availableModels = res.data.map { $0.id }
+                    self.availableModels = res.data.map { $0.id }.filter { $0.contains("tts") }
                 }
             } catch {
                 print("Failed to decode models: \(error)")
