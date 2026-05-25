@@ -182,9 +182,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     
     func fetchAvailableModels(baseURL: String, apiKey: String) {
         if baseURL.contains("generativelanguage.googleapis.com") {
-            DispatchQueue.main.async {
-                self.availableModels = ["gemini-3.1-flash-tts-preview"]
-            }
+            self.availableModels = ["gemini-3.1-flash-tts-preview"]
             return
         }
         
@@ -196,6 +194,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else { return }
+            
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("Failed to fetch models: HTTP \(httpResponse.statusCode)")
+                return
+            }
+            
             do {
                 let res = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
                 DispatchQueue.main.async {
@@ -209,16 +213,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     
     func fetchAvailableVoices(baseURL: String, apiKey: String) {
         if baseURL.contains("api.openai.com") {
-            DispatchQueue.main.async {
-                self.availableVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-            }
+            self.availableVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
             return
         }
         
         if baseURL.contains("generativelanguage.googleapis.com") {
-            DispatchQueue.main.async {
-                self.availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
-            }
+            self.availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
             return
         }
         
@@ -230,6 +230,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else { return }
+            
+            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+                print("Failed to fetch voices: HTTP \(httpResponse.statusCode)")
+                return
+            }
+            
             do {
                 if let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
                     var fetchedVoices: [String] = []

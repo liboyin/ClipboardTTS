@@ -32,7 +32,7 @@ After any code change:
 - All existing unit tests and static analysis must pass.
 - Create new tests if necessary.
 
-Unit est coverage must be at least 85% overall across statements, branches, functions, and lines.
+Unit test coverage must be at least 85% overall across statements, branches, functions, and lines.
 
 # Review Guidelines
 
