@@ -12,9 +12,11 @@ This file is intended for AI agents.
 
 # Implementation Guidelines
 
-- Prefer the simplest implementation, even if it violates SOLID principles. No feature beyond what was asked.
+- Implement only what was asked; do not add features or unrelated refactors.
+- Prefer the simplest implementation. Each function/class/module must have a single responsibility and a well-defined interface; other SOLID principles may be relaxed in favor of simplicity.
+- Keep implementations easy to test with minimal mocking. Prefer pure functions, and isolate side effects where practical.
 - Use up-to-date features from languages, libraries, and frameworks.
-- Break changes into small, functionally isolated chunks; commit as you go.
+- Commit each functionally independent change once fully implemented, tested, and documented.
 - Commit messages must follow this template:
 
 ```
@@ -40,8 +42,9 @@ Review your own changes before committing:
 
 - Does it achieve the intended purpose?
 - Is it bug-free?
-- Are there design flaws or anti-patterns?
 - Can it be simplified?
+- Are there design flaws or anti-patterns?
+- Are there design choices that make testing or validation unnecessarily difficult?
 - Anything else a senior reviewer would push back on? (Use judgment)
 
 Fix trivial issues. For others, stop and confirm with the user.
