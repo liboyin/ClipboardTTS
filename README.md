@@ -44,3 +44,5 @@ Run tests:
 ```
 xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSAppTests -destination 'platform=macOS' test
 ```
+
+For local distribution without an Apple Developer Program account (ad-hoc signed, not notarized), run `package.sh`.
