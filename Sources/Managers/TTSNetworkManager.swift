@@ -40,6 +40,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }
+
+    private var isGeminiEndpoint: Bool {
+        baseURL.contains("generativelanguage.googleapis.com")
+    }
     
     func updateSettings(baseURL: String, apiKey: String, model: String, voice: String) {
         self.baseURL = baseURL
@@ -49,7 +53,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     }
     
     func streamTTS(text: String, dataHandler: @escaping (Data) -> Void) {
-        let isGemini = baseURL.contains("generativelanguage.googleapis.com")
+        let isGemini = isGeminiEndpoint
         let urlString = isGemini ? "\(baseURL)/models/\(model):generateContent?key=\(apiKey)" : baseURL
         
         guard let url = URL(string: urlString) else {
@@ -135,12 +139,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         if isErrorResponse {
             errorData.append(data)
+        } else if isGeminiEndpoint {
+            geminiBuffer.append(data)
         } else {
-            if baseURL.contains("generativelanguage.googleapis.com") {
-                geminiBuffer.append(data)
-            } else {
-                dataHandler?(data)
-            }
+            dataHandler?(data)
         }
     }
     
@@ -149,8 +151,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             self.isStreaming = false
         }
         
-        let isGemini = baseURL.contains("generativelanguage.googleapis.com")
-        if isGemini && !isErrorResponse {
+        if isGeminiEndpoint && !isErrorResponse {
             if let json = try? JSONSerialization.jsonObject(with: geminiBuffer) as? [String: Any],
                let candidates = json["candidates"] as? [[String: Any]],
                let content = candidates.first?["content"] as? [String: Any],

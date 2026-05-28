@@ -62,18 +62,8 @@ class AudioPlayerManager: ObservableObject {
         let dataToProcess = unprocessedData.prefix(bytesToProcess)
         unprocessedData.removeFirst(bytesToProcess)
         
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else { return }
-        buffer.frameLength = frameCapacity
-        
-        dataToProcess.withUnsafeBytes { rawBufferPointer in
-            let int16Pointer = rawBufferPointer.bindMemory(to: Int16.self)
-            if let floatChannelData = buffer.floatChannelData?[0] {
-                for i in 0..<Int(frameCapacity) {
-                    floatChannelData[i] = Float(int16Pointer[i]) / 32768.0
-                }
-            }
-        }
-        
+        guard let buffer = makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
+
         DispatchQueue.main.async {
             self.bufferDuration += Double(frameCapacity) / format.sampleRate
             self.hasAudio = true
@@ -90,14 +80,12 @@ class AudioPlayerManager: ObservableObject {
         if !engine.isRunning {
             try? engine.start()
         }
-        
+
         if playbackProgress >= bufferDuration && bufferDuration > 0 {
             seek(to: 0.0)
-            playerNode.play()
-        } else {
-            playerNode.play()
         }
-        
+        playerNode.play()
+
         DispatchQueue.main.async {
             self.isPlaying = true
         }
@@ -130,25 +118,29 @@ class AudioPlayerManager: ObservableObject {
     func seek(to progress: Double) {
         self.playbackProgress = progress
         self.baseProgressOffset = progress
-        
+
         playerNode.stop()
         guard let format = audioFormat else { return }
-        
-        let sampleRate = format.sampleRate
+
         let bytesPerNetworkFrame = 2
-        let byteOffset = Int(progress * sampleRate) * bytesPerNetworkFrame
-        
-        // Align to frame boundary
-        let alignedOffset = byteOffset - (byteOffset % bytesPerNetworkFrame)
-        
-        guard alignedOffset < accumulatedData.count else { return }
-        
-        let remainingData = accumulatedData.subdata(in: alignedOffset..<accumulatedData.count)
+        let byteOffset = Int(progress * format.sampleRate) * bytesPerNetworkFrame
+        guard byteOffset < accumulatedData.count else { return }
+
+        let remainingData = accumulatedData.subdata(in: byteOffset..<accumulatedData.count)
         let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
-        guard frameCapacity > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else { return }
-        
+        guard frameCapacity > 0,
+              let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
+
+        playerNode.scheduleBuffer(buffer)
+        if isPlaying {
+            playerNode.play()
+        }
+    }
+
+    private func makePCMBuffer(from data: Data, format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCapacity) else { return nil }
         buffer.frameLength = frameCapacity
-        remainingData.withUnsafeBytes { rawBufferPointer in
+        data.withUnsafeBytes { rawBufferPointer in
             let int16Pointer = rawBufferPointer.bindMemory(to: Int16.self)
             if let floatChannelData = buffer.floatChannelData?[0] {
                 for i in 0..<Int(frameCapacity) {
@@ -156,11 +148,7 @@ class AudioPlayerManager: ObservableObject {
                 }
             }
         }
-        
-        playerNode.scheduleBuffer(buffer)
-        if isPlaying {
-            playerNode.play()
-        }
+        return buffer
     }
     
     private func startProgressTimer() {
