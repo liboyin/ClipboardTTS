@@ -1,8 +1,22 @@
 # Clipboard TTS App
 
-## Architecture
+Native macOS menu bar app (Swift/SwiftUI, macOS 13+) that reads clipboard text aloud via OpenAI-compatible TTS APIs. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
-A menu bar app provides an unobtrusive, always-available TTS tool.
+```
+Sources/
+  ClipboardTTSApp.swift       # app entry point, menu bar setup
+  Managers/
+    AudioPlayerManager.swift
+    TextExtractionManager.swift
+    TTSNetworkManager.swift
+  Views/
+    MenuBarView.swift
+    SettingsView.swift
+Tests/                        # XCTest, one file per Manager/View
+project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
+```
+
+## Architecture
 
 - **UI**: SwiftUI `MenuBarExtra` for playback controls; a separate `Window` hosts settings to keep the dropdown focused on play/pause/progress/speed. The settings window includes an endpoint test action.
 - **Audio**: `AVAudioEngine` + `AVAudioPlayerNode` (not `AVPlayer`) so playback speed can be adjusted via `AVAudioUnitTimePitch` without altering pitch.
@@ -13,3 +27,20 @@ A menu bar app provides an unobtrusive, always-available TTS tool.
 
 - **OpenAI-compatible endpoints**: Local TTS engines must expose `/v1/audio/speech`. Cloud APIs that differ (e.g. Google Gemini) get dedicated payload formatters.
 - **External toolchain**: `xcodegen` and related tools are user-managed; the app does not install or modify them.
+
+## Build & Test
+
+Regenerate Xcode project (required after editing `project.yml`):
+```
+xcodegen generate
+```
+
+Build:
+```
+xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSApp -configuration Debug build
+```
+
+Run tests:
+```
+xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSAppTests -destination 'platform=macOS' test
+```
