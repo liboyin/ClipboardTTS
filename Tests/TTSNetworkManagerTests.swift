@@ -212,6 +212,113 @@ final class TTSNetworkManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
     
+    func testNetworkManagerInitReadsProviderSpecificDefaults() {
+        // WHY: SettingsView persists model/voice under provider-specific UserDefaults keys
+        // (openaiModel/openaiVoice, geminiModel/geminiVoice). The manager's init must read the
+        // same keys so user-chosen settings survive an app restart even before the settings
+        // window is opened. A regression here would silently fall back to hardcoded defaults
+        // (tts-1/alloy) on every cold start until the user re-opens settings.
+        let keys = ["ttsProvider", "openaiModel", "openaiVoice", "apiKey",
+                    "geminiModel", "geminiVoice", "geminiAPIKey"]
+        let originals = keys.map { (key: $0, value: UserDefaults.standard.object(forKey: $0)) }
+        defer {
+            for (key, value) in originals {
+                if let value = value {
+                    UserDefaults.standard.set(value, forKey: key)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+            }
+        }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+
+        // OpenAI: persisted model/voice/key should drive the outgoing request
+        UserDefaults.standard.set("OpenAI", forKey: "ttsProvider")
+        UserDefaults.standard.set("persisted-openai-model", forKey: "openaiModel")
+        UserDefaults.standard.set("persisted-openai-voice", forKey: "openaiVoice")
+        UserDefaults.standard.set("persisted-openai-key", forKey: "apiKey")
+
+        let openaiManager = TTSNetworkManager(configuration: config)
+        let openaiExpectation = XCTestExpectation(description: "OpenAI request uses persisted values")
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer persisted-openai-key")
+
+            var extractedData: Data? = request.httpBody
+            if extractedData == nil, let stream = request.httpBodyStream {
+                stream.open()
+                var buffer = [UInt8](repeating: 0, count: 1024)
+                var data = Data()
+                while stream.hasBytesAvailable {
+                    let bytesRead = stream.read(&buffer, maxLength: 1024)
+                    if bytesRead > 0 { data.append(buffer, count: bytesRead) } else { break }
+                }
+                stream.close()
+                extractedData = data
+            }
+
+            if let bodyData = extractedData,
+               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
+                XCTAssertEqual(json["model"] as? String, "persisted-openai-model")
+                XCTAssertEqual(json["voice"] as? String, "persisted-openai-voice")
+            } else {
+                XCTFail("OpenAI request body missing")
+            }
+
+            openaiExpectation.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        openaiManager.streamTTS(text: "test") { _ in }
+        wait(for: [openaiExpectation], timeout: 2.0)
+
+        // Gemini: persisted model embeds in URL path, voice embeds in request body
+        UserDefaults.standard.set("Gemini", forKey: "ttsProvider")
+        UserDefaults.standard.set("persisted-gemini-model", forKey: "geminiModel")
+        UserDefaults.standard.set("persisted-gemini-voice", forKey: "geminiVoice")
+        UserDefaults.standard.set("persisted-gemini-key", forKey: "geminiAPIKey")
+
+        let geminiManager = TTSNetworkManager(configuration: config)
+        let geminiExpectation = XCTestExpectation(description: "Gemini request uses persisted values")
+
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:generateContent?key=persisted-gemini-key")
+
+            var extractedData: Data? = request.httpBody
+            if extractedData == nil, let stream = request.httpBodyStream {
+                stream.open()
+                var buffer = [UInt8](repeating: 0, count: 1024)
+                var data = Data()
+                while stream.hasBytesAvailable {
+                    let bytesRead = stream.read(&buffer, maxLength: 1024)
+                    if bytesRead > 0 { data.append(buffer, count: bytesRead) } else { break }
+                }
+                stream.close()
+                extractedData = data
+            }
+
+            if let bodyData = extractedData,
+               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
+                let cfg = json["generationConfig"] as? [String: Any]
+                let speech = cfg?["speechConfig"] as? [String: Any]
+                let voiceCfg = speech?["voiceConfig"] as? [String: Any]
+                let prebuilt = voiceCfg?["prebuiltVoiceConfig"] as? [String: Any]
+                XCTAssertEqual(prebuilt?["voiceName"] as? String, "persisted-gemini-voice")
+            } else {
+                XCTFail("Gemini request body missing")
+            }
+
+            geminiExpectation.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        geminiManager.streamTTS(text: "test") { _ in }
+        wait(for: [geminiExpectation], timeout: 2.0)
+    }
+
     func testFetchAvailableVoices() {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
