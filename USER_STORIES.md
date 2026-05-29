@@ -7,7 +7,7 @@
     - Speak Copied Text/Stop
     - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically. Once the entire audio is buffered, also start showing remaining time. All times should be precise to the second.
     - Pause/Resume
-    - Playback Speed (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2.0x, 2.5x)
+    - Playback Speed, adjusted with a continuous slider from 0.5x to 2.5x (0.1x increments)
     - Voice (all available voices via OpenAI API, only changeable during idle state)
     - Settings (Model Selection, API Key, Local/Online API Base URL, Test Voice, About, etc.)
 - The menu bar icon should change to reflect the current state (Idle, Playing, Paused).
@@ -22,5 +22,5 @@
 ### Control & Navigation During Playback
 - The user should be able to pause and resume the currently playing audio from the menu bar.
 - The user should be able to stop playback entirely from the menu bar to cancel a read and discard content that has yet to be sent to the TTS engine.
-- The user should be able to change the playback speed (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2.0x, 2.5x) during playback.
+- The user should be able to change the playback speed anywhere from 0.5x to 2.5x (continuous slider, 0.1x increments) during playback.
 - The user should be able to drag the slider thumb to jump to a precise point in the buffered audio.
