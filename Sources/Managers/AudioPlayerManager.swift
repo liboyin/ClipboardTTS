@@ -18,6 +18,11 @@ class AudioPlayerManager: ObservableObject {
     private var timePitch = AVAudioUnitTimePitch()
     
     private var audioFormat: AVAudioFormat?
+
+    // accumulatedData/unprocessedData are written from the network delegate's background queue
+    // (scheduleAudio) and read/cleared from the main thread (seek/stop). All access to them MUST
+    // go through bufferQueue to avoid a data race.
+    private let bufferQueue = DispatchQueue(label: "com.clipboardtts.audiobuffer")
     private var accumulatedData = Data()
     private var unprocessedData = Data()
     private var baseProgressOffset: Double = 0.0
@@ -50,30 +55,33 @@ class AudioPlayerManager: ObservableObject {
     
     func scheduleAudio(data: Data) {
         guard let format = audioFormat else { return }
-        
-        accumulatedData.append(data)
-        unprocessedData.append(data)
-        
-        let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
-        let frameCapacity = AVAudioFrameCount(unprocessedData.count / bytesPerNetworkFrame)
-        guard frameCapacity > 0 else { return }
-        
-        let bytesToProcess = Int(frameCapacity) * bytesPerNetworkFrame
-        let dataToProcess = unprocessedData.prefix(bytesToProcess)
-        unprocessedData.removeFirst(bytesToProcess)
-        
-        guard let buffer = makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
 
-        DispatchQueue.main.async {
-            self.bufferDuration += Double(frameCapacity) / format.sampleRate
-            self.hasAudio = true
-            
-            if !self.isPlaying {
-                self.play()
+        // Runs on the network delegate's background queue; serialize buffer access via bufferQueue.
+        bufferQueue.async {
+            self.accumulatedData.append(data)
+            self.unprocessedData.append(data)
+
+            let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
+            let frameCapacity = AVAudioFrameCount(self.unprocessedData.count / bytesPerNetworkFrame)
+            guard frameCapacity > 0 else { return }
+
+            let bytesToProcess = Int(frameCapacity) * bytesPerNetworkFrame
+            let dataToProcess = self.unprocessedData.prefix(bytesToProcess)
+            self.unprocessedData.removeFirst(bytesToProcess)
+
+            guard let buffer = self.makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
+
+            self.playerNode.scheduleBuffer(buffer)
+
+            DispatchQueue.main.async {
+                self.bufferDuration += Double(frameCapacity) / format.sampleRate
+                self.hasAudio = true
+
+                if !self.isPlaying {
+                    self.play()
+                }
             }
         }
-        
-        playerNode.scheduleBuffer(buffer)
     }
     
     func play() {
@@ -102,10 +110,12 @@ class AudioPlayerManager: ObservableObject {
     
     func stop() {
         playerNode.stop()
-        accumulatedData.removeAll()
-        unprocessedData.removeAll()
+        bufferQueue.sync {
+            accumulatedData.removeAll()
+            unprocessedData.removeAll()
+        }
         baseProgressOffset = 0.0
-        
+
         DispatchQueue.main.async {
             self.isPlaying = false
             self.hasAudio = false
@@ -116,24 +126,28 @@ class AudioPlayerManager: ObservableObject {
     }
     
     func seek(to progress: Double) {
+        guard let format = audioFormat else { return }
         self.playbackProgress = progress
         self.baseProgressOffset = progress
+        let wasPlaying = isPlaying
 
         playerNode.stop()
-        guard let format = audioFormat else { return }
 
-        let bytesPerNetworkFrame = 2
-        let byteOffset = Int(progress * format.sampleRate) * bytesPerNetworkFrame
-        guard byteOffset < accumulatedData.count else { return }
+        // Reading accumulatedData must be serialized against background appends in scheduleAudio.
+        bufferQueue.sync {
+            let bytesPerNetworkFrame = 2
+            let byteOffset = Int(progress * format.sampleRate) * bytesPerNetworkFrame
+            guard byteOffset < accumulatedData.count else { return }
 
-        let remainingData = accumulatedData.subdata(in: byteOffset..<accumulatedData.count)
-        let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
-        guard frameCapacity > 0,
-              let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
+            let remainingData = accumulatedData.subdata(in: byteOffset..<accumulatedData.count)
+            let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
+            guard frameCapacity > 0,
+                  let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
 
-        playerNode.scheduleBuffer(buffer)
-        if isPlaying {
-            playerNode.play()
+            playerNode.scheduleBuffer(buffer)
+            if wasPlaying {
+                playerNode.play()
+            }
         }
     }
 
