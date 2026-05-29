@@ -6,9 +6,9 @@ struct ClipboardTTSApp: App {
     @StateObject private var audioPlayer = AudioPlayerManager()
     @StateObject private var textExtraction = TextExtractionManager()
     @StateObject private var networkManager = TTSNetworkManager()
-    
+
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     var body: some Scene {
         MenuBarExtra("Clipboard TTS", systemImage: "waveform.circle") {
             MenuBarView(
@@ -18,7 +18,7 @@ struct ClipboardTTSApp: App {
             )
         }
         .menuBarExtraStyle(.window)
-        
+
         Window("Settings", id: "settings") {
             SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
         }

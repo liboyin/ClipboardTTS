@@ -4,9 +4,9 @@ struct MenuBarView: View {
     @ObservedObject var audioPlayer: AudioPlayerManager
     @ObservedObject var textExtraction: TextExtractionManager
     @ObservedObject var networkManager: TTSNetworkManager
-    
+
     @Environment(\.openWindow) var openWindow
-    
+
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -20,7 +20,7 @@ struct MenuBarView: View {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(PlainButtonStyle())
-                
+
                 Button(action: {
                     NSApplication.shared.terminate(nil)
                 }) {
@@ -30,9 +30,9 @@ struct MenuBarView: View {
             }
             .padding(.horizontal)
             .padding(.top)
-            
+
             Divider()
-            
+
             HStack {
                 Button(action: {
                     speakCopiedText()
@@ -43,7 +43,7 @@ struct MenuBarView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(.horizontal)
-            
+
             HStack {
                 Button(action: {
                     togglePlayPause()
@@ -53,7 +53,7 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .disabled(!audioPlayer.hasAudio)
-                
+
                 Slider(value: Binding(
                     get: { audioPlayer.playbackProgress },
                     set: { audioPlayer.seek(to: $0) }
@@ -61,7 +61,7 @@ struct MenuBarView: View {
                 .disabled(!audioPlayer.hasAudio)
             }
             .padding(.horizontal)
-            
+
             HStack {
                 Text("Speed:")
                 Slider(value: $audioPlayer.playbackRate, in: 0.5...2.5, step: 0.1)
@@ -82,7 +82,7 @@ struct MenuBarView: View {
             }
         }
     }
-    
+
     func speakCopiedText() {
         if networkManager.isStreaming || audioPlayer.hasAudio {
             networkManager.stopStreaming()
@@ -107,4 +107,3 @@ struct MenuBarView: View {
         }
     }
 }
-

@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var networkManager: TTSNetworkManager
     @ObservedObject var audioPlayer: AudioPlayerManager
-    
+
     @AppStorage("ttsProvider") private var ttsProvider: String = "OpenAI"
     @AppStorage("apiBaseURL") private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
     @AppStorage("apiKey") private var openaiAPIKey: String = ""
@@ -18,25 +18,25 @@ struct SettingsView: View {
         if ttsProvider == "Gemini" { return geminiAPIKey }
         return customAPIKey
     }
-    
+
     var currentBaseURL: String {
         if ttsProvider == "OpenAI" { return "https://api.openai.com/v1/audio/speech" }
         if ttsProvider == "Gemini" { return "https://generativelanguage.googleapis.com/v1beta" }
         return apiBaseURL
     }
-    
+
     var currentModel: String {
         if ttsProvider == "OpenAI" { return openaiModel }
         if ttsProvider == "Gemini" { return geminiModel }
         return ""
     }
-    
+
     var currentVoice: String {
         if ttsProvider == "OpenAI" { return openaiVoice }
         if ttsProvider == "Gemini" { return geminiVoice }
         return ""
     }
-    
+
     var body: some View {
         HStack(spacing: 0) {
             List(selection: $ttsProvider) {
@@ -49,9 +49,9 @@ struct SettingsView: View {
             .onChange(of: ttsProvider) { newValue in
                 providerDidChange(to: newValue)
             }
-            
+
             Divider()
-            
+
             Form {
                 if ttsProvider == "OpenAI" {
                     openAISettings
@@ -69,7 +69,7 @@ struct SettingsView: View {
             syncSettings()
         }
     }
-    
+
     private var openAISettings: some View {
         Group {
             Section(header: Text("OpenAI Configuration").font(.headline)) {
@@ -77,13 +77,14 @@ struct SettingsView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: openaiAPIKey) { _ in syncSettings() }
             }
-            
-            ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice, networkManager: networkManager, onSync: syncSettings)
-            
+
+            ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
+                                        networkManager: networkManager, onSync: syncSettings)
+
             testVoiceButton
         }
     }
-    
+
     private var geminiSettings: some View {
         Group {
             Section(header: Text("Gemini Configuration").font(.headline)) {
@@ -91,41 +92,42 @@ struct SettingsView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: geminiAPIKey) { _ in syncSettings() }
             }
-            
-            ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice, networkManager: networkManager, onSync: syncSettings)
-            
+
+            ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
+                                        networkManager: networkManager, onSync: syncSettings)
+
             testVoiceButton
         }
     }
-    
+
     private var customSettings: some View {
         Group {
             Section(header: Text("Custom Configuration").font(.headline)) {
                 TextField("Base URL", text: $apiBaseURL)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: apiBaseURL) { _ in syncSettings() }
-                
+
                 SecureField("API Key", text: $customAPIKey)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: customAPIKey) { _ in syncSettings() }
             }
-            
+
             testVoiceButton
         }
     }
-    
+
     private var testVoiceButton: some View {
         HStack {
             Button("Test Voice") {
                 runTestVoice()
             }
             .buttonStyle(.bordered)
-            
+
             Spacer()
         }
         .padding(.top)
     }
-    
+
     func runTestVoice() {
         networkManager.updateSettings(
             baseURL: currentBaseURL,
@@ -139,11 +141,11 @@ struct SettingsView: View {
             audioPlayer.scheduleAudio(data: data)
         }
     }
-    
+
     func providerDidChange(to newValue: String) {
         syncSettings()
     }
-    
+
     func syncSettings() {
         networkManager.updateSettings(
             baseURL: currentBaseURL,
@@ -153,7 +155,7 @@ struct SettingsView: View {
         )
         fetchMetadata()
     }
-    
+
     func fetchMetadata() {
         if ttsProvider == "Custom" { return }
         networkManager.fetchAvailableModels(baseURL: currentBaseURL, apiKey: currentAPIKey)
@@ -166,14 +168,14 @@ struct ModelVoiceConfigurationView: View {
     @Binding var ttsVoice: String
     @ObservedObject var networkManager: TTSNetworkManager
     var onSync: () -> Void
-    
+
     var body: some View {
         Section(header: Text("Model & Voice").font(.headline)) {
             HStack {
                 TextField("Model", text: $ttsModel)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: ttsModel) { _ in onSync() }
-                
+
                 if !networkManager.availableModels.isEmpty {
                     Picker("", selection: $ttsModel) {
                         ForEach(networkManager.availableModels, id: \.self) { model in
@@ -185,12 +187,12 @@ struct ModelVoiceConfigurationView: View {
                     .onChange(of: ttsModel) { _ in onSync() }
                 }
             }
-            
+
             HStack {
                 TextField("Voice", text: $ttsVoice)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: ttsVoice) { _ in onSync() }
-                
+
                 if !networkManager.availableVoices.isEmpty {
                     Picker("", selection: $ttsVoice) {
                         ForEach(networkManager.availableVoices, id: \.self) { voice in

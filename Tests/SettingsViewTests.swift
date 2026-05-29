@@ -3,12 +3,12 @@ import SwiftUI
 @testable import ClipboardTTSApp
 
 final class SettingsViewTests: XCTestCase {
-    
+
     func testSettingsViewMethods() {
         let audioPlayer = AudioPlayerManager()
         let networkManager = TTSNetworkManager(configuration: .ephemeral)
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
-        
+
         UserDefaults.standard.set("OpenAI", forKey: "ttsProvider")
         UserDefaults.standard.set("test-openai-key", forKey: "apiKey")
         UserDefaults.standard.set("tts-1-hd", forKey: "openaiModel")
@@ -40,23 +40,23 @@ final class SettingsViewTests: XCTestCase {
         XCTAssertEqual(view.currentVoice, "")
         view.syncSettings()
     }
-    
+
     func testProviderDidChangeAndTestVoice() {
         let audioPlayer = AudioPlayerManager()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let networkManager = TTSNetworkManager(configuration: config)
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
-        
+
         view.providerDidChange(to: "OpenAI")
         view.providerDidChange(to: "Gemini")
-        
+
         MockURLProtocol.requestHandler = { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
-        
+
         view.runTestVoice()
-        
+
         // Let async execute
         let expectation = XCTestExpectation(description: "Wait for test voice")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

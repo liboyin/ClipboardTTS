@@ -3,7 +3,7 @@ import SwiftUI
 @testable import ClipboardTTSApp
 
 final class MenuBarViewTests: XCTestCase {
-    
+
     func testTogglePlayPauseFlipsPlayingState() {
         // WHY: The single play/pause button is driven entirely by togglePlayPause flipping
         // audioPlayer.isPlaying. If toggling stopped alternating state, the button would lie about
@@ -44,7 +44,8 @@ final class MenuBarViewTests: XCTestCase {
         let networkManager = TTSNetworkManager(configuration: config)
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
         MockURLProtocol.requestHandler = { request in
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(repeating: 0, count: 2048))
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(repeating: 0, count: 2048))
         }
 
         NSPasteboard.general.clearContents()
@@ -90,5 +91,3 @@ final class MenuBarViewTests: XCTestCase {
         wait(for: [cleared], timeout: 1.0)
     }
 }
-
-

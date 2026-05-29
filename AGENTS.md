@@ -27,7 +27,7 @@ Tests MUST encode WHY behavior matters, not just WHAT it does. A test that does 
 
 After any code change:
 
-- All existing unit tests MUST pass.
+- All existing unit tests and static analysis MUST pass.
 - Create new tests if necessary.
 - Business logic in `Sources/Managers/` MUST meet the line-coverage threshold (enforced by `check-coverage.sh`).
 - Declarative UI logic in `Sources/Views/` is exempted from coverage check.

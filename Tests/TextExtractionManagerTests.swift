@@ -3,7 +3,7 @@ import AppKit
 @testable import ClipboardTTSApp
 
 final class TextExtractionManagerTests: XCTestCase {
-    
+
     func testTextExtractionReturnsClipboardText() {
         // WHY: The "Speak Copied Text" flow depends on getCopiedText() handing back exactly what
         // the user copied. If it dropped or mangled the clipboard string, the wrong text (or none)
@@ -15,12 +15,12 @@ final class TextExtractionManagerTests: XCTestCase {
         let manager = TextExtractionManager()
         XCTAssertEqual(manager.getCopiedText(), "Hello clipboard")
     }
-    
+
     func testTextExtractionEmptyPasteboard() {
         // WHY: Ensure getCopiedText returns nil when pasteboard is empty.
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        
+
         let manager = TextExtractionManager()
         let text = manager.getCopiedText()
         XCTAssertNil(text)

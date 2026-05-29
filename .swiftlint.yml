@@ -1,0 +1,30 @@
+# SwiftLint configuration — the "static analysis" gate referenced in AGENTS.md.
+# Run `swiftlint` to report, `swiftlint --fix` to autocorrect, `swiftlint --strict`
+# to treat any remaining violation as a failure (used as the pass/fail gate).
+
+included:
+  - Sources
+  - Tests
+
+disabled_rules:
+  # Conflicts with idiomatic SwiftUI: Button(action:){ label } passes two closures,
+  # and the trailing-closure label form is the standard, most readable style.
+  - multiple_closures_with_trailing_closure
+
+# Network/JSON code has unavoidably long URLs and string literals.
+line_length:
+  warning: 140
+  ignores_urls: true
+  ignores_comments: true
+
+# streamTTS builds two provider-specific request bodies inline; a little longer than default.
+function_body_length:
+  warning: 60
+
+# SettingsView declares its provider sub-views in one type by design.
+type_body_length:
+  warning: 320
+
+# TTSNetworkManager nests its decodable response model one extra level, which reads fine.
+nesting:
+  type_level: 2

@@ -6,17 +6,17 @@ class AudioPlayerManager: ObservableObject {
     @Published var playbackProgress: Double = 0.0
     @Published var bufferDuration: Double = 0.0
     @Published var hasAudio = false
-    
+
     @Published var playbackRate: Float = 1.0 {
         didSet {
             timePitch.rate = playbackRate
         }
     }
-    
+
     private var engine = AVAudioEngine()
     private var playerNode = AVAudioPlayerNode()
     private var timePitch = AVAudioUnitTimePitch()
-    
+
     private var audioFormat: AVAudioFormat?
 
     // accumulatedData/unprocessedData are written from the network delegate's background queue
@@ -26,33 +26,32 @@ class AudioPlayerManager: ObservableObject {
     private var accumulatedData = Data()
     private var unprocessedData = Data()
     private var baseProgressOffset: Double = 0.0
-    
+
     private var progressTimer: Timer?
-    
+
     init() {
         setupEngine()
     }
-    
+
     private func setupEngine() {
         engine.attach(playerNode)
         engine.attach(timePitch)
-        
-        
+
         let standardFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)
         audioFormat = standardFormat
-        
+
         if let standardFormat = standardFormat {
             engine.connect(playerNode, to: timePitch, format: standardFormat)
             engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
         }
-        
+
         do {
             try engine.start()
         } catch {
             print("Engine start error: \(error)")
         }
     }
-    
+
     func scheduleAudio(data: Data) {
         guard let format = audioFormat else { return }
 
@@ -83,7 +82,7 @@ class AudioPlayerManager: ObservableObject {
             }
         }
     }
-    
+
     func play() {
         if !engine.isRunning {
             try? engine.start()
@@ -99,7 +98,7 @@ class AudioPlayerManager: ObservableObject {
         }
         startProgressTimer()
     }
-    
+
     func pause() {
         playerNode.pause()
         DispatchQueue.main.async {
@@ -107,7 +106,7 @@ class AudioPlayerManager: ObservableObject {
         }
         stopProgressTimer()
     }
-    
+
     func stop() {
         playerNode.stop()
         bufferQueue.sync {
@@ -124,7 +123,7 @@ class AudioPlayerManager: ObservableObject {
         }
         stopProgressTimer()
     }
-    
+
     func seek(to progress: Double) {
         guard let format = audioFormat else { return }
         self.playbackProgress = progress
@@ -157,19 +156,21 @@ class AudioPlayerManager: ObservableObject {
         data.withUnsafeBytes { rawBufferPointer in
             let int16Pointer = rawBufferPointer.bindMemory(to: Int16.self)
             if let floatChannelData = buffer.floatChannelData?[0] {
-                for i in 0..<Int(frameCapacity) {
-                    floatChannelData[i] = Float(int16Pointer[i]) / 32768.0
+                for frame in 0..<Int(frameCapacity) {
+                    floatChannelData[frame] = Float(int16Pointer[frame]) / 32768.0
                 }
             }
         }
         return buffer
     }
-    
+
     private func startProgressTimer() {
         stopProgressTimer()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self = self, let nodeTime = self.playerNode.lastRenderTime, let playerTime = self.playerNode.playerTime(forNodeTime: nodeTime) else { return }
-            
+            guard let self = self,
+                  let nodeTime = self.playerNode.lastRenderTime,
+                  let playerTime = self.playerNode.playerTime(forNodeTime: nodeTime) else { return }
+
             DispatchQueue.main.async {
                 if let format = self.audioFormat {
                     let newProgress = self.baseProgressOffset + Double(playerTime.sampleTime) / format.sampleRate
@@ -178,7 +179,7 @@ class AudioPlayerManager: ObservableObject {
                     } else if newProgress > self.bufferDuration {
                         self.playbackProgress = self.bufferDuration
                     }
-                    
+
                     if self.isPlaying && self.playbackProgress >= self.bufferDuration && self.bufferDuration > 0 {
                         self.pause()
                     }
@@ -186,7 +187,7 @@ class AudioPlayerManager: ObservableObject {
             }
         }
     }
-    
+
     private func stopProgressTimer() {
         progressTimer?.invalidate()
         progressTimer = nil

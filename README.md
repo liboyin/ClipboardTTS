@@ -26,7 +26,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 ## Design Assumptions
 
 - **OpenAI-compatible endpoints**: Local TTS engines must expose `/v1/audio/speech`. Cloud APIs that differ (e.g. Google Gemini) get dedicated payload formatters.
-- **External toolchain**: `xcodegen` and related tools are user-managed; the app does not install or modify them.
+- **External toolchain**: `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them.
 
 ## Build & Test
 

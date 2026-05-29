@@ -1,0 +1,5 @@
+# Test-only overrides, merged with the root .swiftlint.yml.
+# Test methods legitimately run long (multi-scenario setup, inline assertions),
+# so the production function-length limit does not apply here.
+disabled_rules:
+  - function_body_length

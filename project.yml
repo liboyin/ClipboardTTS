@@ -7,6 +7,15 @@ targets:
     platform: macOS
     deploymentTarget: "13.0"
     sources: [Sources]
+    preBuildScripts:
+      - name: SwiftLint
+        basedOnDependencyAnalysis: false
+        script: |
+          if command -v swiftlint >/dev/null; then
+            swiftlint --strict
+          else
+            echo "warning: SwiftLint not installed (brew install swiftlint); skipping static analysis"
+          fi
     info:
       path: Sources/Info.plist
       properties:
