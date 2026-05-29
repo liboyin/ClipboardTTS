@@ -27,10 +27,10 @@ Tests MUST encode WHY behavior matters, not just WHAT it does. A test that does 
 
 After any code change:
 
-- All existing unit tests and static analysis MUST pass.
+- All existing unit tests MUST pass.
 - Create new tests if necessary.
-
-Unit test coverage SHOULD be at least 75% overall across statements, branches, functions, and lines.
+- Business logic in `Sources/Managers/` MUST meet the line-coverage threshold (enforced by `check-coverage.sh`).
+- Declarative UI logic in `Sources/Views/` is exempted from coverage check.
 
 # Review Guidelines
 

@@ -4,15 +4,16 @@ import AppKit
 
 final class TextExtractionManagerTests: XCTestCase {
     
-    func testTextExtractionDoesNotCrash() {
-        // WHY: Text extraction relies on Pasteboard which might fail to yield string data.
-        // We must ensure that calling getCopiedText gracefully handles this and returns nil or string without crashing.
-        
+    func testTextExtractionReturnsClipboardText() {
+        // WHY: The "Speak Copied Text" flow depends on getCopiedText() handing back exactly what
+        // the user copied. If it dropped or mangled the clipboard string, the wrong text (or none)
+        // would be spoken. Writing a known string and asserting it round-trips guards that contract.
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString("Hello clipboard", forType: .string)
+
         let manager = TextExtractionManager()
-        let text = manager.getCopiedText()
-        
-        // Assert that we get either nil or a string, gracefully.
-        XCTAssertTrue(text == nil || text != nil)
+        XCTAssertEqual(manager.getCopiedText(), "Hello clipboard")
     }
     
     func testTextExtractionEmptyPasteboard() {

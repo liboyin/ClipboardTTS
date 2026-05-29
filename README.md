@@ -40,9 +40,9 @@ Build:
 xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSApp -configuration Debug build
 ```
 
-Run tests:
+Run tests and check the line coverage of `Sources/Managers/`:
 ```
-xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSAppTests -destination 'platform=macOS' test
+./check-coverage.sh
 ```
 
-For local distribution without an Apple Developer Program account (ad-hoc signed, not notarized), run `package.sh`.
+To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`.
