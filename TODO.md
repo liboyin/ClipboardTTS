@@ -15,31 +15,6 @@ Ground rules for every task below:
 
 ---
 
-## 1. Fix the Services flow (bug)
-
-**Context.** macOS Services integration is broken until the user opens the dropdown once.
-`ServicesProvider.handleServices` (`Sources/ClipboardTTSApp.swift:34-40`) posts a
-`SpeakSelectedText` notification, but the only observer is `MenuBarView.onReceive`
-(`Sources/Views/MenuBarView.swift:75-83`). A `MenuBarExtra(.window)` body is not built
-until the menu is first opened, so right-click → Services → "Speak Selected Text"
-immediately after launch is silently dropped.
-
-**Change.**
-- Move the notification subscription (and the stop-then-stream pipeline it triggers) out
-  of the view into an object that exists from launch — e.g. a small coordinator created in
-  `ClipboardTTSApp.init` and injected with `audioPlayer`, `textExtraction`, and
-  `networkManager`, or subscribe inside one of the managers. Remove the `.onReceive` from
-  `MenuBarView`.
-- While there: rename the Services menu item from "Speak Selected Text" to
-  "Speak Selected Text with Clipboard TTS" (per `USER_STORIES.md`). Edit the `NSServices`
-  block in `project.yml` **and** `Sources/Info.plist` (both carry the string), then
-  `xcodegen generate`.
-
-**Done when.** With a freshly launched app (dropdown never opened), invoking the Service
-speaks the selected text. The coordinator/pipeline logic has a unit test (the notification
-post → `streamTTS` → `scheduleAudio` chain is testable with `MockURLProtocol`; see
-`Tests/MenuBarViewTests.swift:36-64` for the existing pattern).
-
 ## 2. Stop tests from corrupting real app settings (bug)
 
 **Context.** The unit-test bundle is hosted inside the app, so `UserDefaults.standard` in

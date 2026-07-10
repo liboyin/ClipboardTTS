@@ -1,0 +1,68 @@
+import XCTest
+@testable import ClipboardTTSApp
+
+final class ServicesCoordinatorTests: XCTestCase {
+
+    func testServiceNotificationStreamsSelectedTextToAudio() {
+        // WHY: The macOS Services entry point ("Speak Selected Text with Clipboard TTS") must work
+        // from app launch, before the menu bar dropdown (and thus MenuBarView) is ever built. The
+        // coordinator now owns the subscription that used to live on the lazily-built view, so
+        // posting the notification alone — with no view in existence — must drive selected text ->
+        // network -> scheduled audio. hasAudio flipping true proves that whole chain ran.
+        let audioPlayer = AudioPlayerManager()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let networkManager = TTSNetworkManager(configuration: config)
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        MockURLProtocol.requestHandler = { request in
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    Data(repeating: 0, count: 2048))
+        }
+
+        let center = NotificationCenter()
+        let coordinator = ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager, notificationCenter: center)
+
+        withExtendedLifetime(coordinator) {
+            center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: "Speak me")
+
+            let expectation = XCTestExpectation(description: "Service text streamed to audio")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                XCTAssertTrue(audioPlayer.hasAudio)
+                expectation.fulfill()
+            }
+            wait(for: [expectation], timeout: 3.0)
+        }
+    }
+
+    func testServiceNotificationWithoutStringObjectIsIgnored() {
+        // WHY: handleServices only posts when the pasteboard holds a string, but the coordinator
+        // must still defensively drop a malformed notification (non-String object) rather than
+        // start a stream with garbage. If the guard regressed and fed a non-String payload into
+        // the pipeline, streamTTS would fire a real network request — MockURLProtocol's XCTFail
+        // handler makes that regression fail the test rather than silently hit the live API.
+        let audioPlayer = AudioPlayerManager()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let networkManager = TTSNetworkManager(configuration: config)
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        MockURLProtocol.requestHandler = { request in
+            XCTFail("Malformed notification must not start a network request")
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        let center = NotificationCenter()
+        let coordinator = ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager, notificationCenter: center)
+
+        withExtendedLifetime(coordinator) {
+            center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: 42)
+
+            // Drain the main/network queues so a regressed request would have reached the protocol.
+            let settled = XCTestExpectation(description: "No stream started")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled.fulfill() }
+            wait(for: [settled], timeout: 1.0)
+        }
+
+        XCTAssertFalse(networkManager.isStreaming)
+        XCTAssertFalse(audioPlayer.hasAudio)
+    }
+}

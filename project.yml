@@ -22,7 +22,7 @@ targets:
         LSUIElement: true
         NSServices:
           - NSMenuItem:
-              default: "Speak Selected Text"
+              default: "Speak Selected Text with Clipboard TTS"
             NSMessage: "handleServices"
             NSPortName: "ClipboardTTSApp"
             NSSendTypes:

@@ -26,7 +26,7 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Speak Selected Text</string>
+				<string>Speak Selected Text with Clipboard TTS</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>handleServices</string>

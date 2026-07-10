@@ -9,6 +9,7 @@ Sources/
     AudioPlayerManager.swift
     TextExtractionManager.swift
     TTSNetworkManager.swift
+    ServicesCoordinator.swift   # bridges the macOS Services flow into the audio pipeline
   Views/
     MenuBarView.swift
     SettingsView.swift
@@ -22,6 +23,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 - **Audio**: `AVAudioEngine` + `AVAudioPlayerNode` (not `AVPlayer`) so playback speed can be adjusted via `AVAudioUnitTimePitch` without altering pitch.
 - **Text**: Reads `NSPasteboard` directly, asynchronously, to avoid blocking the source app.
 - **Network**: `URLSession` with HTTP chunked streaming, so playback starts on the first bytes from the TTS provider rather than after the full payload downloads. Minimizing Time-To-First-Byte is a primary design goal.
+- **Services**: The macOS right-click "Speak Selected Text with Clipboard TTS" service posts a notification handled by `ServicesCoordinator`, which lives for the whole app lifetime (created in `ClipboardTTSApp.init`). This is deliberately *not* in `MenuBarView`: `MenuBarExtra(.window)` builds its body only when the dropdown is first opened, so a view-hosted observer would drop the service until then.
 
 ## Design Assumptions
 

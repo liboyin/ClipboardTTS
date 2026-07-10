@@ -3,11 +3,27 @@ import AppKit
 
 @main
 struct ClipboardTTSApp: App {
-    @StateObject private var audioPlayer = AudioPlayerManager()
-    @StateObject private var textExtraction = TextExtractionManager()
-    @StateObject private var networkManager = TTSNetworkManager()
+    @StateObject private var audioPlayer: AudioPlayerManager
+    @StateObject private var textExtraction: TextExtractionManager
+    @StateObject private var networkManager: TTSNetworkManager
+
+    // Owns the Services-notification subscription for the app's lifetime, so the Services flow
+    // works before the menu bar dropdown (and thus MenuBarView) is ever built. Held as a
+    // @StateObject (like the managers) so all four share first-wins lifecycle semantics and can
+    // never end up pointing at different manager instances.
+    @StateObject private var servicesCoordinator: ServicesCoordinator
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    init() {
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager()
+        let networkManager = TTSNetworkManager()
+        _audioPlayer = StateObject(wrappedValue: audioPlayer)
+        _textExtraction = StateObject(wrappedValue: textExtraction)
+        _networkManager = StateObject(wrappedValue: networkManager)
+        _servicesCoordinator = StateObject(wrappedValue: ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager))
+    }
 
     var body: some Scene {
         MenuBarExtra("Clipboard TTS", systemImage: "waveform.circle") {
@@ -34,7 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class ServicesProvider: NSObject {
     @objc func handleServices(_ pasteboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString>) {
         if let text = pasteboard.string(forType: .string) {
-            NotificationCenter.default.post(name: NSNotification.Name("SpeakSelectedText"), object: text)
+            NotificationCenter.default.post(name: ServicesCoordinator.speakSelectedTextNotification, object: text)
         }
     }
 }

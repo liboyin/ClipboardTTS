@@ -72,15 +72,6 @@ struct MenuBarView: View {
             .padding(.bottom)
         }
         .frame(width: 300)
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("SpeakSelectedText"))) { notification in
-            if let text = notification.object as? String {
-                networkManager.stopStreaming()
-                audioPlayer.stop()
-                networkManager.streamTTS(text: text) { data in
-                    audioPlayer.scheduleAudio(data: data)
-                }
-            }
-        }
     }
 
     func speakCopiedText() {
