@@ -12,7 +12,7 @@ Sources/
   Views/
     MenuBarView.swift
     SettingsView.swift
-Tests/                        # XCTest, one file per Manager/View
+Tests/                        # XCTest, one file per Manager/View + shared MockURLProtocol
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
 ```
 
