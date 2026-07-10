@@ -14,6 +14,7 @@ Sources/
     MenuBarView.swift
     SettingsView.swift
 Tests/                        # XCTest, one file per Manager/View + shared MockURLProtocol
+                              # and UserDefaultsSnapshot (settings isolation)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
 ```
 
@@ -46,5 +47,7 @@ Run tests and check the line coverage of `Sources/Managers/`:
 ```
 ./check-coverage.sh
 ```
+
+The unit-test bundle is hosted inside the app, so `UserDefaults.standard` in a test is the real app's defaults domain. Any test that touches a settings key must call `isolateAppSettingsDefaults()` first (`Tests/UserDefaultsSnapshot.swift`), which clears those keys for the test and restores the developer's configuration on teardown.
 
 To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`.

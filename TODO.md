@@ -15,23 +15,6 @@ Ground rules for every task below:
 
 ---
 
-## 2. Stop tests from corrupting real app settings (bug)
-
-**Context.** The unit-test bundle is hosted inside the app, so `UserDefaults.standard` in
-tests is the *real* app's defaults domain. `Tests/SettingsViewTests.swift` sets
-`ttsProvider`, `apiKey`, `openaiModel`, `openaiVoice`, `geminiAPIKey`, `geminiModel`,
-`geminiVoice`, `customAPIKey`, and `apiBaseURL` and never restores them — running the test
-suite overwrites whatever the developer had configured, ending with provider "Custom".
-
-**Change.** Save and restore every mutated key, exactly like
-`Tests/TTSNetworkManagerTests.swift:221-232`
-(`testNetworkManagerInitReadsProviderSpecificDefaults`) already does: capture originals,
-`defer` restoration. Consider extracting that save/restore helper into a shared test
-utility so both files use it.
-
-**Done when.** Running `./check-coverage.sh` leaves `defaults read com.clipboardtts.ClipboardTTSApp`
-identical to its pre-run state, and both test files use the shared helper.
-
 ## 3. Fix residual concurrency races (bug)
 
 **Context.** Commit `200772d` fixed the data race on `AudioPlayerManager`'s audio buffers,
@@ -191,3 +174,72 @@ progress bar advancing (audio is inaudible in a GIF, so make the moving progress
 icon state the visual proof). Save as `docs/demo.gif` (keep it under ~5 MB; `ffmpeg` +
 `gifski` or a screen-recording → GIF tool), embed near the top of README. Best done after
 task 9 so the recording shows the released build.
+
+## 11. Give the settings keys a single source of truth
+
+**Context.** The nine `UserDefaults` key strings exist in three hand-maintained copies:
+`@AppStorage` literals in `Sources/Views/SettingsView.swift:7-15`, `string(forKey:)` calls
+in `Sources/Managers/TTSNetworkManager.swift:22-35`, and `AppSettingsDefaults.keys` in
+`Tests/UserDefaultsSnapshot.swift`. Adding a tenth `@AppStorage` and forgetting the test
+list silently reintroduces task 2's bug (tests overwriting the developer's real settings),
+and nothing detects the omission.
+
+**Change.** Add a `SettingsKeys` enum in `Sources/Managers/` holding the key strings, and
+reference it from all three sites (`@AppStorage(SettingsKeys.ttsProvider)` etc.). Expose an
+`allKeys` collection so the test helper enumerates it instead of repeating the literals.
+
+**Done when.** No settings key string is written more than once; `AppSettingsDefaults.keys`
+is gone in favor of `SettingsKeys.allKeys`; `./check-coverage.sh` still passes.
+
+## 12. Reset `MockURLProtocol.requestHandler` between tests
+
+**Context.** `Tests/MockURLProtocol.swift:4` is a `static var` that no test ever clears, so a
+handler outlives the test class that installed it. This is not theoretical: with task 2's
+settings isolation in place, a `/v1/models` request dispatched by
+`SettingsViewTests.testProviderDidChangeAndTestVoice` raced the `XCTFail` handler left behind
+by `ServicesCoordinatorTests.swift:48-51`, failing the settings test with the services test's
+message. That test now installs its handler before issuing any request, but the hazard
+remains for every future test, and `startLoading`'s `fatalError` on a nil handler makes a
+naive reset unsafe.
+
+**Change.** Give `MockURLProtocol` a `reset()` that clears the handler, call it from a shared
+`setUp`/`tearDown` (an `XCTestCase` extension, or a base class), and replace the `fatalError`
+in `startLoading` with an `XCTFail`-style failure attributed to the running test plus a
+returned error, so a stray request names the offender instead of killing the process.
+
+**Done when.** No test depends on a handler set by another test; a request with no handler
+installed fails that test with a clear message rather than crashing the suite.
+
+## 13. Stop tests from making real network requests
+
+**Context.** `Tests/SettingsViewTests.swift:9` builds `TTSNetworkManager(configuration: .ephemeral)`
+without `MockURLProtocol`, then `testSettingsViewMethods` calls `syncSettings()` and
+`fetchMetadata()`. Those issue real outbound requests to `api.openai.com/v1/models` carrying
+the fake key `test-openai-key`. The suite is therefore slow, offline-hostile, and leaks a
+request to a third party on every run. `MenuBarViewTests.swift:13` and
+`MenuBarViewTests.swift:72` construct the manager the same way.
+
+**Change.** Route every `TTSNetworkManager` built in tests through `MockURLProtocol` (the
+config is already a one-liner) or, where the test genuinely does not care about the network,
+point it at a base URL that cannot resolve. Do not leave a code path where a unit test talks
+to a real endpoint.
+
+**Done when.** The full suite passes with the machine offline (`sudo ifconfig en0 down`, or
+Network Link Conditioner set to 100% loss), and no test names a real hostname.
+
+## 14. Stop tests from clobbering the real clipboard
+
+**Context.** Same bug class as task 2, one layer over: `Tests/MenuBarViewTests.swift:51-52`
+and `Tests/TextExtractionManagerTests.swift:11-13,21-22` call
+`NSPasteboard.general.clearContents()` and write their own strings, destroying whatever the
+developer had copied and never restoring it.
+
+**Change.** Either snapshot and restore the general pasteboard around each test (mirroring
+`UserDefaultsSnapshot`), or — cleaner — inject the pasteboard into `TextExtractionManager`
+(`init(pasteboard: NSPasteboard = .general)`) and hand tests a scratch
+`NSPasteboard(name:)` so the general one is never touched. Prefer injection: it removes the
+shared-state problem instead of papering over it, and matches the "side effects isolated"
+rule in `CLAUDE.md`.
+
+**Done when.** Copying a string, running `./check-coverage.sh`, and pasting yields the
+original string; no test writes to `NSPasteboard.general`.

@@ -218,18 +218,7 @@ final class TTSNetworkManagerTests: XCTestCase {
         // same keys so user-chosen settings survive an app restart even before the settings
         // window is opened. A regression here would silently fall back to hardcoded defaults
         // (tts-1/alloy) on every cold start until the user re-opens settings.
-        let keys = ["ttsProvider", "openaiModel", "openaiVoice", "apiKey",
-                    "geminiModel", "geminiVoice", "geminiAPIKey"]
-        let originals = keys.map { (key: $0, value: UserDefaults.standard.object(forKey: $0)) }
-        defer {
-            for (key, value) in originals {
-                if let value = value {
-                    UserDefaults.standard.set(value, forKey: key)
-                } else {
-                    UserDefaults.standard.removeObject(forKey: key)
-                }
-            }
-        }
+        isolateAppSettingsDefaults()
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]

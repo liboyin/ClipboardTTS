@@ -5,6 +5,8 @@ import SwiftUI
 final class SettingsViewTests: XCTestCase {
 
     func testSettingsViewMethods() {
+        isolateAppSettingsDefaults()
+
         let audioPlayer = AudioPlayerManager()
         let networkManager = TTSNetworkManager(configuration: .ephemeral)
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
@@ -42,18 +44,26 @@ final class SettingsViewTests: XCTestCase {
     }
 
     func testProviderDidChangeAndTestVoice() {
+        // Isolated even though this test writes nothing: SettingsView reads the provider from
+        // UserDefaults.standard, so without it the exercised code path depends on machine state.
+        isolateAppSettingsDefaults()
+
         let audioPlayer = AudioPlayerManager()
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let networkManager = TTSNetworkManager(configuration: config)
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
 
-        view.providerDidChange(to: "OpenAI")
-        view.providerDidChange(to: "Gemini")
-
+        // Install the handler before anything can issue a request: providerDidChange fetches the
+        // model list, and MockURLProtocol.requestHandler is a static that the previous test class
+        // leaves pointing at its own XCTFail. A request dispatched before this line races that
+        // stale handler and fails this test with another test's message.
         MockURLProtocol.requestHandler = { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
+
+        view.providerDidChange(to: "OpenAI")
+        view.providerDidChange(to: "Gemini")
 
         view.runTestVoice()
 
