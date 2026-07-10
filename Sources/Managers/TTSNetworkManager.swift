@@ -18,6 +18,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var errorData = Data()
     private var geminiBuffer = Data()
 
+    private let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
+    private var activeTaskIdentifier: Int?
+
     init(configuration: URLSessionConfiguration = .default) {
         let provider = UserDefaults.standard.string(forKey: "ttsProvider") ?? "OpenAI"
         if provider == "OpenAI" {
@@ -61,7 +64,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             return
         }
 
-        self.dataHandler = dataHandler
+        stateQueue.sync {
+            self.dataHandler = dataHandler
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -103,24 +108,32 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             return
         }
 
-        currentTask?.cancel()
+        let task = session.dataTask(with: request)
+        stateQueue.sync {
+            currentTask?.cancel()
+            currentTask = task
+            activeTaskIdentifier = task.taskIdentifier
 
-        isErrorResponse = false
-        errorData.removeAll()
-        geminiBuffer.removeAll()
+            isErrorResponse = false
+            errorData.removeAll()
+            geminiBuffer.removeAll()
+        }
 
         DispatchQueue.main.async {
             self.isStreaming = true
         }
 
         print("Starting TTS stream to \(baseURL) with model: \(model), voice: \(voice)")
-        currentTask = session.dataTask(with: request)
-        currentTask?.resume()
+        task.resume()
     }
 
     func stopStreaming() {
-        currentTask?.cancel()
-        currentTask = nil
+        stateQueue.sync {
+            currentTask?.cancel()
+            currentTask = nil
+            activeTaskIdentifier = nil
+            dataHandler = nil
+        }
         DispatchQueue.main.async {
             self.isStreaming = false
         }
@@ -130,55 +143,108 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
                     dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        if let httpResponse = response as? HTTPURLResponse {
-            print("Received HTTP Status Code: \(httpResponse.statusCode)")
-            if !(200...299).contains(httpResponse.statusCode) {
-                isErrorResponse = true
+        var shouldAllow = false
+        stateQueue.sync {
+            if dataTask.taskIdentifier == activeTaskIdentifier {
+                shouldAllow = true
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("Received HTTP Status Code: \(httpResponse.statusCode)")
+                    if !(200...299).contains(httpResponse.statusCode) {
+                        isErrorResponse = true
+                    }
+                }
             }
         }
-        completionHandler(.allow)
+        completionHandler(shouldAllow ? .allow : .cancel)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        if isErrorResponse {
-            errorData.append(data)
-        } else if isGeminiEndpoint {
-            geminiBuffer.append(data)
-        } else {
-            dataHandler?(data)
+        stateQueue.sync {
+            guard dataTask.taskIdentifier == activeTaskIdentifier else { return }
+            if isErrorResponse {
+                errorData.append(data)
+            } else if isGeminiEndpoint {
+                geminiBuffer.append(data)
+            } else {
+                dataHandler?(data)
+            }
+        }
+    }
+
+    struct TaskCompletionResult {
+        let audioData: Data?
+        let handler: ((Data) -> Void)?
+        let errorString: String?
+        let hadError: Bool
+        let isStale: Bool
+    }
+
+    private func processCompletedTask(_ task: URLSessionTask) -> TaskCompletionResult {
+        return stateQueue.sync {
+            if task.taskIdentifier != activeTaskIdentifier {
+                return TaskCompletionResult(audioData: nil, handler: nil, errorString: nil, hadError: false, isStale: true)
+            }
+
+            var audioData: Data?
+            if isGeminiEndpoint && !isErrorResponse {
+                audioData = extractGeminiAudioData(from: geminiBuffer)
+            }
+
+            var errorString: String?
+            if isErrorResponse {
+                errorString = String(data: errorData, encoding: .utf8)
+            }
+
+            let result = TaskCompletionResult(
+                audioData: audioData,
+                handler: dataHandler,
+                errorString: errorString,
+                hadError: isErrorResponse,
+                isStale: false
+            )
+
+            activeTaskIdentifier = nil
+            currentTask = nil
+            dataHandler = nil
+
+            return result
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let result = processCompletedTask(task)
+        if result.isStale { return }
+
+        if let audioData = result.audioData {
+            result.handler?(audioData)
+        }
+
+        if result.hadError {
+            let msg = result.errorString ?? "(unable to decode data)"
+            print("API Error Response: \(msg)")
+        }
+
         DispatchQueue.main.async {
             self.isStreaming = false
         }
 
-        if isGeminiEndpoint && !isErrorResponse {
-            if let json = try? JSONSerialization.jsonObject(with: geminiBuffer) as? [String: Any],
-               let candidates = json["candidates"] as? [[String: Any]],
-               let content = candidates.first?["content"] as? [String: Any],
-               let parts = content["parts"] as? [[String: Any]],
-               let inlineData = parts.first?["inlineData"] as? [String: Any],
-               let base64String = inlineData["data"] as? String,
-               let audioData = Data(base64Encoded: base64String) {
-                dataHandler?(audioData)
-            }
-        }
-
-        if isErrorResponse {
-            if let errorString = String(data: errorData, encoding: .utf8) {
-                print("API Error Response: \(errorString)")
-            } else {
-                print("API Error Response: (unable to decode data)")
-            }
-        }
-
         if let error = error {
             print("Task completed with error: \(error.localizedDescription)")
-        } else if !isErrorResponse {
+        } else if !result.hadError {
             print("Task completed successfully.")
         }
+    }
+
+    private func extractGeminiAudioData(from buffer: Data) -> Data? {
+        guard let json = try? JSONSerialization.jsonObject(with: buffer) as? [String: Any],
+              let candidates = json["candidates"] as? [[String: Any]],
+              let content = candidates.first?["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]],
+              let inlineData = parts.first?["inlineData"] as? [String: Any],
+              let base64String = inlineData["data"] as? String else {
+            return nil
+        }
+        return Data(base64Encoded: base64String)
     }
 
     struct OpenAIModelsResponse: Decodable {

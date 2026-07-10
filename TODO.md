@@ -15,35 +15,6 @@ Ground rules for every task below:
 
 ---
 
-## 3. Fix residual concurrency races (bug)
-
-**Context.** Commit `200772d` fixed the data race on `AudioPlayerManager`'s audio buffers,
-but the same pattern remains one layer up, plus one narrow window in the player:
-
-- `TTSNetworkManager.streamTTS` (`Sources/Managers/TTSNetworkManager.swift:106-118`)
-  resets `isErrorResponse` / `errorData` / `geminiBuffer` on the caller's thread while a
-  just-cancelled task's delegate callbacks may still be running on the session's delegate
-  queue (delegate queue is nil ⇒ URLSession's own serial background queue). A stale
-  callback can append to the freshly-cleared buffers or flip `isErrorResponse` for the new
-  request.
-- `stopStreaming()` (`:121-127`) cancels the task but never clears `dataHandler`, so a
-  late in-flight chunk can still call `scheduleAudio` and resurrect audio after a stop.
-- `AudioPlayerManager.stop()` (`Sources/Managers/AudioPlayerManager.swift:110-125`) calls
-  `playerNode.stop()` *before* the `bufferQueue.sync` clear; a `scheduleAudio` block
-  already queued on `bufferQueue` can schedule one more buffer after the stop.
-
-**Change.** Suggested approach (adapt if a simpler one holds up):
-- Confine all of `TTSNetworkManager`'s mutable per-request state to one serial context.
-  A clean option is a generation/request-ID counter: increment on every `streamTTS` /
-  `stopStreaming`, capture it in the delegate callbacks, and no-op when stale. This also
-  fixes the `dataHandler` leak (nil it or gate it on the generation).
-- Same generation idea in `AudioPlayerManager`: `stop()` bumps a generation inside
-  `bufferQueue`; queued `scheduleAudio` blocks compare and drop.
-
-**Done when.** All existing tests pass, new tests cover "chunk arrives after stop is a
-no-op" for both managers, and the test scheme runs clean under Thread Sanitizer
-(`xcodebuild test -enableThreadSanitizer YES`, or toggle in the scheme).
-
 ## 4. Key security: Keychain + header + no key logging
 
 **Context.** API keys are stored in plaintext `UserDefaults` (via `@AppStorage` in

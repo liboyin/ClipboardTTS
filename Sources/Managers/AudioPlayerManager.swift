@@ -26,6 +26,7 @@ class AudioPlayerManager: ObservableObject {
     private var accumulatedData = Data()
     private var unprocessedData = Data()
     private var baseProgressOffset: Double = 0.0
+    private var scheduleGeneration: Int = 0
 
     private var progressTimer: Timer?
 
@@ -52,11 +53,22 @@ class AudioPlayerManager: ObservableObject {
         }
     }
 
-    func scheduleAudio(data: Data) {
+    func startNewStream() -> Int {
+        return bufferQueue.sync {
+            scheduleGeneration += 1
+            accumulatedData.removeAll()
+            unprocessedData.removeAll()
+            return scheduleGeneration
+        }
+    }
+
+    func scheduleAudio(data: Data, streamGeneration: Int) {
         guard let format = audioFormat else { return }
 
         // Runs on the network delegate's background queue; serialize buffer access via bufferQueue.
         bufferQueue.async {
+            guard self.scheduleGeneration == streamGeneration else { return }
+
             self.accumulatedData.append(data)
             self.unprocessedData.append(data)
 
@@ -110,6 +122,7 @@ class AudioPlayerManager: ObservableObject {
     func stop() {
         playerNode.stop()
         bufferQueue.sync {
+            scheduleGeneration += 1
             accumulatedData.removeAll()
             unprocessedData.removeAll()
         }

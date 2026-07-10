@@ -42,8 +42,9 @@ final class ServicesCoordinator: ObservableObject {
     private func speak(_ text: String) {
         networkManager.stopStreaming()
         audioPlayer.stop()
+        let gen = audioPlayer.startNewStream()
         networkManager.streamTTS(text: text) { [audioPlayer] data in
-            audioPlayer.scheduleAudio(data: data)
+            audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
         }
     }
 }

@@ -53,7 +53,8 @@ final class AudioPlayerManagerTests: XCTestCase {
         let player = AudioPlayerManager()
         let sampleData = Data(repeating: 0, count: 1024)
 
-        player.scheduleAudio(data: sampleData)
+        let gen = player.startNewStream()
+        player.scheduleAudio(data: sampleData, streamGeneration: gen)
 
         let expectation = XCTestExpectation(description: "Audio scheduled")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -65,11 +66,31 @@ final class AudioPlayerManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    func testScheduleAudioDroppedAfterStop() {
+        // WHY: Ensure that scheduleAudio calls from stale network requests are ignored after stop() is called.
+        let player = AudioPlayerManager()
+        let gen = player.startNewStream()
+
+        player.stop()
+
+        player.scheduleAudio(data: Data(repeating: 0, count: 1024), streamGeneration: gen)
+
+        let expectation = XCTestExpectation(description: "Audio should not be scheduled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertFalse(player.hasAudio)
+            XCTAssertEqual(player.bufferDuration, 0.0)
+            XCTAssertFalse(player.isPlaying)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
     func testSeek() {
         // WHY: User seeking the slider should change playbackProgress and restart playing.
         let player = AudioPlayerManager()
         let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
-        player.scheduleAudio(data: sampleData)
+        let gen = player.startNewStream()
+        player.scheduleAudio(data: sampleData, streamGeneration: gen)
 
         let expectation = XCTestExpectation(description: "Wait for audio schedule")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {

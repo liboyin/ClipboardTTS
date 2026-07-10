@@ -73,7 +73,8 @@ final class MenuBarViewTests: XCTestCase {
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         // Buffer audio so hasAudio == true (the "Clear Buffer" precondition).
-        audioPlayer.scheduleAudio(data: Data(repeating: 0, count: 2048))
+        let gen = audioPlayer.startNewStream()
+        audioPlayer.scheduleAudio(data: Data(repeating: 0, count: 2048), streamGeneration: gen)
         let buffered = XCTestExpectation(description: "Audio buffered")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             XCTAssertTrue(audioPlayer.hasAudio)

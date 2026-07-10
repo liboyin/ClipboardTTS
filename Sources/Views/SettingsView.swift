@@ -137,8 +137,9 @@ struct SettingsView: View {
         )
         networkManager.stopStreaming()
         audioPlayer.stop()
+        let gen = audioPlayer.startNewStream()
         networkManager.streamTTS(text: "Hello! This is a test of your text to speech configuration.") { data in
-            audioPlayer.scheduleAudio(data: data)
+            audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
         }
     }
 

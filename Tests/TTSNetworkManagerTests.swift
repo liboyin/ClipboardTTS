@@ -115,6 +115,33 @@ final class TTSNetworkManagerTests: XCTestCase {
         wait(for: [expectation2], timeout: 1.0)
     }
 
+    func testNetworkManagerIgnoresDataAfterStop() {
+        // WHY: Stale delegate callbacks from a cancelled URLSessionTask should not invoke dataHandler.
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let manager = TTSNetworkManager(configuration: config)
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+
+        var dataReceived = false
+        MockURLProtocol.requestHandler = { _ in
+            Thread.sleep(forTimeInterval: 0.1)
+            return (HTTPURLResponse(), Data("audiochunk".utf8))
+        }
+
+        manager.streamTTS(text: "Test cancel data") { _ in
+            dataReceived = true
+        }
+
+        manager.stopStreaming()
+
+        let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            XCTAssertFalse(dataReceived)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
     func testNetworkManagerFormatsGeminiRequestCorrectly() {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
