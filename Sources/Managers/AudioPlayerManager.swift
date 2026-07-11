@@ -120,12 +120,17 @@ class AudioPlayerManager: ObservableObject {
     }
 
     func stop() {
-        playerNode.stop()
+        // Bump the generation and clear buffers first, then stop the node. bufferQueue is a serial
+        // FIFO: any scheduleAudio block already queued runs before this sync block and may still call
+        // playerNode.scheduleBuffer, but the following playerNode.stop() flushes that buffer. Blocks
+        // queued after the bump fail the generation guard and drop. Reversing the order would let an
+        // in-flight scheduleAudio schedule one buffer onto the node after it was stopped.
         bufferQueue.sync {
             scheduleGeneration += 1
             accumulatedData.removeAll()
             unprocessedData.removeAll()
         }
+        playerNode.stop()
         baseProgressOffset = 0.0
 
         DispatchQueue.main.async {

@@ -64,10 +64,6 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             return
         }
 
-        stateQueue.sync {
-            self.dataHandler = dataHandler
-        }
-
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -110,9 +106,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
         let task = session.dataTask(with: request)
         stateQueue.sync {
+            // Swap the task identifier and handler together so a still-active previous task cannot
+            // deliver its data to the new handler in the window between the two.
             currentTask?.cancel()
             currentTask = task
             activeTaskIdentifier = task.taskIdentifier
+            self.dataHandler = dataHandler
 
             isErrorResponse = false
             errorData.removeAll()

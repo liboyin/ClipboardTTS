@@ -116,13 +116,19 @@ final class TTSNetworkManagerTests: XCTestCase {
     }
 
     func testNetworkManagerIgnoresDataAfterStop() {
-        // WHY: Stale delegate callbacks from a cancelled URLSessionTask should not invoke dataHandler.
+        // WHY: A delegate callback for a task that is no longer active (e.g. one cancelled by
+        // stopStreaming) must not invoke dataHandler, or a stale chunk resurrects audio after a stop.
+        // We drive the delegate method directly with a task whose identifier does not match the
+        // active one, because URLSession suppresses callbacks for a cancelled task, so the real
+        // network path can never exercise the stale-callback guard.
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let manager = TTSNetworkManager(configuration: config)
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
 
         var dataReceived = false
+        // Sleep so the real task stays in-flight until stopStreaming cancels it, keeping the only
+        // path to dataHandler the stale delegate call below.
         MockURLProtocol.requestHandler = { _ in
             Thread.sleep(forTimeInterval: 0.1)
             return (HTTPURLResponse(), Data("audiochunk".utf8))
@@ -133,6 +139,11 @@ final class TTSNetworkManagerTests: XCTestCase {
         }
 
         manager.stopStreaming()
+
+        // Simulate a late chunk arriving for the now-cancelled task. Its identifier cannot match the
+        // active one (stopStreaming cleared it), so the guard must drop it.
+        let staleTask = URLSession.shared.dataTask(with: URL(string: "https://mock.api/v1/audio/speech")!)
+        manager.urlSession(URLSession.shared, dataTask: staleTask, didReceive: Data("late chunk".utf8))
 
         let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
