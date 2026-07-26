@@ -1,46 +1,49 @@
 ---
 name: adversarial-review
-description: Read-only, multi-model review and triage of a non-trivial code, test, or configuration change.
+description: Read-only adversarial review and triage of a non-trivial code change.
 ---
 
 # Adversarial Review
 
-Return a verified adversarial review report without editing, fixing, stashing, formatting, or otherwise writing to the repository. Reviewers MAY propose remedies but MUST NOT implement them.
-
-## Input
-
-The caller provides the purpose; target (dirty tree, commit, or range); in-scope paths; unrelated dirty paths to preserve and ignore; accepted out-of-scope findings not to re-raise; and any prior mutation evidence. Ask only if target or scope is unclear; report other assumptions.
+Return a verified report without changing the repository. The reviewer MAY propose remedies but MUST NOT implement them.
 
 ## Procedure
 
-1. **Snapshot and read.** Capture `git status`; SHA-256 hashes of in-scope and dirty tracked files; path/status metadata (not content) of ignored untracked files; and baseline PIDs/listeners if a command might start a service. Read the full target diff (staged changes and in-scope untracked files included for worktrees), relevant source/tests, `README.md`, and `TODO.md`. Read `project.yml` and the applicable SwiftLint configuration when they affect the change or its verification. Do not read ignored untracked content.
+1. **Freeze and snapshot.** The main agent records `git status`, hashes of dirty tracked files, path metadata for untracked files, and relevant PIDs/listeners, then freezes repository edits.
 
-2. **Dispatch reviewers in parallel.** Give the complete change and identical review prompt (apart from identity and separate scratch paths) to two isolated reviewers from different model families; never split files. Select the first reviewer from the main agent:
+2. **Dispatch one reviewer.** Tell it to read this skill but execute only step 3 and return the defined report; the main agent owns steps 1, 2, and 4. Launch without inherited conversation history and select the model by the main agent's harness:
 
    - **Codex:** `gpt-5.6-sol` high reasoning via tool use.
    - **Claude Code:** `claude-fable-5` high reasoning via tool use.
 
-   Use **Gemini 3.1 Pro High** as the second reviewer via Antigravity CLI:
+   Pass only:
 
-   ```bash
-   agy --mode plan --sandbox --model gemini-3.1-pro-high --print-timeout 15m \
-     -p "$(cat <prompt-file>)" < /dev/null
-   ```
+   - Repository path and target: dirty tree, commit, or range.
+   - In-scope paths and any unrelated dirty paths to ignore.
+   - Purpose of the change in a few sentences.
 
-   Never pass `--dangerously-skip-permissions`; request senior review, not “vulnerability hunting.” Any wrapper timeout MUST exceed `--print-timeout` (exit 124 belongs to the wrapper). Retry one internal response timeout with the bounded-command rule restated. Antigravity CLI's exit status does not report failure — a blocked, unauthenticated, or timed-out run can still exit 0 — so judge every run by its output file. A backgrounded wrapper writes **nothing** to the harness's own task file until it exits, so that file is not a progress signal: check liveness with `ps -eo pid,etime,pcpu,cmd` and the output file's mtime, and wait on the resolved PID (`while kill -0 <pid>; do sleep 20; done`). If either required reviewer or model family is unavailable or remains unreachable after that retry, you MUST stop and ask the user what to do; do not substitute, proceed with one reviewer, or issue a verdict without their direction. Record the user's decision in the report.
+   Add undocumented constraints, accepted findings not to re-raise, or prior mutation evidence only when nonempty. Do not inline the diff, full conversation, architecture summaries available in the repository, suspected defects, or the main agent's conclusions.
 
-   The prompt MUST include all caller input, repository and scratch paths, the report fields, and these rules:
+   The reviewer MAY ask for further information when missing context could affect a finding or verdict. Reply with the minimum factual context and record the exchange under **Assumptions**.
 
-   - Keep commands foreground and bounded; change neither the repository nor another reviewer's scratch. Compare repository status and hashes at exit.
-   - Judge purpose, correctness, regressions, simplicity, documentation consistency, design/operational anti-patterns, and testability. For Swift code, scrutinize actor and queue isolation, object lifetimes, callback ordering, cancellation, shared macOS state, and AppKit/SwiftUI lifecycle assumptions where relevant. Check that XCTest assertions can fail for their stated reason rather than being tautological. Measure factual claims; induce failures only in a safe, controlled setup.
-   - You MAY propose remedies, but MUST NOT implement them. Present each remedy as a proposal for the main-agent to review.
-   - For changed code/tests, mutation-test new assertions only in scratch. Discover and copy every build- or runtime-read path; the current minimum is `Sources/`, `Tests/`, `project.yml`, `.swiftlint.yml`, `Tests/.swiftlint.yml`, and `check-coverage.sh`. Generate the scratch Xcode project with `xcodegen generate`, then pass the baseline `./check-coverage.sh` and `swiftlint --strict`. Make a loud mutant fail to prove Xcode built the scratch sources, restore it, then test an applicable revert mutant unless evidence was supplied and a plausible future-regression mutant. Report kills and survivors.
+   If the selected model is unavailable, stop and ask the user. Do not substitute or issue a verdict.
 
-   Freeze repository edits until both reviewers return. Serialize repository-root coverage runs because they share `build/TestResults.xcresult`; distinct scratch roots may test concurrently.
+3. **Review.** The reviewer:
 
-3. **Reclaim and verify.** Compare exit status and hashes with entry. Remove and verify only scratch artifacts and processes/listeners proven from the baseline and recorded PIDs to belong to this review; MUST NOT use `pkill -f`. Any unexplained repository change blocks the review.
+   - Reads `AGENTS.md`, the complete target diff, in-scope untracked files, and relevant source, tests, documentation, and configuration. Never reads ignored untracked content.
+   - Takes a constructively adversarial stance: assume the change may be wrong and actively try to falsify it with counterexamples, boundary and failure cases, invariant violations, state transitions, tests that can pass for the wrong reason, and mutants. For Swift, scrutinize isolation, lifetimes, callback ordering, cancellation, shared macOS state, and AppKit/SwiftUI lifecycle assumptions where relevant. Never manufacture findings, treat taste as a defect, or inflate severity; every finding needs evidence and proportional impact.
+   - Uses these questions to navigate the review:
+     - Does it achieve the intended purpose?
+     - Is it bug-free?
+     - Can it be simplified?
+     - Is it consistent with the documentation?
+     - Are there design flaws or anti-patterns?
+     - Are there design choices that make testing or validation unnecessarily difficult?
+     - Anything else a senior reviewer would push back on? Use judgment.
+   - Verifies claims with safe, bounded commands. For changed assertions, uses a scratch copy to pass the baseline suite, prove the scratch with a loud mutant, and test applicable revert and future-regression mutants.
+   - Keeps the repository read-only, cleans up only its recorded scratch artifacts and processes, compares repository status and hashes at exit, and returns the report below.
 
-4. **Verify, triage, and report.** Treat reviewer claims as hypotheses: validate each diagnosis against the diff/source and, when safe, by measurement in scratch; check third-party behavior in installed source or version-matched official docs. Review each proposed remedy separately from the diagnosis before accepting, implementing, or including it in the final report. Classify each verified finding once: **Blocking** for bugs, broken tests, requirements/contracts/security failures, misleading claims, or `AGENTS.md` MUST violations; **Non-blocking** for deferrable improvements; **Nit** for cheap style/taste only. Record rejected hypotheses under **Dismissed**.
+4. **Verify and triage.** The main agent confirms repository integrity and treats every reviewer claim and remedy as a hypothesis to validate. Classify each verified finding once: **Blocking** for bugs, broken tests, requirements, security, misleading claims, or `AGENTS.md` MUST violations; **Non-blocking** for deferrable improvements; **Nit** for cheap style only. Record rejected hypotheses under **Dismissed**. Any unexplained repository change blocks the review.
 
 ## Report
 
@@ -50,7 +53,7 @@ Return this structure without rewritten code. Every finding MUST cite a path and
 ## Adversarial Review Report
 **Purpose:** ...
 **Target:** ...
-**Reviewers:** <models/tools; substitutions/failures>
+**Reviewer:** <model/tool; failure>
 **Assumptions:** ...
 **Verification:** <commands and results>
 
@@ -63,5 +66,5 @@ Return this structure without rewritten code. Every finding MUST cite a path and
 ### Dismissed
 <hypothesis and measured reason>
 ### Verdict
-<No blocking findings | N blocking findings — fix and re-review | Review blocked — model availability or repository integrity>
+<No blocking findings | N blocking findings — fix and re-review | Review blocked — reviewer availability or repository integrity>
 ```
