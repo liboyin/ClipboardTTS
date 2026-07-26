@@ -1,216 +1,711 @@
-# TODO — Hand-over Document
+# TODO — Remediation Hand-over
 
-Follow-up work for ClipboardTTS, written to be executable by any agent or human without
-further context. Read `AGENTS.md` (workflow rules) and `README.md` (architecture, build &
-test commands) before starting.
+This document is the executable plan for resolving the findings from the whole-project
+adversarial review. It replaces the previous hand-over, whose task list and line references
+no longer matched the repository.
 
-Ground rules for every task below:
+Read `AGENTS.md`, `USER_STORIES.md`, and `README.md` before starting. `USER_STORIES.md`
+owns product behavior; `README.md` owns current architecture and operating instructions.
+Keep those documents current rather than duplicating their content here.
 
-- Tasks are independent unless a dependency is stated. Execute one task per commit.
-- After any code change: `xcodegen generate` (if `project.yml` changed), then
-  `./check-coverage.sh` must pass (runs tests + enforces ≥85% line coverage on
-  `Sources/Managers/`), and `swiftlint --strict` must be clean.
-- Delete a task from this file in the same commit that completes it.
-- Items marked **[needs user decision]** have an open question — ask before implementing.
+## Working rules
+
+- Execute tasks in the order shown unless a task explicitly says it is independent.
+- There are exactly 16 numbered tasks. Each task MUST be one self-contained implementation
+  commit: do not combine tasks in one commit, split a task across commits, or include code
+  belonging to a later task.
+- Every task must leave the repository coherent and independently pass all required tests,
+  coverage, lint, and review gates. If that is impossible within the stated boundary, stop
+  and ask the user to revise the task instead of borrowing changes from another task.
+- Before implementation, re-read every path named by the task because line numbers and
+  surrounding code may have moved.
+- Add tests that encode the user or system consequence of the behavior. Mutation-test every
+  new assertion in an isolated scratch copy as required by `AGENTS.md`.
+- Unit tests MUST NOT contact external services, write to `NSPasteboard.general`, use the
+  developer's Keychain, or leave changes in the app's real `UserDefaults` domain.
+- Documentation and tests required to explain and verify a task belong in that task's commit.
+  None of the 16 implementation tasks may use the documentation-only review exemption for the
+  task as a whole.
+- Remove a completed task from this file in its implementation commit. Move durable decisions
+  or architectural facts into `README.md` rather than leaving completed history here.
+
+## Per-task commit checklist
+
+Complete this checklist separately for each numbered task:
+
+1. Start from the commits for its declared dependencies and confirm the worktree state.
+2. Implement only that task, its focused tests, required documentation, and removal of its
+   completed entry from this file.
+3. Mutation-test every new assertion in an isolated scratch copy, including a plausible future
+   regression and the trade-off introduced by the constraint.
+4. Generate the project when `project.yml` changed or the generated project is absent:
+
+   ```bash
+   xcodegen generate
+   ```
+
+5. Run the task-specific tests plus both complete repository gates:
+
+   ```bash
+   ./check-coverage.sh
+   swiftlint --strict
+   ```
+
+   Inspect the per-file coverage output rather than relying only on the aggregate result.
+6. Before staging or committing, run the adversarial-review skill on the task's complete dirty
+   tree. Give the reviewer that task's purpose and treat still-numbered tasks in this document
+   as known, unchanged, out-of-scope work; this must never hide a defect introduced, exposed,
+   or worsened by the current task.
+7. Fix every blocking finding and trivial non-blocking finding, rerun the tests and lint, and
+   repeat review. Any edit made in response to review invalidates the earlier gate results.
+   Continue until no blocking finding remains; ask the user to fix, defer, or ignore any other
+   non-blocking finding.
+8. Only after the final gates and review succeed, stage explicit paths, inspect the staged diff
+   and `git status`, and create that task's single commit using the `AGENTS.md` message format.
+   Never commit with a failed gate, an unexplained repository change, or a pending review
+   disposition.
+
+## Work map
+
+| Issue or requested change | Classification | Remediation task |
+| --- | --- | --- |
+| Active requests change decoder when provider settings change | Blocking | 3 |
+| Seeking to the buffered end leaves false playing state | Blocking | 10 |
+| Custom requests send empty model and voice values | Blocking | 7 |
+| API keys use plaintext preferences, URL queries, and unsafe logging | Blocking | 8 |
+| Gemini buffers the full response instead of streaming | Blocking | 9 |
+| Network and API failures are invisible in the UI | Blocking | 6 |
+| Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
+| Required voice, icon, and About UI is missing | Blocking | 13–15 |
+| Tests can use live network, shared handlers, and the real clipboard | Blocking | 1 |
+| Stale metadata responses can replace the current provider's models | Blocking | 5 |
+| Settings keys have three hand-maintained definitions | Non-blocking | 2 |
+| The streaming callback executes while the state lock is held | Non-blocking | 4 |
+| The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
+| Playback starts immediately on the first playable packet | Requested implementation change | 12 |
+
+## Decisions already made
+
+- The Custom provider's PCM sample rate will be configurable. OpenAI and Gemini remain fixed
+  at 24 kHz unless their documented response formats change.
+- The Custom provider follows the OpenAI-compatible request contract: model and voice are
+  configurable, required values and are included in every Custom speech request.
+- Changing audio format invalidates buffered audio. Rebuilding the graph therefore stops
+  playback and clears the buffer.
+- The progress slider remains a product requirement, but elapsed and remaining time labels do
+  not. Do not add time-label UI unless `USER_STORIES.md` changes again.
+- Automatic playback will wait 0.1 seconds after the first playable audio packet arrives.
+  This is an implementation constraint intended to accumulate a small startup buffer, not a
+  user story.
+- API secret values belong in the Keychain, not `UserDefaults`, URLs, logs, fixtures, or
+  committed files. Tests may use unmistakably fake tokens.
+- Do not switch the project to Swift 6 as part of this remediation. First make the Swift 5
+  build clean with complete concurrency checking; a language-mode migration is separate work.
 
 ---
 
-## 4. Key security: Keychain + header + no key logging
+## Phase 0 — Make verification safe
 
-**Context.** API keys are stored in plaintext `UserDefaults` (via `@AppStorage` in
-`Sources/Views/SettingsView.swift:9-11` and read in
-`Sources/Managers/TTSNetworkManager.swift:21-38`). The Gemini key is embedded in the URL
-query string (`:57`), which leaks into proxies and any log line that prints the URL — and
-`streamTTS` does exactly that when the URL fails to parse (`:60`).
+### 1. Make the complete unit-test suite hermetic
 
-**Change.** Three parts, in increasing size:
-1. **Never log key material.** In `streamTTS`'s failure path, log a redacted URL or just
-   the base URL, never the composed `urlString`.
-2. **Gemini key via header.** Send `x-goog-api-key: <key>` instead of `?key=`. Update the
-   URL assertion in `Tests/TTSNetworkManagerTests.swift` (`testNetworkManagerFormatsGeminiRequestCorrectly`
-   and `testNetworkManagerInitReadsProviderSpecificDefaults`) to expect the header.
-3. **Keychain storage.** Replace the three `@AppStorage` key fields with a small
-   Keychain-backed store (a `KeychainStore` type in `Sources/Managers/` wrapping
-   `SecItemAdd`/`SecItemCopyMatching`/`SecItemUpdate`, service =
-   `com.clipboardtts.ClipboardTTSApp`, one account per provider). `TTSNetworkManager.init`
-   reads keys from it instead of `UserDefaults`. Include a one-time migration: if a legacy
-   `UserDefaults` key exists, move it into the Keychain and delete the default.
-   Keep non-secret settings (provider, model, voice, base URL) in `UserDefaults`/`@AppStorage`.
+**Classification:** Blocking
 
-**Done when.** No API key ever appears in `UserDefaults`, URLs, or log output; legacy keys
-are migrated on first run; `KeychainStore` has unit tests (it lives in `Sources/Managers/`,
-so it is inside the coverage gate); all existing tests updated and passing.
+**Depends on:** Nothing
 
-## 5. Surface API/network errors in the UI
+**Problem.**
 
-**Context.** Every failure path in `TTSNetworkManager` only `print()`s (invalid URL `:60`,
-JSON encode failure `:102`, non-2xx response `:169-175`, transport error `:177-178`). A
-user with a bad API key clicks "Speak Copied Text" and nothing happens, with no feedback —
-which also makes the USER_STORIES requirement "start streaming within 2 seconds"
-unverifiable by the user.
+- `MockURLProtocol.requestHandler` is process-global, is not reset, and calls `fatalError`
+  when no handler is installed.
+- `SettingsViewTests.testSettingsViewMethods` creates an ordinary ephemeral session and calls
+  metadata methods that can reach the real OpenAI API.
+- `MenuBarViewTests` and `TextExtractionManagerTests` clear and write
+  `NSPasteboard.general`, destroying the developer's clipboard contents.
+- These hazards prevent safe use of the mandatory full-suite gate.
 
-**Change.** Add `@Published var lastError: String?` to `TTSNetworkManager`, set on the
-main queue in each failure path (clear it at the start of `streamTTS`), and render it in
-`MenuBarView` (e.g. a small red `Text` under the buttons, visible only when non-nil).
-Prefer a short human-readable message (HTTP status + first line of the error body) over
-raw JSON.
+**Required change.**
 
-**Done when.** Pointing the app at a bad key/endpoint shows the error in the dropdown;
-unit tests assert `lastError` is set for non-2xx responses and cleared on the next
-successful request (extend `testNetworkManagerHandlesAPIError`).
+1. Add a single test helper for creating `TTSNetworkManager` with an ephemeral
+   `URLSessionConfiguration` whose protocol classes contain `MockURLProtocol`.
+2. Use that helper for every network manager created by tests, even where the current test
+   does not expect a request. A future code path must fail locally rather than escape to the
+   network.
+3. Give `MockURLProtocol` synchronized install/reset behavior. Reset it in test setup and
+   teardown, and replace the nil-handler `fatalError` with a deterministic URL-loading error
+   that fails the responsible test without terminating the process.
+4. Ensure a handler from one test cannot satisfy or fail a later test. If the test runner can
+   execute these cases concurrently, do not rely on an unsynchronized shared static variable.
+5. Inject a minimal pasteboard-reading dependency into `TextExtractionManager`, with a
+   production adapter that uses `.general`. Give tests a deterministic fake or uniquely named
+   scratch pasteboard and pass that manager into `MenuBarView`.
+6. Preserve the existing `UserDefaultsSnapshot` isolation until Task 2 centralizes its keys.
 
-## 6. Restore streaming for Gemini
+**Tests and falsification.**
 
-**Context.** `README.md` names minimal time-to-first-byte as a primary design goal, and
-the OpenAI path honors it via chunked PCM. The Gemini path does not: it calls
-`:generateContent` and buffers the entire response, decoding audio only in
-`didCompleteWithError` (`Sources/Managers/TTSNetworkManager.swift:157-167`). Long texts
-wait for the full synthesis before the first sound.
+- A request with no installed mock handler reports a controlled test failure/error rather
+  than crashing.
+- A second test cannot observe the first test's handler.
+- Clipboard extraction and menu-bar end-to-end tests pass with a named scratch pasteboard.
+- A mutation that ignores the injected dependency and reads `.general` must fail against a
+  deterministic fake value.
+- Search the test tree after implementation: no test may write to `NSPasteboard.general`,
+  and every test-created network session must be mock-routed.
 
-**Change.** Switch the Gemini URL to `:streamGenerateContent?alt=sse` and parse the SSE
-stream incrementally in `urlSession(_:dataTask:didReceive:)`: buffer bytes until a
-complete `data: {...}\n\n` event, JSON-decode it, extract
-`candidates[0].content.parts[0].inlineData.data`, base64-decode, and forward to
-`dataHandler` per event. Verify against current Google GenAI docs (fetch them — payload
-shapes change) that audio chunks are actually emitted incrementally for TTS models, and
-mind base64 padding: only decode complete events, never partial buffers.
+**Done when.**
 
-**Done when.** A `MockURLProtocol` test feeding two SSE events asserts `dataHandler` fires
-once per event (not once at completion); manual test with a real Gemini key starts audio
-before the response finishes.
+- `./check-coverage.sh` can be run without external network traffic or changes to the
+  developer's clipboard, settings, or Keychain.
+- All existing tests pass in any supported order, and a missing network mock cannot terminate
+  the test process.
 
-## 7. Make the audio sample rate configurable
+## Phase 1 — Establish shared configuration
 
-**Context.** `AudioPlayerManager.setupEngine` hardcodes 24 kHz / mono / 16-bit PCM
-(`Sources/Managers/AudioPlayerManager.swift:40`). That matches OpenAI's `pcm` format and
-Gemini's TTS output, but a *Custom* OpenAI-compatible endpoint returning 22.05/44.1 kHz
-will play at the wrong speed and pitch with no error.
-(Decision resolved with the user: make it configurable; do not just document it.)
+### 2. Give persisted settings one source of truth
 
-**Change.**
-- Add a "Sample Rate (Hz)" field to the **Custom** provider section of
-  `Sources/Views/SettingsView.swift` (persisted via `@AppStorage("customSampleRate")`,
-  default 24000; validate it parses to a sane positive value, e.g. 8000–48000, and fall
-  back to 24000 otherwise). OpenAI and Gemini remain fixed at 24 kHz — no UI for them.
-- Plumb the value into `AudioPlayerManager` (e.g. `func setSampleRate(_ hz: Double)`),
-  called from `SettingsView.syncSettings()`. On change, the engine graph must be rebuilt:
-  nodes are connected with a fixed `AVAudioFormat`, so stop the player, disconnect,
-  reconnect with the new format, and reset buffered state (a format change mid-buffer is
-  not meaningful — treat it like `stop()`).
-- The frame math in `scheduleAudio`, `seek`, and the progress timer already derives from
-  `format.sampleRate`, so it adapts automatically once `audioFormat` is rebuilt — verify,
-  don't assume.
+**Classification:** Non-blocking, scheduled early because Tasks 7, 8, 11, and 13 depend on it
 
-**Done when.** A custom endpoint at 22.05 or 44.1 kHz plays at correct speed/pitch; unit
-tests cover `setSampleRate` (bufferDuration math at a non-default rate, and that a rate
-change resets playback state); README "Design Assumptions" documents the default and the
-Custom-provider override; `./check-coverage.sh` still passes.
+**Depends on:** Task 1
 
-## 8. Add the AGPL-3.0 license
+**Problem.** The same settings-key strings are repeated in `SettingsView`,
+`TTSNetworkManager`, and `Tests/UserDefaultsSnapshot`. Adding a key in only one or two places
+can make tests depend on or overwrite the developer's actual configuration.
 
-(Decision resolved with the user: GNU Affero General Public License v3.0.)
+**Required change.**
 
-Add a `LICENSE` file containing the verbatim AGPL-3.0 text from
-<https://www.gnu.org/licenses/agpl-3.0.txt> (do not paraphrase or reformat). Add a short
-"License" section to README stating the project is licensed under AGPL-3.0, copyright
-Libo Yin. Optionally add the standard per-project AGPL notice block (program name,
-copyright line, warranty disclaimer) to the README rather than to every source file.
+1. Add a `SettingsKeys` namespace in production code containing every persisted non-secret
+   key and the legacy secret-key names needed by Task 8's migration.
+2. Expose an `allUserDefaultsKeys` collection used by test isolation.
+3. Replace literals in `@AppStorage`, `TTSNetworkManager`, and `UserDefaultsSnapshot`.
+4. When later tasks add Custom model, voice, or sample-rate settings, add them only through
+   this namespace.
+5. Keep Keychain account identifiers separate from `UserDefaults` keys so the storage
+   boundary is explicit.
 
-## 9. Publish a GitHub Release with a notarised .dmg
+**Tests and falsification.**
 
-**Context.** `package.sh` currently produces an ad-hoc-signed .app that requires users to
-strip the quarantine attribute manually. A notarised .dmg removes that friction.
-**Prerequisite:** an Apple Developer Program membership and a "Developer ID Application"
-certificate in the login keychain — confirm with the user that these exist before starting.
+- Test that `allUserDefaultsKeys` contains every declared preference key exactly once.
+- Prove snapshot restore behavior for both originally present and originally absent values.
+- Mutation-test omission of a newly introduced key from the isolation collection.
 
-**Change.**
-- Extend `package.sh` (or add `release.sh`) to: build Release signed with the Developer ID
-  identity and hardened runtime (`CODE_SIGN_IDENTITY="Developer ID Application: ..."`,
-  `OTHER_CODE_SIGN_FLAGS=--options=runtime`), wrap the .app in a .dmg (`hdiutil create`),
-  submit with `xcrun notarytool submit --wait` (needs an App Store Connect API key or
-  app-specific password — ask the user), then `xcrun stapler staple` the .dmg.
-- Create the GitHub release: `gh release create v1.0 <dmg> --title ... --notes ...`.
-  Update the version in `Sources/Info.plist` / `project.yml` if it is no longer 1.0.
-- Update README's distribution section (the `xattr` instructions become the fallback for
-  source builds only).
+**Done when.** Each persisted setting string has one declaration, test isolation enumerates
+that source, and no production or test file carries a second literal copy.
 
-**Done when.** `spctl --assess --type open --context context:primary-signature <dmg>`
-passes, a fresh macOS user can download and open the app with no Terminal steps, and the
-release is live on GitHub.
+## Phase 2 — Repair network state and failure behavior
 
-## 10. Add a demo GIF to the README
+### 3. Bind response parsing to immutable per-request context
 
-Record ~10 seconds of real usage: select text in an app → menu bar → "Speak Copied Text" →
-progress bar advancing (audio is inaudible in a GIF, so make the moving progress slider and
-icon state the visual proof). Save as `docs/demo.gif` (keep it under ~5 MB; `ffmpeg` +
-`gifski` or a screen-recording → GIF tool), embed near the top of README. Best done after
-task 9 so the recording shows the released build.
+**Classification:** Blocking
 
-## 11. Give the settings keys a single source of truth
+**Depends on:** Tasks 1–2
 
-**Context.** The nine `UserDefaults` key strings exist in three hand-maintained copies:
-`@AppStorage` literals in `Sources/Views/SettingsView.swift:7-15`, `string(forKey:)` calls
-in `Sources/Managers/TTSNetworkManager.swift:22-35`, and `AppSettingsDefaults.keys` in
-`Tests/UserDefaultsSnapshot.swift`. Adding a tenth `@AppStorage` and forgetting the test
-list silently reintroduces task 2's bug (tests overwriting the developer's real settings),
-and nothing detects the omission.
+**Problem.** `streamTTS` chooses a request format from the current provider, but URL-session
+delegate callbacks later re-read mutable manager settings. Switching provider during an
+active request can forward Gemini JSON as PCM or buffer OpenAI PCM as Gemini data.
 
-**Change.** Add a `SettingsKeys` enum in `Sources/Managers/` holding the key strings, and
-reference it from all three sites (`@AppStorage(SettingsKeys.ttsProvider)` etc.). Expose an
-`allKeys` collection so the test helper enumerates it instead of repeating the literals.
+**Required change.**
 
-**Done when.** No settings key string is written more than once; `AppSettingsDefaults.keys`
-is gone in favor of `SettingsKeys.allKeys`; `./check-coverage.sh` still passes.
+1. Introduce an explicit provider kind and immutable request-settings snapshot.
+2. Store an active-request context under `stateQueue`. It must contain the task identifier,
+   provider/decoder kind, data handler, error state, and provider-specific incremental buffer.
+3. Delegate callbacks must consult only the context belonging to their task. They MUST NOT
+   infer response format from the manager's current `baseURL`.
+4. Preserve the current non-cancelling behavior unless the user directs otherwise:
+   `updateSettings` affects the next request only, while the active task finishes with its
+   captured configuration.
+5. Preserve stale-task rejection and the audio stream-generation guard.
 
-## 12. Reset `MockURLProtocol.requestHandler` between tests
+**Tests and falsification.**
 
-**Context.** `Tests/MockURLProtocol.swift:4` is a `static var` that no test ever clears, so a
-handler outlives the test class that installed it. This is not theoretical: with task 2's
-settings isolation in place, a `/v1/models` request dispatched by
-`SettingsViewTests.testProviderDidChangeAndTestVoice` raced the `XCTFail` handler left behind
-by `ServicesCoordinatorTests.swift:48-51`, failing the settings test with the services test's
-message. That test now installs its handler before issuing any request, but the hazard
-remains for every future test, and `startLoading`'s `fatalError` on a nil handler makes a
-naive reset unsafe.
+- Start delayed Gemini, switch settings to OpenAI, and assert only decoded Gemini audio is
+  delivered.
+- Start delayed OpenAI, switch settings to Gemini, and assert PCM is forwarded unchanged.
+- Cover stale data and completion callbacks after stop and after replacement.
+- Mutation-test delegate code that consults current settings instead of task context.
 
-**Change.** Give `MockURLProtocol` a `reset()` that clears the handler, call it from a shared
-`setUp`/`tearDown` (an `XCTestCase` extension, or a base class), and replace the `fatalError`
-in `startLoading` with an `XCTFail`-style failure attributed to the running test plus a
-returned error, so a stray request names the offender instead of killing the process.
+**Done when.** Provider changes cannot alter an active task's URL, authentication, payload,
+decoder, buffers, or handler.
 
-**Done when.** No test depends on a handler set by another test; a request with no handler
-installed fails that test with a clear message rather than crashing the suite.
+### 4. Invoke client callbacks outside `stateQueue`
 
-## 13. Stop tests from making real network requests
+**Classification:** Non-blocking
 
-**Context.** `Tests/SettingsViewTests.swift:9` builds `TTSNetworkManager(configuration: .ephemeral)`
-without `MockURLProtocol`, then `testSettingsViewMethods` calls `syncSettings()` and
-`fetchMetadata()`. Those issue real outbound requests to `api.openai.com/v1/models` carrying
-the fake key `test-openai-key`. The suite is therefore slow, offline-hostile, and leaks a
-request to a third party on every run. `MenuBarViewTests.swift:13` and
-`MenuBarViewTests.swift:72` construct the manager the same way.
+**Depends on:** Task 3
 
-**Change.** Route every `TTSNetworkManager` built in tests through `MockURLProtocol` (the
-config is already a one-liner) or, where the test genuinely does not care about the network,
-point it at a base URL that cannot resolve. Do not leave a code path where a unit test talks
-to a real endpoint.
+**Problem.** The OpenAI data handler currently runs inside `stateQueue.sync`. A handler that
+calls `stopStreaming()` recursively synchronizes on the same serial queue and can deadlock or
+trap.
 
-**Done when.** The full suite passes with the machine offline (`sudo ifconfig en0 down`, or
-Network Link Conditioner set to 100% loss), and no test names a real hostname.
+**Required change.**
 
-## 14. Stop tests from clobbering the real clipboard
+1. Under `stateQueue`, validate the task and capture the data plus handler needed for delivery.
+2. Exit the queue before invoking client code.
+3. Apply the same rule to completion-time Gemini delivery after Task 9: no external callback,
+   UI publication, logging formatter, or decoder with unknown re-entrancy may run while the
+   state queue is held.
+4. Document the lock boundary and callback ordering.
 
-**Context.** Same bug class as task 2, one layer over: `Tests/MenuBarViewTests.swift:51-52`
-and `Tests/TextExtractionManagerTests.swift:11-13,21-22` call
-`NSPasteboard.general.clearContents()` and write their own strings, destroying whatever the
-developer had copied and never restoring it.
+**Tests and falsification.**
 
-**Change.** Either snapshot and restore the general pasteboard around each test (mirroring
-`UserDefaultsSnapshot`), or — cleaner — inject the pasteboard into `TextExtractionManager`
-(`init(pasteboard: NSPasteboard = .general)`) and hand tests a scratch
-`NSPasteboard(name:)` so the general one is never touched. Prefer injection: it removes the
-shared-state problem instead of papering over it, and matches the "side effects isolated"
-rule in `CLAUDE.md`.
+- Use a handler that calls `stopStreaming()` and prove it completes within a bounded timeout.
+- Verify no data is delivered after the re-entrant stop.
+- Mutation-test moving handler invocation back inside the queue.
 
-**Done when.** Copying a string, running `./check-coverage.sh`, and pasting yields the
-original string; no test writes to `NSPasteboard.general`.
+**Done when.** Client callbacks can safely stop or replace a stream without queue re-entry.
+
+### 5. Reject stale provider-metadata completions
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 1–3
+
+**Problem.** A delayed OpenAI model request can complete after a switch to Gemini and replace
+the current provider's model list.
+
+**Required change.**
+
+1. Track model and voice metadata requests explicitly, using cancellation plus a provider or
+   generation token checked before publication. Cancellation alone is not sufficient because
+   completion can race.
+2. Invalidate outstanding metadata work whenever the selected provider or endpoint changes.
+3. Publish results on the main actor/queue only when the response still belongs to the current
+   metadata generation.
+4. Keep model and voice request state separate if they can complete independently.
+5. Clear or replace lists deterministically during provider changes so the UI never presents
+   entries from the previous provider.
+
+**Tests and falsification.**
+
+- Delay an OpenAI model response, switch to Gemini, complete the old response, and assert the
+  Gemini list remains.
+- Repeat with two Custom endpoints and with voice metadata.
+- Cover cancellation, malformed responses, and an empty successful list.
+- Mutation-test removal of the generation/provider guard.
+
+**Done when.** Only the latest provider and endpoint may publish model or voice metadata.
+
+### 6. Surface request failures to the user
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 3–5
+
+**Problem.** Invalid URLs, encoding failures, non-2xx responses, transport failures, and
+provider-decoding failures only print to the console. Users receive no explanation when
+speech does not start.
+
+**Required change.**
+
+1. Define a small user-facing error model, or a sanitized `lastError` string, published by
+   `TTSNetworkManager` on the main actor/queue.
+2. Clear stale error state at the start of a new request.
+3. Set an error for invalid configuration, request encoding, non-2xx responses, transport
+   failure, and malformed/empty provider audio.
+4. Include only actionable, bounded information such as HTTP status and a short sanitized
+   message. Never expose keys, authorization headers, full request URLs, or unbounded bodies.
+5. Render the error in `MenuBarView` without hiding playback controls.
+6. Clear the message on the next request and on explicit Clear Buffer; document this behavior.
+
+**Tests and falsification.**
+
+- Assert each failure class publishes an error and finishes streaming state.
+- Assert the next request clears the previous error and a later success leaves it cleared.
+- Test truncation/redaction of error bodies containing key-like material.
+- Add a view construction/state test showing the error only when present.
+
+**Done when.** A user can distinguish invalid configuration, authentication/API failure, and
+transport failure without consulting Console, and no secret can enter the UI or logs.
+
+## Phase 3 — Define provider contracts and secure secrets
+
+### 7. Implement the OpenAI-compatible Custom model/voice contract
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 1–6
+
+**Problem.** Custom settings return empty model and voice values, while request encoding still
+sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
+omitted.
+
+**Required change.**
+
+1. Add persisted Custom model and voice fields using `SettingsKeys`.
+2. Require non-empty, non-whitespace model and voice values before issuing a Custom request.
+   Invalid configuration must use Task 6's user-visible error path without contacting the
+   endpoint.
+3. Include both values in every Custom `/v1/audio/speech` payload. Do not preserve the current
+   empty-string behavior and do not conditionally omit the fields.
+4. Make request-body construction explicit and typed enough that required key inclusion is
+   testable without relying on dictionary accident.
+5. Correct `SettingsViewTests` so it inspects the emitted request rather than only computed
+   properties.
+6. Ensure Test Voice and normal clipboard/Services speech use the same validated contract.
+7. Record the OpenAI-compatible Custom contract in README Design Assumptions when implemented.
+
+**Tests and falsification.**
+
+- Decode an intercepted Custom request and assert exact model/voice key presence and values.
+- Cover missing, whitespace-only, and valid configuration.
+- Assert invalid configuration produces Task 6's user-visible error without issuing a request.
+- Mutation-test empty-string acceptance and omission of either required field.
+
+**Done when.** The Custom payload, settings UI, tests, and README describe one consistent
+model/voice contract.
+
+### 8. Move API keys to Keychain and remove key-bearing URLs/logs
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 2, 6, and 7
+
+**Problem.** OpenAI, Gemini, and Custom keys are stored in plaintext `UserDefaults`. Gemini
+puts its key in the query string, and the invalid-URL path can print the composed URL.
+
+**Required change.**
+
+1. Introduce a narrow secret-store protocol and a production Keychain implementation. Use a
+   stable service identifier and one account per provider.
+2. Inject an in-memory implementation into tests; unit tests MUST NOT access the developer's
+   real Keychain.
+3. Replace secret `@AppStorage` fields with view state backed by the secret store. Keep
+   provider, endpoint, model, voice, and sample rate in `UserDefaults`.
+4. Migrate each legacy preference key once. Delete the legacy value only after a confirmed
+   Keychain write; preserve it and surface an actionable error if migration fails.
+5. Send the Gemini key using the currently documented authentication header rather than a URL
+   query. Verify the header name against current official Google documentation at execution
+   time.
+6. Redact or remove request logging. No error path may interpolate a composed URL that can
+   contain credentials.
+7. Do not place real keys in tests, fixtures, command output, or commits.
+
+**Tests and falsification.**
+
+- Test secret create/read/update/delete and error mapping against the in-memory store.
+- Test successful legacy migration, failed write without deletion, and idempotent subsequent
+  launch.
+- Intercept all provider requests and assert keys appear only in the correct header.
+- Assert URLs, logs, error state, and `UserDefaults` contain none of the injected secret
+  values.
+- Mutation-test deleting a legacy key before a failed store write.
+
+**Done when.** No production secret value appears in `UserDefaults`, URLs, logs, errors, or
+committed fixtures; legacy installs migrate without data loss.
+
+### 9. Stream Gemini audio incrementally
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 3, 4, 6, and 8
+
+**Problem.** Gemini currently calls the non-streaming endpoint, buffers the complete JSON
+response, and delivers audio only after task completion. This violates the project's
+time-to-first-audio goal.
+
+**Required change.**
+
+1. Verify the current Gemini TTS streaming endpoint, authentication, event format, audio
+   encoding, and whether chunks are actually emitted incrementally using official Google
+   documentation. Provider formats are not stable enough to implement from memory.
+2. Put streaming parser state in Task 3's active-request context.
+3. Implement a small incremental event parser that accepts arbitrary byte boundaries, retains
+   incomplete events, handles the documented line-ending form, and emits only complete events.
+4. Decode and forward each complete audio chunk outside the state queue. Do not attempt base64
+   decoding on partial events.
+5. Convert malformed events, missing audio, and provider error events into Task 6's error
+   model without corrupting already delivered audio.
+6. Update README's Network section so it accurately distinguishes verified streaming behavior
+   for each provider.
+
+**Tests and falsification.**
+
+- Feed one event split across several URL-session callbacks.
+- Feed multiple events in one callback and across awkward boundaries, including base64 padding.
+- Assert the first audio handler invocation occurs before task completion.
+- Cover malformed JSON, missing audio, an HTTP error stream, and cancellation mid-event.
+- Mutation-test parsing each callback as a complete event and buffering until completion.
+- If the user supplies a Gemini key, perform a manual timing smoke test without recording the
+  key or response content.
+
+**Done when.** Valid Gemini audio is delivered incrementally before response completion, and
+the two-second product target can be meaningfully measured.
+
+## Phase 4 — Repair audio boundaries and Custom format
+
+### 10. Correct exact-end seek state
+
+**Classification:** Blocking
+
+**Depends on:** Task 1
+
+**Problem.** Seeking to `bufferDuration` stops `AVAudioPlayerNode` but leaves `isPlaying`
+true because no remaining buffer is scheduled and no paused/stopped state is published.
+
+**Required change.**
+
+1. Clamp requested progress to the valid buffered range.
+2. Define exact-end behavior explicitly: stop/pause the node, set progress to the buffer end,
+   set `isPlaying` false, and stop the progress timer while retaining the buffer for replay.
+3. Preserve current behavior for a middle seek and replay from zero after completion.
+4. Keep `playerNode` operations and buffered-data reads consistently ordered. While working in
+   this area, add evidence for any claimed scheduling race rather than assuming
+   `AVAudioPlayerNode` semantics.
+
+**Tests and falsification.**
+
+- Seek to zero, middle, exact end, just below end, and beyond end.
+- Cover both playing and paused preconditions.
+- Assert exact end is silent, not playing, and still has buffered audio available for replay.
+- Mutation-test the existing early return that leaves `isPlaying` true.
+
+**Done when.** Slider boundary values produce truthful playback state and replay remains
+possible without re-fetching audio.
+
+### 11. Make the Custom PCM sample rate configurable
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 2, 7, and 10
+
+**Problem.** `AudioPlayerManager` always interprets PCM as 24-kHz mono 16-bit audio. A Custom
+endpoint returning 22.05 or 44.1/48 kHz therefore has wrong duration, speed, pitch, and seek
+math.
+
+**Required change.**
+
+1. Add a persisted Custom sample-rate field using `SettingsKeys`, defaulting to 24000 Hz.
+2. Validate a finite numeric value within the supported range selected by the implementation
+   (the existing decision suggested 8000–48000 Hz). Invalid input must produce clear inline or
+   Task 6 error feedback and must not partially rebuild the graph.
+3. Add a focused `AudioPlayerManager` API for changing sample rate.
+4. On actual change, stop playback, clear buffered data and progress, disconnect/reconnect the
+   fixed-format audio graph, and restart the engine safely.
+5. OpenAI and Gemini must select 24 kHz automatically; only Custom uses the override.
+6. Document the default and Custom override in README Design Assumptions.
+
+**Tests and falsification.**
+
+- At 48 kHz, 48,000 mono Int16 frames must report one second, not two.
+- Cover the default rate, a non-default valid rate, unchanged rate, invalid values, and engine
+  rebuild failure.
+- Assert a format change clears playing/buffer/progress state.
+- Verify schedule, seek, and timer math all derive from the rebuilt format.
+- Mutation-test retaining the hard-coded 24-kHz divisor in any one path.
+
+**Done when.** Supported Custom sample rates play and seek with correct timing, and changing
+format cannot leave mixed-format buffered audio.
+
+### 12. Add a 0.1-second automatic-playback prebuffer
+
+**Classification:** Requested implementation change
+
+**Depends on:** Tasks 1, 10, and 11
+
+**Problem.** `AudioPlayerManager.scheduleAudio` currently schedules the first playable PCM
+buffer and calls `play()` immediately. A small or slowly followed first packet can be consumed
+before enough subsequent audio is buffered, causing startup underrun.
+
+**Required change.**
+
+1. Start a one-shot 0.1-second delay when the first packet containing at least one complete PCM
+   frame is accepted for the current stream generation.
+2. Continue appending and scheduling packets during the delay so playback begins with the
+   accumulated startup buffer.
+3. Associate the pending start with `scheduleGeneration`. `stop()`, Clear Buffer, a new stream,
+   or any format-reset operation must cancel or invalidate it so an old delayed action cannot
+   restart playback.
+4. Start at most one automatic-playback delay per stream. Later packets must not postpone the
+   original deadline or schedule additional starts.
+5. Keep `hasAudio` and `bufferDuration` truthful during prebuffering, but leave `isPlaying`
+   false until `playerNode.play()` actually runs.
+6. Make delayed-start scheduling directly testable with an injected clock/scheduler or an
+   equivalently isolated component. Automated correctness tests must not depend only on
+   imprecise wall-clock sleeps.
+7. Do not add this delay to `USER_STORIES.md`. After implementation, update README's Audio or
+   Network architecture description so it no longer claims playback starts on the first bytes
+   and instead records the 0.1-second prebuffer.
+
+**Tests and falsification.**
+
+- After the first playable packet, assert audio is buffered but playback has not started
+  before the 0.1-second deadline.
+- Assert playback starts once after the deadline and includes packets received during the
+  prebuffer window.
+- Stop before the deadline and prove the delayed action cannot start playback.
+- Start a new generation before the deadline and prove the old generation cannot start it.
+- Cover a sub-frame packet followed by enough bytes for the first complete frame; the delay
+  begins only when playable audio exists.
+- Mutation-test immediate playback, rescheduling the deadline on every packet, and failure to
+  invalidate the pending start.
+
+**Done when.** Automatic playback begins once, 0.1 seconds after the first playable packet for
+the still-active stream, with no delayed restart after cancellation, replacement, or format
+change.
+
+## Phase 5 — Complete the required UI
+
+### 13. Add provider-aware voice selection to the menu
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 2, 5, and 7
+
+**Problem.** Voice selection exists only in Settings, although `USER_STORIES.md` requires it
+in the menu and restricts changes to idle state.
+
+**Required change.**
+
+1. Add a menu voice control bound to the selected provider's persisted voice.
+2. Populate it from provider-authoritative metadata that passed Task 5's freshness guard.
+   Verify at execution time whether OpenAI exposes voice discovery; if it does not, use and
+   document a version-appropriate list from official documentation rather than inventing an
+   endpoint. Define Custom behavior from Task 7's chosen contract.
+3. Disable voice changes whenever streaming is active or audio remains buffered; "idle" means
+   neither condition is true.
+4. When changed at idle, update the network manager's next-request settings without duplicating
+   setting-key literals or reconstructing unrelated state.
+5. Keep Settings and menu selection synchronized through the shared persisted value.
+
+**Tests and falsification.**
+
+- Verify the binding selects the correct provider-specific voice.
+- Verify the control is enabled only when idle.
+- Switch provider and assert stale voices cannot be selected.
+- Verify a menu change is used by the next intercepted TTS request.
+- Mutation-test allowing a change while paused with buffered audio.
+
+**Done when.** The menu offers only current-provider voices, stays synchronized with Settings,
+and cannot alter an active or buffered read.
+
+### 14. Make the menu-bar icon reflect playback state
+
+**Classification:** Blocking
+
+**Depends on:** Tasks 6, 9, and 12
+
+**Problem.** `ClipboardTTSApp` always uses `waveform.circle`, so idle, playing/streaming, and
+paused states are indistinguishable.
+
+**Required change.**
+
+1. Use a state-driven `MenuBarExtra` label rather than a constant `systemImage` initializer.
+2. Define one symbol and accessibility label for:
+   - idle: no stream and no buffered audio;
+   - active: network streaming or audio playing;
+   - paused: buffered audio exists but neither streaming nor playing.
+3. Make state precedence explicit so startup, prebuffer delay, completion, pause, clear, and
+   error transitions cannot select contradictory icons.
+
+**Tests and falsification.**
+
+- Put state-to-symbol selection in a pure helper and test every meaningful boolean combination.
+- Test transition sequences: idle → streaming → playing → paused → playing → cleared.
+- Mutation-test precedence that labels buffered-and-playing audio as paused.
+
+**Done when.** The status item and accessibility label truthfully reflect idle, active, and
+paused state through the complete lifecycle.
+
+### 15. Add an About action
+
+**Classification:** Blocking
+
+**Depends on:** Task 1; otherwise independent
+
+**Problem.** Settings lacks the About entry required by `USER_STORIES.md`.
+
+**Required change.**
+
+1. Add a conventional About action in Settings or its standard macOS command location.
+2. Prefer the system About panel and bundle metadata over a custom window unless product
+   requirements demand more.
+3. Show application name and version from bundle metadata. Reference the existing license
+   without duplicating its full text in source.
+4. Keep this task separate from release, notarization, or marketing work.
+
+**Tests and falsification.**
+
+- Add a construction or action-routing test that does not display an interactive panel during
+  the automated suite.
+- Verify version text comes from bundle metadata rather than a second hard-coded value.
+
+**Done when.** A user can open standard About information from the application UI.
+
+## Phase 6 — Concurrency hardening
+
+### 16. Eliminate complete-concurrency warnings in Swift 5 mode
+
+**Classification:** Non-blocking
+
+**Depends on:** All earlier manager and UI state changes
+
+**Problem.** A build with `SWIFT_STRICT_CONCURRENCY=complete` reports mutable state on the
+URL-session delegate, non-Sendable manager captures, and a concurrently captured mutable
+voice-list local. These become errors in Swift 6.
+
+**Required change.**
+
+1. Run a clean strict-concurrency build and inventory every warning before choosing isolation.
+2. Put observable UI state on `@MainActor` where practical.
+3. Keep queue-owned network/audio buffers behind their existing explicit synchronization, and
+   make cross-isolation handoffs visible.
+4. Replace mutable captured locals with immutable values before dispatch.
+5. Treat URL-session and notification callbacks as concurrent entry points. Hop to the correct
+   actor/queue before touching isolated state.
+6. Avoid `@unchecked Sendable` as a warning silencer. If it is genuinely required for an
+   Apple delegate type, document the protected fields and invariant and test concurrent entry.
+7. Add `SWIFT_STRICT_CONCURRENCY: complete` to `project.yml` once the build is clean so future
+   warnings are visible. Do not change `SWIFT_VERSION` in this task.
+
+**Tests and falsification.**
+
+- Run the full test/coverage gate under Thread Sanitizer when feasible for the manager tests;
+  record and resolve any failures rather than treating a clean run as proof of absence.
+- Exercise provider switching, stop/replacement, metadata races, seek during streaming, and
+  Services notifications after the isolation changes.
+- Mutation-test removal of an actor hop or immutable capture where a deterministic test can
+  expose the regression.
+
+**Done when.**
+
+```bash
+xcodebuild \
+  -project ClipboardTTSApp.xcodeproj \
+  -scheme ClipboardTTSApp \
+  -configuration Debug \
+  SWIFT_STRICT_CONCURRENCY=complete \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+completes with no Swift concurrency warnings, while the project remains in Swift 5 mode and
+all normal gates pass.
+
+---
+
+## Final acceptance sweep
+
+After the numbered tasks are complete:
+
+This sweep supplements the 16 per-task reviews. It is not Task 17 and cannot replace or defer
+testing, linting, or adversarial review required before any of the 16 implementation commits.
+If it discovers new work, record and execute that work as a new self-contained task rather
+than folding it retroactively into a completed commit.
+
+1. Run `./check-coverage.sh` and manually inspect the per-file manager coverage report; the
+   aggregate must remain at least 85%.
+2. Run `swiftlint --strict` and the strict-concurrency build from Task 16.
+3. Confirm with repository searches that:
+   - tests do not write to `NSPasteboard.general`;
+   - tests cannot construct a live-network `TTSNetworkManager`;
+   - production API-key values do not use `@AppStorage`/`UserDefaults`, URL queries, committed
+     fixtures, or logs;
+   - no response decoder derives provider identity from current mutable settings;
+   - persisted settings keys have one declaration.
+4. Perform manual smoke tests for clipboard and Services input, Clear Buffer, provider
+   switching during a request, bad credentials, Gemini first-audio latency, seek-to-end and
+   replay, Custom non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, status
+   icons, and About.
+   Obtain user permission and credentials before any live provider test; never record keys.
+5. Run the adversarial-review loop on the complete remediation range until no blocking
+   findings remain. Resolve or obtain explicit user disposition for every remaining
+   non-blocking finding.
+6. Reconcile `README.md` and `USER_STORIES.md` with the verified final behavior. Remove
+   completed tasks from this file so it contains only genuinely outstanding work.

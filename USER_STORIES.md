@@ -5,7 +5,7 @@
 - The app should reside in the menu bar, with a macOS native look and feel (built using Native Swift/SwiftUI).
 - Clicking on the app button in the menu bar should open a drop-down menu with the following options:
     - Speak Copied Text/Clear Buffer
-    - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically. Once the entire audio is buffered, also start showing remaining time. All times should be precise to the second.
+    - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically.
     - Pause/Resume
     - Playback Speed, adjusted with a continuous slider from 0.5x to 2.5x (0.1x increments)
     - Voice (all available voices via OpenAI API, only changeable during idle state)
