@@ -1,21 +1,19 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class TTSNetworkManagerTests: XCTestCase {
+final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
     func testNetworkManagerFormatsRequestCorrectly() {
         // WHY: We must ensure that the app sends the exactly correct JSON payload, headers, and URL
         // when triggering a TTS request, so that the API accepts it without error.
 
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
 
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "secret_token", model: "tts-test", voice: "test-voice")
 
         let expectation = XCTestExpectation(description: "Wait for request to be formed")
 
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.url?.absoluteString, "https://mock.api/v1/audio/speech")
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret_token")
@@ -61,14 +59,12 @@ final class TTSNetworkManagerTests: XCTestCase {
         // WHY: The UI depends on receiving audio data quickly. This test ensures that when the server
         // sends data, the network manager relays it to the completion handler properly.
 
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
 
         let expectation = XCTestExpectation(description: "Wait for data chunk")
 
-        MockURLProtocol.requestHandler = { _ in
+        MockURLProtocol.installRequestHandler { _ in
             let mockData = Data("audiochunk".utf8)
             return (HTTPURLResponse(), mockData)
         }
@@ -85,34 +81,37 @@ final class TTSNetworkManagerTests: XCTestCase {
         // WHY: Users might interrupt TTS playback. The network manager must cancel the ongoing network request
         // to save bandwidth and instantly transition the state.
 
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
 
-        MockURLProtocol.requestHandler = { _ in
+        let requestStarted = XCTestExpectation(description: "Mock request started")
+        let requestFinished = XCTestExpectation(description: "Mock request finished")
+        MockURLProtocol.installRequestHandler { _ in
+            requestStarted.fulfill()
             Thread.sleep(forTimeInterval: 0.5)
+            requestFinished.fulfill()
             return (HTTPURLResponse(), Data())
         }
 
         manager.streamTTS(text: "Test cancel") { _ in }
 
-        // Wait briefly for the async state change
-        let expectation1 = XCTestExpectation(description: "Wait for stream to start")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        wait(for: [requestStarted], timeout: 1.0)
+
+        let streamStarted = XCTestExpectation(description: "Wait for stream to start")
+        DispatchQueue.main.async {
             XCTAssertTrue(manager.isStreaming)
-            expectation1.fulfill()
+            streamStarted.fulfill()
         }
-        wait(for: [expectation1], timeout: 1.0)
+        wait(for: [streamStarted], timeout: 1.0)
 
         manager.stopStreaming()
 
-        let expectation2 = XCTestExpectation(description: "Wait for stream to stop")
+        let streamStopped = XCTestExpectation(description: "Wait for stream to stop")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             XCTAssertFalse(manager.isStreaming)
-            expectation2.fulfill()
+            streamStopped.fulfill()
         }
-        wait(for: [expectation2], timeout: 1.0)
+        wait(for: [streamStopped, requestFinished], timeout: 1.0)
     }
 
     func testNetworkManagerIgnoresDataAfterStop() {
@@ -121,29 +120,33 @@ final class TTSNetworkManagerTests: XCTestCase {
         // We drive the delegate method directly with a task whose identifier does not match the
         // active one, because URLSession suppresses callbacks for a cancelled task, so the real
         // network path can never exercise the stale-callback guard.
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
 
         var dataReceived = false
-        // Sleep so the real task stays in-flight until stopStreaming cancels it, keeping the only
-        // path to dataHandler the stale delegate call below.
-        MockURLProtocol.requestHandler = { _ in
-            Thread.sleep(forTimeInterval: 0.1)
+        let requestStarted = XCTestExpectation(description: "Mock request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        let responseFinished = XCTestExpectation(description: "Mock response finished")
+        MockURLProtocol.installRequestHandler { _ in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 1.0)
+            responseFinished.fulfill()
             return (HTTPURLResponse(), Data("audiochunk".utf8))
         }
-
         manager.streamTTS(text: "Test cancel data") { _ in
             dataReceived = true
         }
+        wait(for: [requestStarted], timeout: 1.0)
 
         manager.stopStreaming()
+        releaseResponse.signal()
+        wait(for: [responseFinished], timeout: 1.0)
 
         // Simulate a late chunk arriving for the now-cancelled task. Its identifier cannot match the
         // active one (stopStreaming cleared it), so the guard must drop it.
-        let staleTask = URLSession.shared.dataTask(with: URL(string: "https://mock.api/v1/audio/speech")!)
-        manager.urlSession(URLSession.shared, dataTask: staleTask, didReceive: Data("late chunk".utf8))
+        let mockSession = TestNetworkFactory.makeSession()
+        let staleTask = mockSession.dataTask(with: URL(string: "https://mock.api/v1/audio/speech")!)
+        manager.urlSession(mockSession, dataTask: staleTask, didReceive: Data("late chunk".utf8))
 
         let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -154,15 +157,13 @@ final class TTSNetworkManagerTests: XCTestCase {
     }
 
     func testNetworkManagerFormatsGeminiRequestCorrectly() {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
 
         manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token", model: "gemini-tts", voice: "Aoede")
 
         let expectation = XCTestExpectation(description: "Wait for Gemini request")
 
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent?key=gemini_token")
             XCTAssertEqual(request.httpMethod, "POST")
 
@@ -198,15 +199,13 @@ final class TTSNetworkManagerTests: XCTestCase {
     }
 
     func testNetworkManagerHandlesAPIError() {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
 
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
 
         let expectation = XCTestExpectation(description: "Wait for error completion")
 
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             let errorData = Data("{\"error\": \"Unauthorized\"}".utf8)
             let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
             return (response, errorData)
@@ -222,9 +221,7 @@ final class TTSNetworkManagerTests: XCTestCase {
     }
 
     func testFetchAvailableModels() {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
 
         // Test Gemini (returns hardcoded instantly)
         manager.fetchAvailableModels(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token")
@@ -232,7 +229,7 @@ final class TTSNetworkManagerTests: XCTestCase {
 
         // Test OpenAI (requires mock request)
         let expectation = XCTestExpectation(description: "Wait for models fetch")
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             let mockResponse = Data("""
             { "data": [ {"id": "tts-1"}, {"id": "tts-1-hd"}, {"id": "gpt-4"} ] }
             """.utf8)
@@ -258,19 +255,16 @@ final class TTSNetworkManagerTests: XCTestCase {
         // (tts-1/alloy) on every cold start until the user re-opens settings.
         isolateAppSettingsDefaults()
 
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-
         // OpenAI: persisted model/voice/key should drive the outgoing request
         UserDefaults.standard.set("OpenAI", forKey: "ttsProvider")
         UserDefaults.standard.set("persisted-openai-model", forKey: "openaiModel")
         UserDefaults.standard.set("persisted-openai-voice", forKey: "openaiVoice")
         UserDefaults.standard.set("persisted-openai-key", forKey: "apiKey")
 
-        let openaiManager = TTSNetworkManager(configuration: config)
+        let openaiManager = TestNetworkFactory.makeManager()
         let openaiExpectation = XCTestExpectation(description: "OpenAI request uses persisted values")
 
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer persisted-openai-key")
 
             var extractedData: Data? = request.httpBody
@@ -307,10 +301,10 @@ final class TTSNetworkManagerTests: XCTestCase {
         UserDefaults.standard.set("persisted-gemini-voice", forKey: "geminiVoice")
         UserDefaults.standard.set("persisted-gemini-key", forKey: "geminiAPIKey")
 
-        let geminiManager = TTSNetworkManager(configuration: config)
+        let geminiManager = TestNetworkFactory.makeManager()
         let geminiExpectation = XCTestExpectation(description: "Gemini request uses persisted values")
 
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.url?.absoluteString,
                            "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:generateContent?key=persisted-gemini-key")
 
@@ -347,9 +341,7 @@ final class TTSNetworkManagerTests: XCTestCase {
     }
 
     func testFetchAvailableVoices() {
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let manager = TTSNetworkManager(configuration: config)
+        let manager = TestNetworkFactory.makeManager()
 
         // Test OpenAI (hardcoded)
         manager.fetchAvailableVoices(baseURL: "https://api.openai.com/v1/audio/speech", apiKey: "test")
@@ -361,7 +353,7 @@ final class TTSNetworkManagerTests: XCTestCase {
 
         // Test Custom (requires mock request)
         let expectation = XCTestExpectation(description: "Wait for voices fetch")
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             let mockResponse = Data("""
             { "voices": ["custom-voice-1", "custom-voice-2"] }
             """.utf8)

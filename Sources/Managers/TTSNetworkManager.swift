@@ -13,6 +13,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var session: URLSession!
     private var currentTask: URLSessionDataTask?
     private var dataHandler: ((Data) -> Void)?
+    private var sessionInvalidated: ((URLSession) -> Void)?
 
     private var isErrorResponse = false
     private var errorData = Data()
@@ -21,7 +22,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     private var activeTaskIdentifier: Int?
 
-    init(configuration: URLSessionConfiguration = .default) {
+    /// Creates a manager and optionally observes the lifecycle of its underlying URL session.
+    init(configuration: URLSessionConfiguration = .default,
+         sessionCreated: ((URLSession) -> Void)? = nil,
+         sessionInvalidated: ((URLSession) -> Void)? = nil) {
         let provider = UserDefaults.standard.string(forKey: "ttsProvider") ?? "OpenAI"
         if provider == "OpenAI" {
             self.baseURL = "https://api.openai.com/v1/audio/speech"
@@ -42,6 +46,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        sessionCreated?(self.session)
+        self.sessionInvalidated = sessionInvalidated
     }
 
     private var isGeminiEndpoint: Bool {
@@ -232,6 +238,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         } else if !result.hadError {
             print("Task completed successfully.")
         }
+    }
+
+    func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+        sessionInvalidated?(session)
     }
 
     private func extractGeminiAudioData(from buffer: Data) -> Data? {

@@ -2,14 +2,22 @@ import XCTest
 import SwiftUI
 @testable import ClipboardTTSApp
 
-final class SettingsViewTests: XCTestCase {
+final class SettingsViewTests: MockURLProtocolTestCase {
 
     func testSettingsViewMethods() {
         isolateAppSettingsDefaults()
 
         let audioPlayer = AudioPlayerManager()
-        let networkManager = TTSNetworkManager(configuration: .ephemeral)
+        let networkManager = TestNetworkFactory.makeManager()
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
+
+        let metadataRequests = expectation(description: "OpenAI metadata requests are mock routed")
+        metadataRequests.expectedFulfillmentCount = 2
+        MockURLProtocol.installRequestHandler { request in
+            metadataRequests.fulfill()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{ \"data\": [] }".utf8))
+        }
 
         UserDefaults.standard.set("OpenAI", forKey: "ttsProvider")
         UserDefaults.standard.set("test-openai-key", forKey: "apiKey")
@@ -21,6 +29,7 @@ final class SettingsViewTests: XCTestCase {
         XCTAssertEqual(view.currentVoice, "nova")
         view.syncSettings()
         view.fetchMetadata()
+        wait(for: [metadataRequests], timeout: 2.0)
 
         UserDefaults.standard.set("Gemini", forKey: "ttsProvider")
         UserDefaults.standard.set("test-gemini-key", forKey: "geminiAPIKey")
@@ -49,17 +58,13 @@ final class SettingsViewTests: XCTestCase {
         isolateAppSettingsDefaults()
 
         let audioPlayer = AudioPlayerManager()
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let networkManager = TTSNetworkManager(configuration: config)
+        let networkManager = TestNetworkFactory.makeManager()
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
 
-        // Install the handler before anything can issue a request: providerDidChange fetches the
-        // model list, and MockURLProtocol.requestHandler is a static that the previous test class
-        // leaves pointing at its own XCTFail. A request dispatched before this line races that
-        // stale handler and fails this test with another test's message.
-        MockURLProtocol.requestHandler = { request in
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        // providerDidChange fetches metadata, so its local handler must be installed before it runs.
+        MockURLProtocol.installRequestHandler { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{ \"data\": [] }".utf8))
         }
 
         view.providerDidChange(to: "OpenAI")

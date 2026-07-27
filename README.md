@@ -22,7 +22,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 
 - **UI**: SwiftUI `MenuBarExtra` for playback controls; a separate `Window` hosts settings to keep the dropdown focused on play/pause/progress/speed. The settings window includes an endpoint test action.
 - **Audio**: `AVAudioEngine` + `AVAudioPlayerNode` (not `AVPlayer`) so playback speed can be adjusted via `AVAudioUnitTimePitch` without altering pitch.
-- **Text**: Reads `NSPasteboard` directly. The menu-bar flow deactivates the app and defers the read by 0.2 seconds before starting TTS.
+- **Text**: `TextExtractionManager` reads through an injected, read-only pasteboard adapter; the production adapter uses `NSPasteboard.general`. The menu-bar flow deactivates the app and defers the read by 0.2 seconds before starting TTS.
 - **Network**: `URLSession` with HTTP chunked streaming, so playback starts on the first bytes from the TTS provider rather than after the full payload downloads. Minimizing Time-To-First-Byte is a primary design goal.
 - **Services**: The macOS right-click "Speak Selected Text with Clipboard TTS" service posts a notification handled by `ServicesCoordinator`, which lives for the whole app lifetime (created in `ClipboardTTSApp.init`). This is deliberately *not* in `MenuBarView`: `MenuBarExtra(.window)` builds its body only when the dropdown is first opened, so a view-hosted observer would drop the service until then.
 
@@ -49,5 +49,7 @@ Run tests and check the line coverage of `Sources/Managers/`:
 ```
 
 The unit-test bundle is hosted inside the app, so `UserDefaults.standard` in a test is the real app's defaults domain. Any test that touches a settings key must call `isolateAppSettingsDefaults()` first (`Tests/UserDefaultsSnapshot.swift`), which clears those keys for the test and restores the developer's configuration on teardown.
+
+Network tests must create managers and sessions through `TestNetworkFactory`, which routes all requests through `MockURLProtocol` with an immutable per-test identifier. `MockURLProtocolTestCase` serializes those tests, invalidates their sessions and drains active protocol loads before releasing the next test, clears the installed response handler in setup and teardown, and fails a test that has an undeclared request without a handler; an explicitly declared unhandled request fails locally with a URL-loading error. Clipboard tests inject `FakePasteboardReader` and never modify the user's shared pasteboard.
 
 To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`.

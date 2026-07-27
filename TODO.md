@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 16 numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 15 numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -24,7 +24,7 @@ Keep those documents current rather than duplicating their content here.
 - Unit tests MUST NOT contact external services, write to `NSPasteboard.general`, use the
   developer's Keychain, or leave changes in the app's real `UserDefaults` domain.
 - Documentation and tests required to explain and verify a task belong in that task's commit.
-  None of the 16 implementation tasks may use the documentation-only review exemption for the
+  None of the 15 implementation tasks may use the documentation-only review exemption for the
   task as a whole.
 - Remove a completed task from this file in its implementation commit. Move durable decisions
   or architectural facts into `README.md` rather than leaving completed history here.
@@ -77,7 +77,6 @@ Complete this checklist separately for each numbered task:
 | Network and API failures are invisible in the UI | Blocking | 6 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
-| Tests can use live network, shared handlers, and the real clipboard | Blocking | 1 |
 | Stale metadata responses can replace the current provider's models | Blocking | 5 |
 | Settings keys have three hand-maintained definitions | Non-blocking | 2 |
 | The streaming callback executes while the state lock is held | Non-blocking | 4 |
@@ -86,6 +85,9 @@ Complete this checklist separately for each numbered task:
 
 ## Decisions already made
 
+- Phase 0 is complete. Tests create network managers and sessions through the hermetic mock
+  factory, and test teardown invalidates registered sessions and drains protocol work before
+  releasing the next test. See `README.md` for the operating contract.
 - The Custom provider's PCM sample rate will be configurable. OpenAI and Gemini remain fixed
   at 24 kHz unless their documented response formats change.
 - The Custom provider follows the OpenAI-compatible request contract: model and voice are
@@ -104,66 +106,13 @@ Complete this checklist separately for each numbered task:
 
 ---
 
-## Phase 0 — Make verification safe
-
-### 1. Make the complete unit-test suite hermetic
-
-**Classification:** Blocking
-
-**Depends on:** Nothing
-
-**Problem.**
-
-- `MockURLProtocol.requestHandler` is process-global, is not reset, and calls `fatalError`
-  when no handler is installed.
-- `SettingsViewTests.testSettingsViewMethods` creates an ordinary ephemeral session and calls
-  metadata methods that can reach the real OpenAI API.
-- `MenuBarViewTests` and `TextExtractionManagerTests` clear and write
-  `NSPasteboard.general`, destroying the developer's clipboard contents.
-- These hazards prevent safe use of the mandatory full-suite gate.
-
-**Required change.**
-
-1. Add a single test helper for creating `TTSNetworkManager` with an ephemeral
-   `URLSessionConfiguration` whose protocol classes contain `MockURLProtocol`.
-2. Use that helper for every network manager created by tests, even where the current test
-   does not expect a request. A future code path must fail locally rather than escape to the
-   network.
-3. Give `MockURLProtocol` synchronized install/reset behavior. Reset it in test setup and
-   teardown, and replace the nil-handler `fatalError` with a deterministic URL-loading error
-   that fails the responsible test without terminating the process.
-4. Ensure a handler from one test cannot satisfy or fail a later test. If the test runner can
-   execute these cases concurrently, do not rely on an unsynchronized shared static variable.
-5. Inject a minimal pasteboard-reading dependency into `TextExtractionManager`, with a
-   production adapter that uses `.general`. Give tests a deterministic fake or uniquely named
-   scratch pasteboard and pass that manager into `MenuBarView`.
-6. Preserve the existing `UserDefaultsSnapshot` isolation until Task 2 centralizes its keys.
-
-**Tests and falsification.**
-
-- A request with no installed mock handler reports a controlled test failure/error rather
-  than crashing.
-- A second test cannot observe the first test's handler.
-- Clipboard extraction and menu-bar end-to-end tests pass with a named scratch pasteboard.
-- A mutation that ignores the injected dependency and reads `.general` must fail against a
-  deterministic fake value.
-- Search the test tree after implementation: no test may write to `NSPasteboard.general`,
-  and every test-created network session must be mock-routed.
-
-**Done when.**
-
-- `./check-coverage.sh` can be run without external network traffic or changes to the
-  developer's clipboard, settings, or Keychain.
-- All existing tests pass in any supported order, and a missing network mock cannot terminate
-  the test process.
-
 ## Phase 1 — Establish shared configuration
 
 ### 2. Give persisted settings one source of truth
 
 **Classification:** Non-blocking, scheduled early because Tasks 7, 8, 11, and 13 depend on it
 
-**Depends on:** Task 1
+**Depends on:** Nothing
 
 **Problem.** The same settings-key strings are repeated in `SettingsView`,
 `TTSNetworkManager`, and `Tests/UserDefaultsSnapshot`. Adding a key in only one or two places
@@ -195,7 +144,7 @@ that source, and no production or test file carries a second literal copy.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 1–2
+**Depends on:** Task 2
 
 **Problem.** `streamTTS` chooses a request format from the current provider, but URL-session
 delegate callbacks later re-read mutable manager settings. Switching provider during an
@@ -255,7 +204,7 @@ trap.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 1–3
+**Depends on:** Task 3
 
 **Problem.** A delayed OpenAI model request can complete after a switch to Gemini and replace
 the current provider's model list.
@@ -320,7 +269,7 @@ transport failure without consulting Console, and no secret can enter the UI or 
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 1–6
+**Depends on:** Tasks 2–6
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -434,7 +383,7 @@ the two-second product target can be meaningfully measured.
 
 **Classification:** Blocking
 
-**Depends on:** Task 1
+**Depends on:** Nothing
 
 **Problem.** Seeking to `bufferDuration` stops `AVAudioPlayerNode` but leaves `isPlaying`
 true because no remaining buffer is scheduled and no paused/stopped state is published.
@@ -497,7 +446,7 @@ format cannot leave mixed-format buffered audio.
 
 **Classification:** Requested implementation change
 
-**Depends on:** Tasks 1, 10, and 11
+**Depends on:** Tasks 10 and 11
 
 **Problem.** `AudioPlayerManager.scheduleAudio` currently schedules the first playable PCM
 buffer and calls `play()` immediately. A small or slowly followed first packet can be consumed
@@ -607,7 +556,7 @@ paused state through the complete lifecycle.
 
 **Classification:** Blocking
 
-**Depends on:** Task 1; otherwise independent
+**Depends on:** Nothing
 
 **Problem.** Settings lacks the About entry required by `USER_STORIES.md`.
 
@@ -684,8 +633,8 @@ all normal gates pass.
 
 After the numbered tasks are complete:
 
-This sweep supplements the 16 per-task reviews. It is not Task 17 and cannot replace or defer
-testing, linting, or adversarial review required before any of the 16 implementation commits.
+This sweep supplements the 15 per-task reviews. It is not Task 17 and cannot replace or defer
+testing, linting, or adversarial review required before any of the 15 implementation commits.
 If it discovers new work, record and execute that work as a new self-contained task rather
 than folding it retroactively into a completed commit.
 

@@ -1,7 +1,7 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class ServicesCoordinatorTests: XCTestCase {
+final class ServicesCoordinatorTests: MockURLProtocolTestCase {
 
     func testServiceNotificationStreamsSelectedTextToAudio() {
         // WHY: The macOS Services entry point ("Speak Selected Text with Clipboard TTS") must work
@@ -10,11 +10,9 @@ final class ServicesCoordinatorTests: XCTestCase {
         // posting the notification alone — with no view in existence — must drive selected text ->
         // network -> scheduled audio. hasAudio flipping true proves that whole chain ran.
         let audioPlayer = AudioPlayerManager()
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let networkManager = TTSNetworkManager(configuration: config)
+        let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     Data(repeating: 0, count: 2048))
         }
@@ -41,11 +39,9 @@ final class ServicesCoordinatorTests: XCTestCase {
         // the pipeline, streamTTS would fire a real network request — MockURLProtocol's XCTFail
         // handler makes that regression fail the test rather than silently hit the live API.
         let audioPlayer = AudioPlayerManager()
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let networkManager = TTSNetworkManager(configuration: config)
+        let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             XCTFail("Malformed notification must not start a network request")
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }

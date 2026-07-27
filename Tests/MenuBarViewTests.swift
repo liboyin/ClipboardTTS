@@ -2,15 +2,15 @@ import XCTest
 import SwiftUI
 @testable import ClipboardTTSApp
 
-final class MenuBarViewTests: XCTestCase {
+final class MenuBarViewTests: MockURLProtocolTestCase {
 
     func testTogglePlayPauseFlipsPlayingState() {
         // WHY: The single play/pause button is driven entirely by togglePlayPause flipping
         // audioPlayer.isPlaying. If toggling stopped alternating state, the button would lie about
         // what playback is doing. This asserts the toggle actually flips the state both ways.
         let audioPlayer = AudioPlayerManager()
-        let textExtraction = TextExtractionManager()
-        let networkManager = TTSNetworkManager(configuration: .ephemeral)
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
 
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
@@ -38,18 +38,13 @@ final class MenuBarViewTests: XCTestCase {
         // playing, the button must pull the clipboard text and stream it to audio. Asserting
         // hasAudio flips true proves clipboard -> network -> scheduled audio ran end to end.
         let audioPlayer = AudioPlayerManager()
-        let textExtraction = TextExtractionManager()
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [MockURLProtocol.self]
-        let networkManager = TTSNetworkManager(configuration: config)
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
+        let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
-        MockURLProtocol.requestHandler = { request in
+        MockURLProtocol.installRequestHandler { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     Data(repeating: 0, count: 2048))
         }
-
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("Speak me", forType: .string)
 
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
         view.speakCopiedText()
@@ -68,8 +63,8 @@ final class MenuBarViewTests: XCTestCase {
         // tear playback down (stop streaming + discard buffered audio) rather than start a new read.
         // If it didn't, the button would advertise a clear that never happens.
         let audioPlayer = AudioPlayerManager()
-        let textExtraction = TextExtractionManager()
-        let networkManager = TTSNetworkManager(configuration: .ephemeral)
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         // Buffer audio so hasAudio == true (the "Clear Buffer" precondition).
