@@ -34,7 +34,7 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
     - Remove a completed task's full active entry from `TODO.md` in that task's implementation commit.
     - Record detailed implementation history in the commit and current operating behavior in `README.md`; do not duplicate either in `TODO.md`.
     - `TODO.md` MAY retain one concise hand-over or decision note when the completion materially constrains remaining work. Link to `README.md` instead of repeating implementation detail.
-    - Update task counts, dependencies, and work-map references in the same commit.
+    - Update task counts, work-map references, and every remaining dependency that references the completed task in the same commit.
 - New or changed non-test types, functions, and methods MUST use Swift documentation comments (`///`) when their purpose, contract, side effects, or constraints are not obvious from the declaration. Test method names MUST describe the behavior under test; add a comment only when the reason or trade-off is not clear from the test.
 
 # Implementation Guidelines
@@ -52,6 +52,7 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 - `check-coverage.sh` is the source of truth for coverage measurement and thresholds. It uses XCTest coverage from `xccov` and requires at least 85% aggregate line coverage for `Sources/Managers/`.
 - `Sources/Views/` is exempt from the line-coverage gate because declarative SwiftUI bodies are exercised through construction smoke tests. Other exclusions MUST have a documented rationale and an end-to-end smoke test.
 - XCTest test cases MUST import the app with `@testable import ClipboardTTSApp`. Prefer injected dependencies and test doubles over modifying process-wide macOS state.
+- A process-global test double or shared asynchronous resource MUST define a per-test lifecycle: isolated ownership, synchronized access, teardown cancellation or invalidation, a quiescence check, and local accounting for unexpected late work. Assertions about asynchronous behavior MUST verify that work cannot escape its owning test's teardown boundary.
 - Tests that touch persisted app settings MUST call `isolateAppSettingsDefaults()` so the hosted test bundle neither reads nor overwrites the developer's configuration.
 - Generate `ClipboardTTSApp.xcodeproj` with `xcodegen generate` before building or testing when it is absent or `project.yml` changed. The generated project MUST NOT be committed.
 - After every code change, all gates MUST pass:
