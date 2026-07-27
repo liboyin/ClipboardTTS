@@ -13,8 +13,14 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var session: URLSession!
     private var sessionInvalidated: ((URLSession) -> Void)?
 
+    /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     private let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     private var activeRequest: ActiveRequestContext?
+
+    /// Returns the active task for debug-only delegate-ordering tests.
+    #if DEBUG
+    var activeTaskForTesting: URLSessionDataTask? { stateQueue.sync { activeRequest?.task } }
+    #endif
 
     private enum ProviderKind: Equatable {
         case openAICompatible
@@ -204,19 +210,19 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         completionHandler(shouldAllow ? .allow : .cancel)
     }
 
+    /// Validates and records an incoming task chunk before delivering OpenAI-compatible audio to the client.
+    ///
+    /// State validation and mutation finish under `stateQueue`. The client handler is captured there
+    /// but invoked only after the queue is released, so it may synchronously stop or replace the stream.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        stateQueue.sync {
-            guard var context = activeRequest,
-                  dataTask.taskIdentifier == context.taskIdentifier else { return }
-            if context.isErrorResponse {
-                context.errorData.append(data)
-            } else if context.provider == .gemini {
-                context.incrementalBuffer.append(data)
-            } else {
-                context.dataHandler(data)
-            }
-            activeRequest = context
+        let dataHandler: ((Data) -> Void)? = stateQueue.sync {
+            guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier else { return nil }
+            defer { activeRequest = context }
+            if context.isErrorResponse { context.errorData.append(data); return nil }
+            if context.provider == .gemini { context.incrementalBuffer.append(data); return nil }
+            return context.dataHandler
         }
+        dataHandler?(data)
     }
 
     struct TaskCompletionResult {

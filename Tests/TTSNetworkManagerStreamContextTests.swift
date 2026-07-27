@@ -2,6 +2,86 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
+    func testOpenAIHandlerCanStopStreamingWithoutReceivingLaterData() {
+        // WHY: Audio handlers may stop playback synchronously. They must run after stateQueue is
+        // released, otherwise stopStreaming recursively enters the same serial queue and hangs.
+        let manager = TestNetworkFactory.makeManager()
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+
+        let handlerStoppedStream = expectation(description: "Re-entrant handler stopped the stream")
+        let requestStarted = expectation(description: "Request context is active")
+        let allowRequestCompletion = DispatchSemaphore(value: 0)
+        let deliveryLock = NSLock()
+        let taskLock = NSLock()
+        let mockSession = TestNetworkFactory.makeSession()
+        var deliveryCount = 0
+        var taskForHandler: URLSessionDataTask?
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = allowRequestCompletion.wait(timeout: .now() + 1.0)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        manager.streamTTS(text: "Stop from handler") { _ in
+            deliveryLock.lock()
+            deliveryCount += 1
+            let isFirstDelivery = deliveryCount == 1
+            deliveryLock.unlock()
+
+            guard isFirstDelivery else { return }
+            manager.stopStreaming()
+            taskLock.lock()
+            let task = taskForHandler
+            taskLock.unlock()
+            guard let task else {
+                XCTFail("Expected the first callback to retain its task for stale-delivery testing.")
+                return
+            }
+            manager.urlSession(mockSession, dataTask: task, didReceive: Data("late audio chunk".utf8))
+            handlerStoppedStream.fulfill()
+        }
+        wait(for: [requestStarted], timeout: 1.0)
+        guard let activeTask = manager.activeTaskForTesting else {
+            XCTFail("Expected a task after streamTTS creates its request context.")
+            allowRequestCompletion.signal()
+            return
+        }
+
+        taskLock.lock()
+        taskForHandler = activeTask
+        taskLock.unlock()
+        let delegateCallbackReturned = expectation(description: "Delegate callback returned")
+        DispatchQueue.global(qos: .userInitiated).async {
+            manager.urlSession(mockSession, dataTask: activeTask, didReceive: Data("first audio chunk".utf8))
+            delegateCallbackReturned.fulfill()
+        }
+        let callbackResult = XCTWaiter().wait(
+            for: [handlerStoppedStream, delegateCallbackReturned],
+            timeout: 1.0
+        )
+        guard callbackResult == .completed else {
+            XCTFail("The handler must synchronously stop the stream without blocking the delegate callback.")
+            allowRequestCompletion.signal()
+            return
+        }
+        allowRequestCompletion.signal()
+
+        deliveryLock.lock()
+        XCTAssertEqual(deliveryCount, 1)
+        deliveryLock.unlock()
+        assertAfterMockQuiescence {
+            deliveryLock.lock()
+            XCTAssertEqual(deliveryCount, 1)
+            deliveryLock.unlock()
+        }
+    }
+
     func testNetworkManagerIgnoresStaleCallbacksAfterStreamReplacement() {
         // WHY: A late callback from a replaced request must not stop the new stream or send its
         // data to the replacement handler. URLSession cancellation cannot guarantee that a queued

@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 13 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 12 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -81,7 +81,6 @@ Complete this checklist separately for each numbered task:
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | Stale metadata responses can replace the current provider's models | Blocking | 5 |
-| The streaming callback executes while the state lock is held | Non-blocking | 4 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 | Playback starts immediately on the first playable packet | Requested implementation change | 12 |
 
@@ -109,33 +108,6 @@ Complete this checklist separately for each numbered task:
 ---
 
 ## Phase 2 — Repair network state and failure behavior
-
-### 4. Invoke client callbacks outside `stateQueue`
-
-**Classification:** Non-blocking
-
-**Depends on:** Phase 2 Task 3 (complete)
-
-**Problem.** The OpenAI data handler currently runs inside `stateQueue.sync`. A handler that
-calls `stopStreaming()` recursively synchronizes on the same serial queue and can deadlock or
-trap.
-
-**Required change.**
-
-1. Under `stateQueue`, validate the task and capture the data plus handler needed for delivery.
-2. Exit the queue before invoking client code.
-3. Apply the same rule to completion-time Gemini delivery after Task 9: no external callback,
-   UI publication, logging formatter, or decoder with unknown re-entrancy may run while the
-   state queue is held.
-4. Document the lock boundary and callback ordering.
-
-**Tests and falsification.**
-
-- Use a handler that calls `stopStreaming()` and prove it completes within a bounded timeout.
-- Verify no data is delivered after the re-entrant stop.
-- Mutation-test moving handler invocation back inside the queue.
-
-**Done when.** Client callbacks can safely stop or replace a stream without queue re-entry.
 
 ### 5. Reject stale provider-metadata completions
 
@@ -172,7 +144,7 @@ the current provider's model list.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 4–5 (Phase 2 Task 3 complete)
+**Depends on:** Task 5 (Phase 2 Task 3 complete)
 
 **Problem.** Invalid URLs, encoding failures, non-2xx responses, transport failures, and
 provider-decoding failures only print to the console. Users receive no explanation when
@@ -206,7 +178,7 @@ transport failure without consulting Console, and no secret can enter the UI or 
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 4–6 (Phase 2 Task 3 complete)
+**Depends on:** Phase 1 (complete) and Tasks 5–6 (Phase 2 Task 3 complete)
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -280,7 +252,7 @@ committed fixtures; legacy installs migrate without data loss.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 4, 6, and 8 (Phase 2 Task 3 complete)
+**Depends on:** Tasks 6 and 8 (Phase 2 Task 3 complete)
 
 **Problem.** Gemini currently calls the non-streaming endpoint, buffers the complete JSON
 response, and delivers audio only after task completion. This violates the project's
