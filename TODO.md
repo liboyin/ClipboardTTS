@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 14 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 13 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -73,7 +73,6 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Active requests change decoder when provider settings change | Blocking | 3 |
 | Seeking to the buffered end leaves false playing state | Blocking | 10 |
 | Custom requests send empty model and voice values | Blocking | 7 |
 | API keys use plaintext preferences, URL queries, and unsafe logging | Blocking | 8 |
@@ -111,44 +110,11 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 2 — Repair network state and failure behavior
 
-### 3. Bind response parsing to immutable per-request context
-
-**Classification:** Blocking
-
-**Depends on:** Phase 1 (complete)
-
-**Problem.** `streamTTS` chooses a request format from the current provider, but URL-session
-delegate callbacks later re-read mutable manager settings. Switching provider during an
-active request can forward Gemini JSON as PCM or buffer OpenAI PCM as Gemini data.
-
-**Required change.**
-
-1. Introduce an explicit provider kind and immutable request-settings snapshot.
-2. Store an active-request context under `stateQueue`. It must contain the task identifier,
-   provider/decoder kind, data handler, error state, and provider-specific incremental buffer.
-3. Delegate callbacks must consult only the context belonging to their task. They MUST NOT
-   infer response format from the manager's current `baseURL`.
-4. Preserve the current non-cancelling behavior unless the user directs otherwise:
-   `updateSettings` affects the next request only, while the active task finishes with its
-   captured configuration.
-5. Preserve stale-task rejection and the audio stream-generation guard.
-
-**Tests and falsification.**
-
-- Start delayed Gemini, switch settings to OpenAI, and assert only decoded Gemini audio is
-  delivered.
-- Start delayed OpenAI, switch settings to Gemini, and assert PCM is forwarded unchanged.
-- Cover stale data and completion callbacks after stop and after replacement.
-- Mutation-test delegate code that consults current settings instead of task context.
-
-**Done when.** Provider changes cannot alter an active task's URL, authentication, payload,
-decoder, buffers, or handler.
-
 ### 4. Invoke client callbacks outside `stateQueue`
 
 **Classification:** Non-blocking
 
-**Depends on:** Task 3
+**Depends on:** Phase 2 Task 3 (complete)
 
 **Problem.** The OpenAI data handler currently runs inside `stateQueue.sync`. A handler that
 calls `stopStreaming()` recursively synchronizes on the same serial queue and can deadlock or
@@ -175,7 +141,7 @@ trap.
 
 **Classification:** Blocking
 
-**Depends on:** Task 3
+**Depends on:** Phase 2 Task 3 (complete)
 
 **Problem.** A delayed OpenAI model request can complete after a switch to Gemini and replace
 the current provider's model list.
@@ -206,7 +172,7 @@ the current provider's model list.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 3–5
+**Depends on:** Tasks 4–5 (Phase 2 Task 3 complete)
 
 **Problem.** Invalid URLs, encoding failures, non-2xx responses, transport failures, and
 provider-decoding failures only print to the console. Users receive no explanation when
@@ -240,7 +206,7 @@ transport failure without consulting Console, and no secret can enter the UI or 
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 3–6
+**Depends on:** Phase 1 (complete) and Tasks 4–6 (Phase 2 Task 3 complete)
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -314,7 +280,7 @@ committed fixtures; legacy installs migrate without data loss.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 3, 4, 6, and 8
+**Depends on:** Tasks 4, 6, and 8 (Phase 2 Task 3 complete)
 
 **Problem.** Gemini currently calls the non-streaming endpoint, buffers the complete JSON
 response, and delivers audio only after task completion. This violates the project's
@@ -325,7 +291,7 @@ time-to-first-audio goal.
 1. Verify the current Gemini TTS streaming endpoint, authentication, event format, audio
    encoding, and whether chunks are actually emitted incrementally using official Google
    documentation. Provider formats are not stable enough to implement from memory.
-2. Put streaming parser state in Task 3's active-request context.
+2. Put streaming parser state in the active-request context introduced by Phase 2 Task 3.
 3. Implement a small incremental event parser that accepts arbitrary byte boundaries, retains
    incomplete events, handles the documented line-ending form, and emits only complete events.
 4. Decode and forward each complete audio chunk outside the state queue. Do not attempt base64

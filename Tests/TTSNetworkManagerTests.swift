@@ -147,6 +147,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         let mockSession = TestNetworkFactory.makeSession()
         let staleTask = mockSession.dataTask(with: URL(string: "https://mock.api/v1/audio/speech")!)
         manager.urlSession(mockSession, dataTask: staleTask, didReceive: Data("late chunk".utf8))
+        manager.urlSession(mockSession, task: staleTask, didCompleteWithError: nil)
 
         let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {

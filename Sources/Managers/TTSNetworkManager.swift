@@ -11,16 +11,40 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var voice: String
 
     private var session: URLSession!
-    private var currentTask: URLSessionDataTask?
-    private var dataHandler: ((Data) -> Void)?
     private var sessionInvalidated: ((URLSession) -> Void)?
 
-    private var isErrorResponse = false
-    private var errorData = Data()
-    private var geminiBuffer = Data()
-
     private let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
-    private var activeTaskIdentifier: Int?
+    private var activeRequest: ActiveRequestContext?
+
+    private enum ProviderKind: Equatable {
+        case openAICompatible
+        case gemini
+
+        init(baseURL: String) {
+            self = baseURL.contains("generativelanguage.googleapis.com") ? .gemini : .openAICompatible
+        }
+    }
+
+    /// The values used to create one request, captured before the task is resumed.
+    private struct RequestSettings {
+        let baseURL: String
+        let apiKey: String
+        let model: String
+        let voice: String
+        let provider: ProviderKind
+    }
+
+    /// State that belongs exclusively to the active URL session task and is guarded by `stateQueue`.
+    private struct ActiveRequestContext {
+        let task: URLSessionDataTask
+        let taskIdentifier: Int
+        let settings: RequestSettings
+        let provider: ProviderKind
+        let dataHandler: (Data) -> Void
+        var isErrorResponse = false
+        var errorData = Data()
+        var incrementalBuffer = Data()
+    }
 
     /// Creates a manager and optionally observes the lifecycle of its underlying URL session.
     init(configuration: URLSessionConfiguration = .default,
@@ -50,20 +74,49 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         self.sessionInvalidated = sessionInvalidated
     }
 
-    private var isGeminiEndpoint: Bool {
-        baseURL.contains("generativelanguage.googleapis.com")
+    func updateSettings(baseURL: String, apiKey: String, model: String, voice: String) {
+        stateQueue.sync {
+            self.baseURL = baseURL
+            self.apiKey = apiKey
+            self.model = model
+            self.voice = voice
+        }
     }
 
-    func updateSettings(baseURL: String, apiKey: String, model: String, voice: String) {
-        self.baseURL = baseURL
-        self.apiKey = apiKey
-        self.model = model
-        self.voice = voice
+    private func requestSettingsSnapshot() -> RequestSettings {
+        stateQueue.sync {
+            RequestSettings(
+                baseURL: baseURL,
+                apiKey: apiKey,
+                model: model,
+                voice: voice,
+                provider: ProviderKind(baseURL: baseURL)
+            )
+        }
+    }
+
+    private func replaceActiveRequest(with task: URLSessionDataTask,
+                                      settings: RequestSettings,
+                                      dataHandler: @escaping (Data) -> Void) {
+        stateQueue.sync {
+            // Swap all task-owned state together so a previous task cannot deliver its data to
+            // the new handler in the window between cancellation and context replacement.
+            activeRequest?.task.cancel()
+            activeRequest = ActiveRequestContext(
+                task: task,
+                taskIdentifier: task.taskIdentifier,
+                settings: settings,
+                provider: settings.provider,
+                dataHandler: dataHandler
+            )
+        }
     }
 
     func streamTTS(text: String, dataHandler: @escaping (Data) -> Void) {
-        let isGemini = isGeminiEndpoint
-        let urlString = isGemini ? "\(baseURL)/models/\(model):generateContent?key=\(apiKey)" : baseURL
+        let settings = requestSettingsSnapshot()
+        let urlString = settings.provider == .gemini
+            ? "\(settings.baseURL)/models/\(settings.model):generateContent?key=\(settings.apiKey)"
+            : settings.baseURL
 
         guard let url = URL(string: urlString) else {
             print("TTSNetworkManager Error: Invalid or missing baseURL (\(urlString))")
@@ -74,13 +127,13 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if !isGemini {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if settings.provider == .openAICompatible {
+            request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
         }
 
         do {
             let bodyData: Data
-            if isGemini {
+            if settings.provider == .gemini {
                 let geminiBody: [String: Any] = [
                     "contents": [["parts": [["text": text]]]],
                     "generationConfig": [
@@ -88,7 +141,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
                         "speechConfig": [
                             "voiceConfig": [
                                 "prebuiltVoiceConfig": [
-                                    "voiceName": voice
+                                    "voiceName": settings.voice
                                 ]
                             ]
                         ]
@@ -97,9 +150,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
                 bodyData = try JSONSerialization.data(withJSONObject: geminiBody)
             } else {
                 let openaiBody: [String: Any] = [
-                    "model": model,
+                    "model": settings.model,
                     "input": text,
-                    "voice": voice,
+                    "voice": settings.voice,
                     "response_format": "pcm"
                 ]
                 bodyData = try JSONSerialization.data(withJSONObject: openaiBody)
@@ -111,33 +164,20 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         }
 
         let task = session.dataTask(with: request)
-        stateQueue.sync {
-            // Swap the task identifier and handler together so a still-active previous task cannot
-            // deliver its data to the new handler in the window between the two.
-            currentTask?.cancel()
-            currentTask = task
-            activeTaskIdentifier = task.taskIdentifier
-            self.dataHandler = dataHandler
-
-            isErrorResponse = false
-            errorData.removeAll()
-            geminiBuffer.removeAll()
-        }
+        replaceActiveRequest(with: task, settings: settings, dataHandler: dataHandler)
 
         DispatchQueue.main.async {
             self.isStreaming = true
         }
 
-        print("Starting TTS stream to \(baseURL) with model: \(model), voice: \(voice)")
+        print("Starting TTS stream to \(settings.baseURL) with model: \(settings.model), voice: \(settings.voice)")
         task.resume()
     }
 
     func stopStreaming() {
         stateQueue.sync {
-            currentTask?.cancel()
-            currentTask = nil
-            activeTaskIdentifier = nil
-            dataHandler = nil
+            activeRequest?.task.cancel()
+            activeRequest = nil
         }
         DispatchQueue.main.async {
             self.isStreaming = false
@@ -150,14 +190,15 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         var shouldAllow = false
         stateQueue.sync {
-            if dataTask.taskIdentifier == activeTaskIdentifier {
+            if var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier {
                 shouldAllow = true
                 if let httpResponse = response as? HTTPURLResponse {
                     print("Received HTTP Status Code: \(httpResponse.statusCode)")
                     if !(200...299).contains(httpResponse.statusCode) {
-                        isErrorResponse = true
+                        context.isErrorResponse = true
                     }
                 }
+                activeRequest = context
             }
         }
         completionHandler(shouldAllow ? .allow : .cancel)
@@ -165,14 +206,16 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         stateQueue.sync {
-            guard dataTask.taskIdentifier == activeTaskIdentifier else { return }
-            if isErrorResponse {
-                errorData.append(data)
-            } else if isGeminiEndpoint {
-                geminiBuffer.append(data)
+            guard var context = activeRequest,
+                  dataTask.taskIdentifier == context.taskIdentifier else { return }
+            if context.isErrorResponse {
+                context.errorData.append(data)
+            } else if context.provider == .gemini {
+                context.incrementalBuffer.append(data)
             } else {
-                dataHandler?(data)
+                context.dataHandler(data)
             }
+            activeRequest = context
         }
     }
 
@@ -186,31 +229,26 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     private func processCompletedTask(_ task: URLSessionTask) -> TaskCompletionResult {
         return stateQueue.sync {
-            if task.taskIdentifier != activeTaskIdentifier {
+            guard let context = activeRequest, task.taskIdentifier == context.taskIdentifier else {
                 return TaskCompletionResult(audioData: nil, handler: nil, errorString: nil, hadError: false, isStale: true)
             }
 
             var audioData: Data?
-            if isGeminiEndpoint && !isErrorResponse {
-                audioData = extractGeminiAudioData(from: geminiBuffer)
+            if context.provider == .gemini && !context.isErrorResponse {
+                audioData = extractGeminiAudioData(from: context.incrementalBuffer)
             }
 
-            var errorString: String?
-            if isErrorResponse {
-                errorString = String(data: errorData, encoding: .utf8)
-            }
+            let errorString = context.isErrorResponse ? String(data: context.errorData, encoding: .utf8) : nil
 
             let result = TaskCompletionResult(
                 audioData: audioData,
-                handler: dataHandler,
+                handler: context.dataHandler,
                 errorString: errorString,
-                hadError: isErrorResponse,
+                hadError: context.isErrorResponse,
                 isStale: false
             )
 
-            activeTaskIdentifier = nil
-            currentTask = nil
-            dataHandler = nil
+            activeRequest = nil
 
             return result
         }
