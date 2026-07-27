@@ -5,17 +5,23 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     @Published var availableModels: [String] = []
     @Published var availableVoices: [String] = []
 
-    private var baseURL: String
+    private(set) var baseURL: String
     private var apiKey: String
     private var model: String
     private var voice: String
 
-    private var session: URLSession!
+    var session: URLSession!
     private var sessionInvalidated: ((URLSession) -> Void)?
 
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
-    private let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
+    let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     private var activeRequest: ActiveRequestContext?
+    private(set) var selectedMetadataProvider: String
+    var metadataGeneration: UInt64 = 0
+    var nextMetadataRequestIdentifier: UInt64 = 0
+    var modelMetadataRequest: MetadataRequest?
+    var voiceMetadataRequest: MetadataRequest?
+    var isPublishingMetadata = false
 
     /// Returns the active task for debug-only delegate-ordering tests.
     #if DEBUG
@@ -57,6 +63,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil) {
         let provider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+        self.selectedMetadataProvider = provider
         if provider == "OpenAI" {
             self.baseURL = "https://api.openai.com/v1/audio/speech"
             self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyOpenAIAPIKey) ?? ""
@@ -80,12 +87,32 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         self.sessionInvalidated = sessionInvalidated
     }
 
-    func updateSettings(baseURL: String, apiKey: String, model: String, voice: String) {
-        stateQueue.sync {
+    /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
+    func updateSettings(baseURL: String,
+                        apiKey: String,
+                        model: String,
+                        voice: String,
+                        selectedProvider: String? = nil) {
+        let invalidatedGeneration: UInt64? = stateQueue.sync {
+            let nextMetadataProvider = selectedProvider ?? inferredMetadataProvider(for: baseURL)
+            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != nextMetadataProvider
             self.baseURL = baseURL
             self.apiKey = apiKey
             self.model = model
             self.voice = voice
+            self.selectedMetadataProvider = nextMetadataProvider
+
+            guard metadataScopeChanged else { return nil }
+
+            metadataGeneration &+= 1
+            modelMetadataRequest?.task?.cancel()
+            voiceMetadataRequest?.task?.cancel()
+            modelMetadataRequest = nil
+            voiceMetadataRequest = nil
+            return metadataGeneration
+        }
+        if let invalidatedGeneration {
+            clearMetadataLists(for: invalidatedGeneration)
         }
     }
 
@@ -300,87 +327,4 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         return Data(base64Encoded: base64String)
     }
 
-    struct OpenAIModelsResponse: Decodable {
-        struct Model: Decodable {
-            let id: String
-        }
-        let data: [Model]
-    }
-
-    func fetchAvailableModels(baseURL: String, apiKey: String) {
-        if baseURL.contains("generativelanguage.googleapis.com") {
-            self.availableModels = ["gemini-3.1-flash-tts-preview"]
-            return
-        }
-
-        let modelsURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/models")
-        guard let url = URL(string: modelsURLString) else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        self.session.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else { return }
-
-            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                print("Failed to fetch models: HTTP \(httpResponse.statusCode)")
-                return
-            }
-
-            do {
-                let res = try JSONDecoder().decode(OpenAIModelsResponse.self, from: data)
-                DispatchQueue.main.async {
-                    self.availableModels = res.data.map { $0.id }.filter { $0.contains("tts") }
-                }
-            } catch {
-                print("Failed to decode models: \(error)")
-            }
-        }.resume()
-    }
-
-    func fetchAvailableVoices(baseURL: String, apiKey: String) {
-        if baseURL.contains("api.openai.com") {
-            self.availableVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-            return
-        }
-
-        if baseURL.contains("generativelanguage.googleapis.com") {
-            self.availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
-            return
-        }
-
-        let voicesURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/audio/voices")
-        guard let url = URL(string: voicesURLString) else { return }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-
-        self.session.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else { return }
-
-            if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
-                print("Failed to fetch voices: HTTP \(httpResponse.statusCode)")
-                return
-            }
-
-            do {
-                if let dict = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
-                    var fetchedVoices: [String] = []
-                    if let dataArray = dict["data"] as? [[String: Any]] {
-                        fetchedVoices = dataArray.compactMap { $0["id"] as? String ?? $0["name"] as? String }
-                    } else if let voicesArray = dict["voices"] as? [String] {
-                        fetchedVoices = voicesArray
-                    }
-
-                    if !fetchedVoices.isEmpty {
-                        DispatchQueue.main.async {
-                            self.availableVoices = fetchedVoices
-                        }
-                    }
-                }
-            } catch {
-                print("Failed to decode voices: \(error)")
-            }
-        }.resume()
-    }
 }

@@ -11,8 +11,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let networkManager = TestNetworkFactory.makeManager()
         let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
 
-        let metadataRequests = expectation(description: "OpenAI metadata requests are mock routed")
-        metadataRequests.expectedFulfillmentCount = 2
+        let metadataRequests = expectation(description: "OpenAI model metadata is mock routed")
         MockURLProtocol.installRequestHandler { request in
             metadataRequests.fulfill()
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -28,7 +27,6 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         XCTAssertEqual(view.currentModel, "tts-1-hd")
         XCTAssertEqual(view.currentVoice, "nova")
         view.syncSettings()
-        view.fetchMetadata()
         wait(for: [metadataRequests], timeout: 2.0)
 
         UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)

@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 12 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 11 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -80,7 +80,6 @@ Complete this checklist separately for each numbered task:
 | Network and API failures are invisible in the UI | Blocking | 6 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
-| Stale metadata responses can replace the current provider's models | Blocking | 5 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 | Playback starts immediately on the first playable packet | Requested implementation change | 12 |
 
@@ -109,42 +108,11 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 2 — Repair network state and failure behavior
 
-### 5. Reject stale provider-metadata completions
-
-**Classification:** Blocking
-
-**Depends on:** Phase 2 Task 3 (complete)
-
-**Problem.** A delayed OpenAI model request can complete after a switch to Gemini and replace
-the current provider's model list.
-
-**Required change.**
-
-1. Track model and voice metadata requests explicitly, using cancellation plus a provider or
-   generation token checked before publication. Cancellation alone is not sufficient because
-   completion can race.
-2. Invalidate outstanding metadata work whenever the selected provider or endpoint changes.
-3. Publish results on the main actor/queue only when the response still belongs to the current
-   metadata generation.
-4. Keep model and voice request state separate if they can complete independently.
-5. Clear or replace lists deterministically during provider changes so the UI never presents
-   entries from the previous provider.
-
-**Tests and falsification.**
-
-- Delay an OpenAI model response, switch to Gemini, complete the old response, and assert the
-  Gemini list remains.
-- Repeat with two Custom endpoints and with voice metadata.
-- Cover cancellation, malformed responses, and an empty successful list.
-- Mutation-test removal of the generation/provider guard.
-
-**Done when.** Only the latest provider and endpoint may publish model or voice metadata.
-
 ### 6. Surface request failures to the user
 
 **Classification:** Blocking
 
-**Depends on:** Task 5 (Phase 2 Task 3 complete)
+**Depends on:** Phase 2 Task 3 (complete)
 
 **Problem.** Invalid URLs, encoding failures, non-2xx responses, transport failures, and
 provider-decoding failures only print to the console. Users receive no explanation when
@@ -178,7 +146,7 @@ transport failure without consulting Console, and no secret can enter the UI or 
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 5–6 (Phase 2 Task 3 complete)
+**Depends on:** Phase 1 (complete) and Task 6 (Phase 2 Task 3 complete)
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -404,7 +372,7 @@ change.
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 5 and 7
+**Depends on:** Phase 1 (complete) and Task 7
 
 **Problem.** Voice selection exists only in Settings, although `USER_STORIES.md` requires it
 in the menu and restricts changes to idle state.

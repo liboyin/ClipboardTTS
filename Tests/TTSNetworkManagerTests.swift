@@ -221,33 +221,6 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
-    func testFetchAvailableModels() {
-        let manager = TestNetworkFactory.makeManager()
-
-        // Test Gemini (returns hardcoded instantly)
-        manager.fetchAvailableModels(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token")
-        XCTAssertEqual(manager.availableModels.first, "gemini-3.1-flash-tts-preview")
-
-        // Test OpenAI (requires mock request)
-        let expectation = XCTestExpectation(description: "Wait for models fetch")
-        MockURLProtocol.installRequestHandler { request in
-            let mockResponse = Data("""
-            { "data": [ {"id": "tts-1"}, {"id": "tts-1-hd"}, {"id": "gpt-4"} ] }
-            """.utf8)
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, mockResponse)
-        }
-
-        manager.fetchAvailableModels(baseURL: "https://api.openai.com/v1/audio/speech", apiKey: "test")
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            XCTAssertTrue(manager.availableModels.contains("tts-1"))
-            XCTAssertTrue(manager.availableModels.contains("tts-1-hd"))
-            XCTAssertFalse(manager.availableModels.contains("gpt-4"))
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2.0)
-    }
-
     func testNetworkManagerInitReadsProviderSpecificDefaults() {
         // WHY: SettingsView persists model/voice under provider-specific UserDefaults keys
         // (openaiModel/openaiVoice, geminiModel/geminiVoice). The manager's init must read the
@@ -341,32 +314,4 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [geminiExpectation], timeout: 2.0)
     }
 
-    func testFetchAvailableVoices() {
-        let manager = TestNetworkFactory.makeManager()
-
-        // Test OpenAI (hardcoded)
-        manager.fetchAvailableVoices(baseURL: "https://api.openai.com/v1/audio/speech", apiKey: "test")
-        XCTAssertTrue(manager.availableVoices.contains("alloy"))
-
-        // Test Gemini (hardcoded)
-        manager.fetchAvailableVoices(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "test")
-        XCTAssertTrue(manager.availableVoices.contains("Aoede"))
-
-        // Test Custom (requires mock request)
-        let expectation = XCTestExpectation(description: "Wait for voices fetch")
-        MockURLProtocol.installRequestHandler { request in
-            let mockResponse = Data("""
-            { "voices": ["custom-voice-1", "custom-voice-2"] }
-            """.utf8)
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, mockResponse)
-        }
-
-        manager.fetchAvailableVoices(baseURL: "https://custom.api/v1/audio/speech", apiKey: "test")
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            XCTAssertTrue(manager.availableVoices.contains("custom-voice-1"))
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2.0)
-    }
 }

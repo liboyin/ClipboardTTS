@@ -9,12 +9,13 @@ Sources/
     AudioPlayerManager.swift
     TextExtractionManager.swift
     TTSNetworkManager.swift
+    TTSNetworkManager+Metadata.swift # guarded model/voice metadata requests
     ServicesCoordinator.swift   # bridges the macOS Services flow into the audio pipeline
   Views/
     MenuBarView.swift
     SettingsView.swift
-Tests/                        # XCTest, one file per Manager/View + shared MockURLProtocol
-                              # and UserDefaultsSnapshot (settings isolation)
+Tests/                        # XCTest, including focused metadata state/race suites, shared
+                              # MockURLProtocol, and UserDefaultsSnapshot (settings isolation)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
 ```
 
@@ -23,7 +24,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 - **UI**: SwiftUI `MenuBarExtra` for playback controls; a separate `Window` hosts settings to keep the dropdown focused on play/pause/progress/speed. The settings window includes an endpoint test action.
 - **Audio**: `AVAudioEngine` + `AVAudioPlayerNode` (not `AVPlayer`) so playback speed can be adjusted via `AVAudioUnitTimePitch` without altering pitch.
 - **Text**: `TextExtractionManager` reads through an injected, read-only pasteboard adapter; the production adapter uses `NSPasteboard.general`. The menu-bar flow deactivates the app and defers the read by 0.2 seconds before starting TTS.
-- **Network**: `URLSession` with HTTP chunked streaming, so playback starts on the first bytes from the TTS provider rather than after the full payload downloads. Each task captures its provider, endpoint, credentials, request inputs, decoder, and incremental parsing state at creation; later settings changes apply only to the next request. A delegate callback validates and records task state under a private serial queue before invoking its audio handler after releasing that queue, so handlers may synchronously stop or replace a stream. Minimizing Time-To-First-Byte is a primary design goal.
+- **Network**: `URLSession` with HTTP chunked streaming, so playback starts on the first bytes from the TTS provider rather than after the full payload downloads. Each task captures its provider, endpoint, credentials, request inputs, decoder, and incremental parsing state at creation; later settings changes apply only to the next request. Model and voice metadata maintain independent cancellable request state and generation tokens; only metadata for the still-selected provider and endpoint may update the UI. Cancellation limits unnecessary work but is not a freshness guarantee: a completion must still match its active request token. Metadata source identity includes both the selected provider and endpoint, because multiple Custom endpoints use the same OpenAI-compatible transport. A delegate callback validates and records task state under a private serial queue before invoking its audio handler after releasing that queue, so handlers may synchronously stop or replace a stream. Minimizing Time-To-First-Byte is a primary design goal.
 - **Settings**: `SettingsKeys` is the sole owner of persisted preference names. It also retains the three legacy plaintext API-key names only until their Keychain migration; Keychain account identifiers remain separate.
 - **Services**: The macOS right-click "Speak Selected Text with Clipboard TTS" service posts a notification handled by `ServicesCoordinator`, which lives for the whole app lifetime (created in `ClipboardTTSApp.init`). This is deliberately *not* in `MenuBarView`: `MenuBarExtra(.window)` builds its body only when the dropdown is first opened, so a view-hosted observer would drop the service until then.
 

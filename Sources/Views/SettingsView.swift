@@ -133,7 +133,8 @@ struct SettingsView: View {
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
             model: currentModel,
-            voice: currentVoice
+            voice: currentVoice,
+            selectedProvider: ttsProvider
         )
         networkManager.stopStreaming()
         audioPlayer.stop()
@@ -152,15 +153,24 @@ struct SettingsView: View {
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
             model: currentModel,
-            voice: currentVoice
+            voice: currentVoice,
+            selectedProvider: ttsProvider
         )
         fetchMetadata()
     }
 
     func fetchMetadata() {
         if ttsProvider == "Custom" { return }
-        networkManager.fetchAvailableModels(baseURL: currentBaseURL, apiKey: currentAPIKey)
-        networkManager.fetchAvailableVoices(baseURL: currentBaseURL, apiKey: currentAPIKey)
+        networkManager.fetchAvailableModels(
+            baseURL: currentBaseURL,
+            apiKey: currentAPIKey,
+            selectedProvider: ttsProvider
+        )
+        networkManager.fetchAvailableVoices(
+            baseURL: currentBaseURL,
+            apiKey: currentAPIKey,
+            selectedProvider: ttsProvider
+        )
     }
 }
 
