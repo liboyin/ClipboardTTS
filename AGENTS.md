@@ -11,6 +11,15 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 - Claims that an action succeeded MUST use a check whose output would differ on failures. Treat non-zero exit codes as failures until explained. Verify absence directly instead of inferring it.
 - Before considering a task done, you MUST re-check compliance with this file.
 
+# Workflow Guidelines
+
+- The planner defines a task's intended boundary, dependencies, non-goals, validation strategy, and done criteria in `TODO.md`. Each task MUST remain a self-contained commit.
+- The executor MUST re-read the task and affected code before implementation. `TODO.md` is a contract to validate against the repository, not permission to apply it mechanically.
+- When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the task boundary unilaterally.
+- The executor MAY make a non-material assumption only when it is supported by repository evidence and does not alter the requested outcome. Its final hand-over MUST name the assumption, supporting evidence, and effect on the change.
+- If user direction changes a task's material boundary, update `TODO.md` before committing so the remaining execution plan stays authoritative.
+- The adversarial reviewer independently evaluates the complete dirty tree against the task boundary; review findings re-enter the executor's test and review loop.
+
 # Documentation Guidelines
 
 - Each document SHOULD be the unique owner of its assigned topic. Other docs SHOULD link or summarize without becoming competing sources of truth.
@@ -21,6 +30,11 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
     - `USER_STORIES.md` owns product requirements and user-visible behavior.
     - `TODO.md` is the phased execution plan and hand-over log. It records work still to do and decisions already made.
     - `README.md` is the project overview and operating guide. It owns the current architecture, design assumptions, and build, test, and distribution procedures.
+- Completed-task handling:
+    - Remove a completed task's full active entry from `TODO.md` in that task's implementation commit.
+    - Record detailed implementation history in the commit and current operating behavior in `README.md`; do not duplicate either in `TODO.md`.
+    - `TODO.md` MAY retain one concise hand-over or decision note when the completion materially constrains remaining work. Link to `README.md` instead of repeating implementation detail.
+    - Update task counts, dependencies, and work-map references in the same commit.
 - New or changed non-test types, functions, and methods MUST use Swift documentation comments (`///`) when their purpose, contract, side effects, or constraints are not obvious from the declaration. Test method names MUST describe the behavior under test; add a comment only when the reason or trade-off is not clear from the test.
 
 # Implementation Guidelines

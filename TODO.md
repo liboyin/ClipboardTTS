@@ -17,6 +17,8 @@ Keep those documents current rather than duplicating their content here.
 - Every task must leave the repository coherent and independently pass all required tests,
   coverage, lint, and review gates. If that is impossible within the stated boundary, stop
   and ask the user to revise the task instead of borrowing changes from another task.
+- When execution exposes a material ambiguity or trade-off, follow the escalation rules in
+  `AGENTS.md`; do not broaden or rewrite the task boundary without the user's direction.
 - Before implementation, re-read every path named by the task because line numbers and
   surrounding code may have moved.
 - Add tests that encode the user or system consequence of the behavior. Mutation-test every
@@ -27,7 +29,9 @@ Keep those documents current rather than duplicating their content here.
   None of the 15 implementation tasks may use the documentation-only review exemption for the
   task as a whole.
 - Remove a completed task from this file in its implementation commit. Move durable decisions
-  or architectural facts into `README.md` rather than leaving completed history here.
+  or architectural facts into `README.md` rather than leaving completed history here. A concise
+  hand-over note is permitted only when it materially constrains remaining work, as defined in
+  `AGENTS.md`.
 
 ## Per-task commit checklist
 
