@@ -33,14 +33,35 @@ final class UserDefaultsSnapshotTests: XCTestCase {
         // pass vacuously on a fresh checkout. Teardown blocks run in reverse order of
         // registration, so the plants are undone before the originals are put back.
         isolateAppSettingsDefaults()
-        for key in AppSettingsDefaults.keys {
+        for key in SettingsKeys.allUserDefaultsKeys {
             UserDefaults.standard.set("planted-\(key)", forKey: key)
         }
 
         isolateAppSettingsDefaults()
 
-        for key in AppSettingsDefaults.keys {
+        for key in SettingsKeys.allUserDefaultsKeys {
             XCTAssertNil(UserDefaults.standard.object(forKey: key), "\(key) should be cleared")
         }
+    }
+
+    func testAllUserDefaultsKeysContainsEachDeclaredKeyExactlyOnce() {
+        // WHY: test isolation must clear every persisted setting. Omitting even one newly added
+        // key would let that setting leak from a developer's app into tests, or let a test
+        // overwrite it permanently.
+        let declaredKeys = [
+            SettingsKeys.ttsProvider,
+            SettingsKeys.apiBaseURL,
+            SettingsKeys.openAIModel,
+            SettingsKeys.openAIVoice,
+            SettingsKeys.geminiModel,
+            SettingsKeys.geminiVoice,
+            SettingsKeys.legacyOpenAIAPIKey,
+            SettingsKeys.legacyGeminiAPIKey,
+            SettingsKeys.legacyCustomAPIKey
+        ]
+
+        XCTAssertEqual(Set(SettingsKeys.allUserDefaultsKeys), Set(declaredKeys))
+        XCTAssertEqual(SettingsKeys.allUserDefaultsKeys.count, declaredKeys.count)
+        XCTAssertEqual(Set(SettingsKeys.allUserDefaultsKeys).count, SettingsKeys.allUserDefaultsKeys.count)
     }
 }

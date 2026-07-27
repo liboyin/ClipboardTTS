@@ -4,15 +4,15 @@ struct SettingsView: View {
     @ObservedObject var networkManager: TTSNetworkManager
     @ObservedObject var audioPlayer: AudioPlayerManager
 
-    @AppStorage("ttsProvider") private var ttsProvider: String = "OpenAI"
-    @AppStorage("apiBaseURL") private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
-    @AppStorage("apiKey") private var openaiAPIKey: String = ""
-    @AppStorage("geminiAPIKey") private var geminiAPIKey: String = ""
-    @AppStorage("customAPIKey") private var customAPIKey: String = ""
-    @AppStorage("openaiModel") private var openaiModel: String = "tts-1"
-    @AppStorage("openaiVoice") private var openaiVoice: String = "alloy"
-    @AppStorage("geminiModel") private var geminiModel: String = "gemini-3.1-flash-tts-preview"
-    @AppStorage("geminiVoice") private var geminiVoice: String = "Aoede"
+    @AppStorage(SettingsKeys.ttsProvider) private var ttsProvider: String = "OpenAI"
+    @AppStorage(SettingsKeys.apiBaseURL) private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
+    @AppStorage(SettingsKeys.legacyOpenAIAPIKey) private var openaiAPIKey: String = ""
+    @AppStorage(SettingsKeys.legacyGeminiAPIKey) private var geminiAPIKey: String = ""
+    @AppStorage(SettingsKeys.legacyCustomAPIKey) private var customAPIKey: String = ""
+    @AppStorage(SettingsKeys.openAIModel) private var openaiModel: String = "tts-1"
+    @AppStorage(SettingsKeys.openAIVoice) private var openaiVoice: String = "alloy"
+    @AppStorage(SettingsKeys.geminiModel) private var geminiModel: String = "gemini-3.1-flash-tts-preview"
+    @AppStorage(SettingsKeys.geminiVoice) private var geminiVoice: String = "Aoede"
     var currentAPIKey: String {
         if ttsProvider == "OpenAI" { return openaiAPIKey }
         if ttsProvider == "Gemini" { return geminiAPIKey }

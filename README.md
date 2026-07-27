@@ -24,6 +24,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 - **Audio**: `AVAudioEngine` + `AVAudioPlayerNode` (not `AVPlayer`) so playback speed can be adjusted via `AVAudioUnitTimePitch` without altering pitch.
 - **Text**: `TextExtractionManager` reads through an injected, read-only pasteboard adapter; the production adapter uses `NSPasteboard.general`. The menu-bar flow deactivates the app and defers the read by 0.2 seconds before starting TTS.
 - **Network**: `URLSession` with HTTP chunked streaming, so playback starts on the first bytes from the TTS provider rather than after the full payload downloads. Minimizing Time-To-First-Byte is a primary design goal.
+- **Settings**: `SettingsKeys` is the sole owner of persisted preference names. It also retains the three legacy plaintext API-key names only until their Keychain migration; Keychain account identifiers remain separate.
 - **Services**: The macOS right-click "Speak Selected Text with Clipboard TTS" service posts a notification handled by `ServicesCoordinator`, which lives for the whole app lifetime (created in `ClipboardTTSApp.init`). This is deliberately *not* in `MenuBarView`: `MenuBarExtra(.window)` builds its body only when the dropdown is first opened, so a view-hosted observer would drop the service until then.
 
 ## Design Assumptions

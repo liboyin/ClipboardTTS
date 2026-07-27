@@ -26,20 +26,20 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     init(configuration: URLSessionConfiguration = .default,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil) {
-        let provider = UserDefaults.standard.string(forKey: "ttsProvider") ?? "OpenAI"
+        let provider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         if provider == "OpenAI" {
             self.baseURL = "https://api.openai.com/v1/audio/speech"
-            self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
-            self.model = UserDefaults.standard.string(forKey: "openaiModel") ?? "tts-1"
-            self.voice = UserDefaults.standard.string(forKey: "openaiVoice") ?? "alloy"
+            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyOpenAIAPIKey) ?? ""
+            self.model = UserDefaults.standard.string(forKey: SettingsKeys.openAIModel) ?? "tts-1"
+            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice) ?? "alloy"
         } else if provider == "Gemini" {
             self.baseURL = "https://generativelanguage.googleapis.com/v1beta"
-            self.apiKey = UserDefaults.standard.string(forKey: "geminiAPIKey") ?? ""
-            self.model = UserDefaults.standard.string(forKey: "geminiModel") ?? "gemini-3.1-flash-tts-preview"
-            self.voice = UserDefaults.standard.string(forKey: "geminiVoice") ?? "Aoede"
+            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyGeminiAPIKey) ?? ""
+            self.model = UserDefaults.standard.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview"
+            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede"
         } else {
-            self.baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "https://api.openai.com/v1/audio/speech"
-            self.apiKey = UserDefaults.standard.string(forKey: "customAPIKey") ?? ""
+            self.baseURL = UserDefaults.standard.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
+            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyCustomAPIKey) ?? ""
             self.model = ""
             self.voice = ""
         }

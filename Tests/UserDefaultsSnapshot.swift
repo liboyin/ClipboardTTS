@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import ClipboardTTSApp
 
 /// Restores a set of `UserDefaults` keys to the exact state they were in when captured.
 struct UserDefaultsSnapshot {
@@ -34,17 +35,6 @@ struct UserDefaultsSnapshot {
     }
 }
 
-/// Every `UserDefaults.standard` key the app persists settings under: the `@AppStorage`
-/// properties of `SettingsView`, which `TTSNetworkManager.init` reads back.
-enum AppSettingsDefaults {
-    static let keys = [
-        "ttsProvider", "apiBaseURL",
-        "apiKey", "geminiAPIKey", "customAPIKey",
-        "openaiModel", "openaiVoice",
-        "geminiModel", "geminiVoice"
-    ]
-}
-
 extension XCTestCase {
     /// Detaches the running test from the developer's real app settings.
     ///
@@ -58,9 +48,9 @@ extension XCTestCase {
     /// so the cleared keys stay cleared. Losing settings to a crash is preferable to silently
     /// running every test against machine state.
     func isolateAppSettingsDefaults() {
-        let snapshot = UserDefaultsSnapshot(keys: AppSettingsDefaults.keys)
+        let snapshot = UserDefaultsSnapshot(keys: SettingsKeys.allUserDefaultsKeys)
         addTeardownBlock { snapshot.restore() }
-        for key in AppSettingsDefaults.keys {
+        for key in SettingsKeys.allUserDefaultsKeys {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

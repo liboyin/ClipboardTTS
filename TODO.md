@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 15 numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 14 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -82,7 +82,6 @@ Complete this checklist separately for each numbered task:
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | Stale metadata responses can replace the current provider's models | Blocking | 5 |
-| Settings keys have three hand-maintained definitions | Non-blocking | 2 |
 | The streaming callback executes while the state lock is held | Non-blocking | 4 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 | Playback starts immediately on the first playable packet | Requested implementation change | 12 |
@@ -110,45 +109,13 @@ Complete this checklist separately for each numbered task:
 
 ---
 
-## Phase 1 — Establish shared configuration
-
-### 2. Give persisted settings one source of truth
-
-**Classification:** Non-blocking, scheduled early because Tasks 7, 8, 11, and 13 depend on it
-
-**Depends on:** Nothing
-
-**Problem.** The same settings-key strings are repeated in `SettingsView`,
-`TTSNetworkManager`, and `Tests/UserDefaultsSnapshot`. Adding a key in only one or two places
-can make tests depend on or overwrite the developer's actual configuration.
-
-**Required change.**
-
-1. Add a `SettingsKeys` namespace in production code containing every persisted non-secret
-   key and the legacy secret-key names needed by Task 8's migration.
-2. Expose an `allUserDefaultsKeys` collection used by test isolation.
-3. Replace literals in `@AppStorage`, `TTSNetworkManager`, and `UserDefaultsSnapshot`.
-4. When later tasks add Custom model, voice, or sample-rate settings, add them only through
-   this namespace.
-5. Keep Keychain account identifiers separate from `UserDefaults` keys so the storage
-   boundary is explicit.
-
-**Tests and falsification.**
-
-- Test that `allUserDefaultsKeys` contains every declared preference key exactly once.
-- Prove snapshot restore behavior for both originally present and originally absent values.
-- Mutation-test omission of a newly introduced key from the isolation collection.
-
-**Done when.** Each persisted setting string has one declaration, test isolation enumerates
-that source, and no production or test file carries a second literal copy.
-
 ## Phase 2 — Repair network state and failure behavior
 
 ### 3. Bind response parsing to immutable per-request context
 
 **Classification:** Blocking
 
-**Depends on:** Task 2
+**Depends on:** Phase 1 (complete)
 
 **Problem.** `streamTTS` chooses a request format from the current provider, but URL-session
 delegate callbacks later re-read mutable manager settings. Switching provider during an
@@ -273,7 +240,7 @@ transport failure without consulting Console, and no secret can enter the UI or 
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 2–6
+**Depends on:** Phase 1 (complete) and Tasks 3–6
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -308,7 +275,7 @@ model/voice contract.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 2, 6, and 7
+**Depends on:** Phase 1 (complete) and Tasks 6 and 7
 
 **Problem.** OpenAI, Gemini, and Custom keys are stored in plaintext `UserDefaults`. Gemini
 puts its key in the query string, and the invalid-URL path can print the composed URL.
@@ -416,7 +383,7 @@ possible without re-fetching audio.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 2, 7, and 10
+**Depends on:** Phase 1 (complete) and Tasks 7 and 10
 
 **Problem.** `AudioPlayerManager` always interprets PCM as 24-kHz mono 16-bit audio. A Custom
 endpoint returning 22.05 or 44.1/48 kHz therefore has wrong duration, speed, pitch, and seek
@@ -499,7 +466,7 @@ change.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 2, 5, and 7
+**Depends on:** Phase 1 (complete) and Tasks 5 and 7
 
 **Problem.** Voice selection exists only in Settings, although `USER_STORIES.md` requires it
 in the menu and restricts changes to idle state.

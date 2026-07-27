@@ -256,10 +256,10 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         isolateAppSettingsDefaults()
 
         // OpenAI: persisted model/voice/key should drive the outgoing request
-        UserDefaults.standard.set("OpenAI", forKey: "ttsProvider")
-        UserDefaults.standard.set("persisted-openai-model", forKey: "openaiModel")
-        UserDefaults.standard.set("persisted-openai-voice", forKey: "openaiVoice")
-        UserDefaults.standard.set("persisted-openai-key", forKey: "apiKey")
+        UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("persisted-openai-model", forKey: SettingsKeys.openAIModel)
+        UserDefaults.standard.set("persisted-openai-voice", forKey: SettingsKeys.openAIVoice)
+        UserDefaults.standard.set("persisted-openai-key", forKey: SettingsKeys.legacyOpenAIAPIKey)
 
         let openaiManager = TestNetworkFactory.makeManager()
         let openaiExpectation = XCTestExpectation(description: "OpenAI request uses persisted values")
@@ -296,10 +296,10 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [openaiExpectation], timeout: 2.0)
 
         // Gemini: persisted model embeds in URL path, voice embeds in request body
-        UserDefaults.standard.set("Gemini", forKey: "ttsProvider")
-        UserDefaults.standard.set("persisted-gemini-model", forKey: "geminiModel")
-        UserDefaults.standard.set("persisted-gemini-voice", forKey: "geminiVoice")
-        UserDefaults.standard.set("persisted-gemini-key", forKey: "geminiAPIKey")
+        UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("persisted-gemini-model", forKey: SettingsKeys.geminiModel)
+        UserDefaults.standard.set("persisted-gemini-voice", forKey: SettingsKeys.geminiVoice)
+        UserDefaults.standard.set("persisted-gemini-key", forKey: SettingsKeys.legacyGeminiAPIKey)
 
         let geminiManager = TestNetworkFactory.makeManager()
         let geminiExpectation = XCTestExpectation(description: "Gemini request uses persisted values")
