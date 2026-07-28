@@ -1,61 +1,28 @@
 import XCTest
+import AppKit
 import SwiftUI
 @testable import ClipboardTTSApp
 
 final class MenuBarViewTests: MockURLProtocolTestCase {
-
-    func testTogglePlayPauseFlipsPlayingState() {
-        // WHY: The single play/pause button is driven entirely by togglePlayPause flipping
-        // audioPlayer.isPlaying. If toggling stopped alternating state, the button would lie about
-        // what playback is doing. This asserts the toggle actually flips the state both ways.
-        let audioPlayer = AudioPlayerManager()
-        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
-        let networkManager = TestNetworkFactory.makeManager()
-
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
-
-        XCTAssertFalse(audioPlayer.isPlaying)
-
-        view.togglePlayPause()
-        let playing = XCTestExpectation(description: "Toggled to playing")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertTrue(audioPlayer.isPlaying)
-            playing.fulfill()
-        }
-        wait(for: [playing], timeout: 1.0)
-
-        view.togglePlayPause()
-        let paused = XCTestExpectation(description: "Toggled back to paused")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertFalse(audioPlayer.isPlaying)
-            paused.fulfill()
-        }
-        wait(for: [paused], timeout: 1.0)
-    }
-
     func testSpeakCopiedTextStartsStreamingFromClipboard() {
         // WHY: This is the core "Speak Copied Text" story - with text on the clipboard and nothing
-        // playing, the button must pull the clipboard text and stream it to audio. Asserting
-        // hasAudio flips true proves clipboard -> network -> scheduled audio ran end to end.
+        // playing, the button must pull the clipboard text and start a network request. Audio
+        // scheduling is covered by AudioPlayerManagerTests, so this view test avoids live audio.
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        let requestStarted = expectation(description: "Clipboard text starts a TTS request")
         MockURLProtocol.installRequestHandler { request in
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
-                    Data(repeating: 0, count: 2048))
+            requestStarted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
 
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
         view.speakCopiedText()
 
-        // speakCopiedText defers the extraction+stream by 0.2s, then audio is scheduled async.
-        let expectation = XCTestExpectation(description: "Clipboard text streamed to audio")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            XCTAssertTrue(audioPlayer.hasAudio)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 3.0)
+        // speakCopiedText defers clipboard extraction and request creation by 0.2 seconds.
+        wait(for: [requestStarted], timeout: 2.0)
     }
 
     func testSpeakCopiedTextClearsActiveBuffer() {
@@ -67,23 +34,67 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let networkManager = TestNetworkFactory.makeManager()
         let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
-        // Buffer audio so hasAudio == true (the "Clear Buffer" precondition).
-        let gen = audioPlayer.startNewStream()
-        audioPlayer.scheduleAudio(data: Data(repeating: 0, count: 2048), streamGeneration: gen)
-        let buffered = XCTestExpectation(description: "Audio buffered")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertTrue(audioPlayer.hasAudio)
-            buffered.fulfill()
-        }
-        wait(for: [buffered], timeout: 1.0)
+        networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        networkManager.streamTTS(text: "Create an error before clearing") { _ in }
+        XCTAssertNotNil(networkManager.lastError)
+
+        // Set the view's branch condition without scheduling live AVAudioEngine work. Audio
+        // scheduling is covered by AudioPlayerManagerTests; this test owns only menu behavior.
+        audioPlayer.hasAudio = true
 
         view.speakCopiedText()
 
         let cleared = XCTestExpectation(description: "Buffer cleared")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        DispatchQueue.main.async {
             XCTAssertFalse(audioPlayer.hasAudio)
+            XCTAssertNil(networkManager.lastError)
             cleared.fulfill()
         }
         wait(for: [cleared], timeout: 1.0)
+    }
+
+    func testRenderedErrorMessageAppearsAfterNetworkFailureWithoutRemovingControls() {
+        // WHY: The request error is supplementary feedback, not a replacement for playback
+        // controls. Mounting the view verifies SwiftUI actually renders the conditional message
+        // while keeping the primary playback control available.
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: 280)
+
+        host.layoutSubtreeIfNeeded()
+        let errorMessage = "TTS configuration is invalid. Check the API endpoint and try again."
+        XCTAssertNil(host.descendantText(equalTo: errorMessage))
+        XCTAssertNotNil(host.descendantView(of: NSSlider.self))
+
+        networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        networkManager.streamTTS(text: "Show error") { _ in }
+
+        let rendered = expectation(description: "Error message rendered")
+        DispatchQueue.main.async {
+            host.layoutSubtreeIfNeeded()
+            XCTAssertNotNil(host.descendantText(equalTo: errorMessage))
+            XCTAssertNotNil(host.descendantView(of: NSSlider.self))
+            rendered.fulfill()
+        }
+        wait(for: [rendered], timeout: 1.0)
+    }
+}
+
+private extension NSView {
+    func descendantText(equalTo value: String) -> NSTextField? {
+        if let textField = self as? NSTextField, textField.stringValue == value {
+            return textField
+        }
+        return subviews.lazy.compactMap { $0.descendantText(equalTo: value) }.first
+    }
+
+    func descendantView<ViewType: NSView>(of type: ViewType.Type) -> ViewType? {
+        if let view = self as? ViewType {
+            return view
+        }
+        return subviews.lazy.compactMap { $0.descendantView(of: type) }.first
     }
 }

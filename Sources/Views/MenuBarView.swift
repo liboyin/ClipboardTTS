@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct MenuBarView: View {
     @ObservedObject var audioPlayer: AudioPlayerManager
@@ -6,6 +7,14 @@ struct MenuBarView: View {
     @ObservedObject var networkManager: TTSNetworkManager
 
     @Environment(\.openWindow) var openWindow
+
+    var errorMessage: String? {
+        networkManager.lastError
+    }
+
+    var requestErrorView: RequestErrorView? {
+        errorMessage.map(RequestErrorView.init)
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -43,6 +52,11 @@ struct MenuBarView: View {
                 .buttonStyle(.borderedProminent)
             }
             .padding(.horizontal)
+
+            if let requestErrorView {
+                requestErrorView
+                    .padding(.horizontal)
+            }
 
             HStack {
                 Button(action: {
@@ -97,5 +111,24 @@ struct MenuBarView: View {
         } else {
             audioPlayer.play()
         }
+    }
+}
+
+/// An AppKit-backed, accessible request-failure label that wraps within the menu width.
+struct RequestErrorView: NSViewRepresentable {
+    let message: String
+
+    func makeNSView(context: Context) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .systemRed
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.setAccessibilityIdentifier("tts-request-error")
+        return label
+    }
+
+    func updateNSView(_ label: NSTextField, context: Context) {
+        label.stringValue = message
     }
 }

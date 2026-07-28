@@ -1,16 +1,46 @@
 import Foundation
 import XCTest
 import AppKit
+import Combine
 @testable import ClipboardTTSApp
+
+extension XCTestCase {
+    /// Waits for a request to publish its expected terminal state instead of relying on a timing delay.
+    func assertTerminalState(of manager: TTSNetworkManager,
+                             expectedError: String?,
+                             after action: () -> Void) {
+        let stateSettled = expectation(description: "Request reaches its expected terminal state")
+        var observedActiveRequest = manager.isStreaming
+        var didSettle = false
+        let observation = Publishers.CombineLatest(manager.$lastError, manager.$isStreaming).sink { error, isStreaming in
+            observedActiveRequest = observedActiveRequest || isStreaming
+            guard error == expectedError,
+                  !isStreaming,
+                  !didSettle,
+                  expectedError != nil || observedActiveRequest else { return }
+            didSettle = true
+            stateSettled.fulfill()
+        }
+
+        action()
+        wait(for: [stateSettled], timeout: 2.0)
+        observation.cancel()
+    }
+}
 
 /// Creates sessions and network managers whose requests are always routed through MockURLProtocol.
 enum TestNetworkFactory {
-    static func makeManager() -> TTSNetworkManager {
+    static func makeManager(
+        requestBodyEncoder: @escaping ([String: Any]) throws -> Data = {
+            try JSONSerialization.data(withJSONObject: $0)
+        }
+    ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.currentTestIdentifier()
         return TTSNetworkManager(
             configuration: makeConfiguration(testIdentifier: testIdentifier),
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
-            sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) }
+            sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
+            requestBodyEncoder: requestBodyEncoder
         )
     }
 

@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 11 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 10 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -77,7 +77,6 @@ Complete this checklist separately for each numbered task:
 | Custom requests send empty model and voice values | Blocking | 7 |
 | API keys use plaintext preferences, URL queries, and unsafe logging | Blocking | 8 |
 | Gemini buffers the full response instead of streaming | Blocking | 9 |
-| Network and API failures are invisible in the UI | Blocking | 6 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
@@ -108,45 +107,13 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 2 — Repair network state and failure behavior
 
-### 6. Surface request failures to the user
-
-**Classification:** Blocking
-
-**Depends on:** Phase 2 Task 3 (complete)
-
-**Problem.** Invalid URLs, encoding failures, non-2xx responses, transport failures, and
-provider-decoding failures only print to the console. Users receive no explanation when
-speech does not start.
-
-**Required change.**
-
-1. Define a small user-facing error model, or a sanitized `lastError` string, published by
-   `TTSNetworkManager` on the main actor/queue.
-2. Clear stale error state at the start of a new request.
-3. Set an error for invalid configuration, request encoding, non-2xx responses, transport
-   failure, and malformed/empty provider audio.
-4. Include only actionable, bounded information such as HTTP status and a short sanitized
-   message. Never expose keys, authorization headers, full request URLs, or unbounded bodies.
-5. Render the error in `MenuBarView` without hiding playback controls.
-6. Clear the message on the next request and on explicit Clear Buffer; document this behavior.
-
-**Tests and falsification.**
-
-- Assert each failure class publishes an error and finishes streaming state.
-- Assert the next request clears the previous error and a later success leaves it cleared.
-- Test truncation/redaction of error bodies containing key-like material.
-- Add a view construction/state test showing the error only when present.
-
-**Done when.** A user can distinguish invalid configuration, authentication/API failure, and
-transport failure without consulting Console, and no secret can enter the UI or logs.
-
 ## Phase 3 — Define provider contracts and secure secrets
 
 ### 7. Implement the OpenAI-compatible Custom model/voice contract
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Task 6 (Phase 2 Task 3 complete)
+**Depends on:** Phase 1 (complete) and the established request-error contract
 
 **Problem.** Custom settings return empty model and voice values, while request encoding still
 sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
@@ -156,7 +123,7 @@ omitted.
 
 1. Add persisted Custom model and voice fields using `SettingsKeys`.
 2. Require non-empty, non-whitespace model and voice values before issuing a Custom request.
-   Invalid configuration must use Task 6's user-visible error path without contacting the
+   Invalid configuration must use the established user-visible error path without contacting the
    endpoint.
 3. Include both values in every Custom `/v1/audio/speech` payload. Do not preserve the current
    empty-string behavior and do not conditionally omit the fields.
@@ -171,7 +138,7 @@ omitted.
 
 - Decode an intercepted Custom request and assert exact model/voice key presence and values.
 - Cover missing, whitespace-only, and valid configuration.
-- Assert invalid configuration produces Task 6's user-visible error without issuing a request.
+- Assert invalid configuration produces the established user-visible error without issuing a request.
 - Mutation-test empty-string acceptance and omission of either required field.
 
 **Done when.** The Custom payload, settings UI, tests, and README describe one consistent
@@ -181,7 +148,7 @@ model/voice contract.
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 6 and 7
+**Depends on:** Phase 1 (complete), the established request-error contract, and Task 7
 
 **Problem.** OpenAI, Gemini, and Custom keys are stored in plaintext `UserDefaults`. Gemini
 puts its key in the query string, and the invalid-URL path can print the composed URL.
@@ -220,7 +187,7 @@ committed fixtures; legacy installs migrate without data loss.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 6 and 8 (Phase 2 Task 3 complete)
+**Depends on:** Task 8 and the established request-error contract (Phase 2 Task 3 complete)
 
 **Problem.** Gemini currently calls the non-streaming endpoint, buffers the complete JSON
 response, and delivers audio only after task completion. This violates the project's
@@ -236,7 +203,7 @@ time-to-first-audio goal.
    incomplete events, handles the documented line-ending form, and emits only complete events.
 4. Decode and forward each complete audio chunk outside the state queue. Do not attempt base64
    decoding on partial events.
-5. Convert malformed events, missing audio, and provider error events into Task 6's error
+5. Convert malformed events, missing audio, and provider error events into the established error
    model without corrupting already delivered audio.
 6. Update README's Network section so it accurately distinguishes verified streaming behavior
    for each provider.
@@ -300,7 +267,7 @@ math.
 1. Add a persisted Custom sample-rate field using `SettingsKeys`, defaulting to 24000 Hz.
 2. Validate a finite numeric value within the supported range selected by the implementation
    (the existing decision suggested 8000–48000 Hz). Invalid input must produce clear inline or
-   Task 6 error feedback and must not partially rebuild the graph.
+   established error feedback and must not partially rebuild the graph.
 3. Add a focused `AudioPlayerManager` API for changing sample rate.
 4. On actual change, stop playback, clear buffered data and progress, disconnect/reconnect the
    fixed-format audio graph, and restart the engine safely.
