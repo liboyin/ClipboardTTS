@@ -52,6 +52,7 @@ extension XCTestCase {
 /// Creates sessions and network managers whose requests are always routed through MockURLProtocol.
 enum TestNetworkFactory {
     static func makeManager(
+        secretStore: SecretStoring = InMemorySecretStore(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.currentTestIdentifier()
@@ -59,6 +60,7 @@ enum TestNetworkFactory {
             configuration: makeConfiguration(testIdentifier: testIdentifier),
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
+            secretStore: secretStore,
             requestBodyEncoder: requestBodyEncoder
         )
     }

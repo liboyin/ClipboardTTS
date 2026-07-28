@@ -157,8 +157,9 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(
                 request.url?.absoluteString,
-                "https://generativelanguage.googleapis.com/v1beta/models/original-gemini-model:generateContent?key=original-gemini-key"
+                "https://generativelanguage.googleapis.com/v1beta/models/original-gemini-model:generateContent"
             )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "original-gemini-key")
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
             let response = HTTPURLResponse(

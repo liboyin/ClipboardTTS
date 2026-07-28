@@ -15,9 +15,10 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         UserDefaults.standard.set("custom-model", forKey: SettingsKeys.customModel)
         UserDefaults.standard.set("custom-voice", forKey: SettingsKeys.customVoice)
 
+        let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
-        let networkManager = TestNetworkFactory.makeManager()
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
 
         let requestEmitted = expectation(description: "Custom Test Voice request is emitted")
         MockURLProtocol.installRequestHandler { request in
@@ -48,9 +49,10 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         UserDefaults.standard.set("\n\t ", forKey: SettingsKeys.customModel)
         UserDefaults.standard.set("custom-voice", forKey: SettingsKeys.customVoice)
 
+        let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
-        let networkManager = TestNetworkFactory.makeManager()
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("Invalid Custom Test Voice configuration must not contact the endpoint")
             return (HTTPURLResponse(), Data())
@@ -67,9 +69,10 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         // UserDefaults.standard, so without it the exercised code path depends on machine state.
         isolateAppSettingsDefaults()
 
+        let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
-        let networkManager = TestNetworkFactory.makeManager()
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
 
         // providerDidChange fetches metadata, so its local handler must be installed before it runs.
         MockURLProtocol.installRequestHandler { request in

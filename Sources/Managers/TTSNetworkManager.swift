@@ -73,22 +73,26 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     init(configuration: URLSessionConfiguration = .default,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
+         secretStore: SecretStoring = KeychainSecretStore(),
          requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }) {
-        let provider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
-        self.selectedMetadataProvider = provider
-        if provider == "OpenAI" {
+        let persistedProvider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+        let provider = APIKeyProvider(selectedProvider: persistedProvider)
+        self.selectedMetadataProvider = provider.settingsValue
+        let secretStartupState = APIKeyStartupState.load(selectedProvider: provider.settingsValue, secretStore: secretStore)
+        switch provider {
+        case .openAI:
             self.baseURL = "https://api.openai.com/v1/audio/speech"
-            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyOpenAIAPIKey) ?? ""
+            self.apiKey = secretStartupState.apiKey
             self.model = UserDefaults.standard.string(forKey: SettingsKeys.openAIModel) ?? "tts-1"
             self.voice = UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice) ?? "alloy"
-        } else if provider == "Gemini" {
+        case .gemini:
             self.baseURL = "https://generativelanguage.googleapis.com/v1beta"
-            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyGeminiAPIKey) ?? ""
+            self.apiKey = secretStartupState.apiKey
             self.model = UserDefaults.standard.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview"
             self.voice = UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede"
-        } else {
+        case .custom:
             self.baseURL = UserDefaults.standard.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
-            self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyCustomAPIKey) ?? ""
+            self.apiKey = secretStartupState.apiKey
             self.model = UserDefaults.standard.string(forKey: SettingsKeys.customModel) ?? ""
             self.voice = UserDefaults.standard.string(forKey: SettingsKeys.customVoice) ?? ""
         }
@@ -98,6 +102,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
         self.sessionInvalidated = sessionInvalidated
+        if let errorMessage = secretStartupState.errorMessage {
+            self.lastError = errorMessage
+        }
     }
 
     /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
@@ -244,7 +251,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     /// Builds a valid provider endpoint from a settings snapshot.
     private func requestURL(for settings: RequestSettings) -> URL? {
         let urlString = settings.provider == .gemini
-            ? "\(settings.baseURL)/models/\(settings.model):generateContent?key=\(settings.apiKey)"
+            ? "\(settings.baseURL)/models/\(settings.model):generateContent"
             : settings.baseURL
         guard let url = URL(string: urlString),
               let scheme = url.scheme,
@@ -276,7 +283,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if settings.provider != .gemini {
+        if settings.provider == .gemini {
+            request.setValue(settings.apiKey, forHTTPHeaderField: "x-goog-api-key")
+        } else {
             request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
         }
 

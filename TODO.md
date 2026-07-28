@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 9 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 8 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -74,7 +74,6 @@ Complete this checklist separately for each numbered task:
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
 | Seeking to the buffered end leaves false playing state | Blocking | 10 |
-| API keys use plaintext preferences, URL queries, and unsafe logging | Blocking | 8 |
 | Gemini buffers the full response instead of streaming | Blocking | 9 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
@@ -107,45 +106,6 @@ Complete this checklist separately for each numbered task:
 ## Phase 2 — Repair network state and failure behavior
 
 ## Phase 3 — Define provider contracts and secure secrets
-
-### 8. Move API keys to Keychain and remove key-bearing URLs/logs
-
-**Classification:** Blocking
-
-**Depends on:** Phase 1 (complete) and the established request-error contract
-
-**Problem.** OpenAI, Gemini, and Custom keys are stored in plaintext `UserDefaults`. Gemini
-puts its key in the query string, and the invalid-URL path can print the composed URL.
-
-**Required change.**
-
-1. Introduce a narrow secret-store protocol and a production Keychain implementation. Use a
-   stable service identifier and one account per provider.
-2. Inject an in-memory implementation into tests; unit tests MUST NOT access the developer's
-   real Keychain.
-3. Replace secret `@AppStorage` fields with view state backed by the secret store. Keep
-   provider, endpoint, model, voice, and sample rate in `UserDefaults`.
-4. Migrate each legacy preference key once. Delete the legacy value only after a confirmed
-   Keychain write; preserve it and surface an actionable error if migration fails.
-5. Send the Gemini key using the currently documented authentication header rather than a URL
-   query. Verify the header name against current official Google documentation at execution
-   time.
-6. Redact or remove request logging. No error path may interpolate a composed URL that can
-   contain credentials.
-7. Do not place real keys in tests, fixtures, command output, or commits.
-
-**Tests and falsification.**
-
-- Test secret create/read/update/delete and error mapping against the in-memory store.
-- Test successful legacy migration, failed write without deletion, and idempotent subsequent
-  launch.
-- Intercept all provider requests and assert keys appear only in the correct header.
-- Assert URLs, logs, error state, and `UserDefaults` contain none of the injected secret
-  values.
-- Mutation-test deleting a legacy key before a failed store write.
-
-**Done when.** No production secret value appears in `UserDefaults`, URLs, logs, errors, or
-committed fixtures; legacy installs migrate without data loss.
 
 ### 9. Stream Gemini audio incrementally
 

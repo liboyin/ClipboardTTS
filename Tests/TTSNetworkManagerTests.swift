@@ -222,12 +222,16 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
     func testNetworkManagerFormatsGeminiRequestCorrectly() {
         let manager = TestNetworkFactory.makeManager()
 
-        manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: "gemini_token", model: "gemini-tts", voice: "Aoede")
+        let geminiKey = "test-gemini-api-key"
+        manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: geminiKey, model: "gemini-tts", voice: "Aoede")
 
         let expectation = XCTestExpectation(description: "Wait for Gemini request")
 
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent?key=gemini_token")
+            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), geminiKey)
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            XCTAssertFalse(request.url?.absoluteString.contains(geminiKey) ?? true)
             XCTAssertEqual(request.httpMethod, "POST")
 
             var extractedData: Data? = request.httpBody
@@ -331,7 +335,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         openaiManager.streamTTS(text: "test") { _ in }
         wait(for: [openaiExpectation], timeout: 2.0)
 
-        // Gemini: persisted model embeds in URL path, voice embeds in request body
+        // Gemini: persisted model embeds in URL path, voice embeds in request body.
         UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
         UserDefaults.standard.set("persisted-gemini-model", forKey: SettingsKeys.geminiModel)
         UserDefaults.standard.set("persisted-gemini-voice", forKey: SettingsKeys.geminiVoice)
@@ -342,7 +346,9 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
         MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.url?.absoluteString,
-                           "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:generateContent?key=persisted-gemini-key")
+                           "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:generateContent")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "persisted-gemini-key")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
 
             var extractedData: Data? = request.httpBody
             if extractedData == nil, let stream = request.httpBodyStream {

@@ -12,13 +12,16 @@ struct ClipboardTTSApp: App {
     // @StateObject (like the managers) so all four share first-wins lifecycle semantics and can
     // never end up pointing at different manager instances.
     @StateObject private var servicesCoordinator: ServicesCoordinator
+    private let secretStore: SecretStoring
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        let secretStore = KeychainSecretStore()
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager()
-        let networkManager = TTSNetworkManager()
+        let networkManager = TTSNetworkManager(secretStore: secretStore)
+        self.secretStore = secretStore
         _audioPlayer = StateObject(wrappedValue: audioPlayer)
         _textExtraction = StateObject(wrappedValue: textExtraction)
         _networkManager = StateObject(wrappedValue: networkManager)
@@ -36,7 +39,7 @@ struct ClipboardTTSApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Settings", id: "settings") {
-            SettingsView(networkManager: networkManager, audioPlayer: audioPlayer)
+            SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         }
     }
 }

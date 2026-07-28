@@ -1,42 +1,66 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var networkManager: TTSNetworkManager
-    @ObservedObject var audioPlayer: AudioPlayerManager
+    @ObservedObject private var networkManager: TTSNetworkManager
+    @ObservedObject private var audioPlayer: AudioPlayerManager
+    @StateObject private var secretState: SettingsSecretState
 
     @AppStorage(SettingsKeys.ttsProvider) private var ttsProvider: String = "OpenAI"
     @AppStorage(SettingsKeys.apiBaseURL) private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
-    @AppStorage(SettingsKeys.legacyOpenAIAPIKey) private var openaiAPIKey: String = ""
-    @AppStorage(SettingsKeys.legacyGeminiAPIKey) private var geminiAPIKey: String = ""
-    @AppStorage(SettingsKeys.legacyCustomAPIKey) private var customAPIKey: String = ""
     @AppStorage(SettingsKeys.openAIModel) private var openaiModel: String = "tts-1"
     @AppStorage(SettingsKeys.openAIVoice) private var openaiVoice: String = "alloy"
     @AppStorage(SettingsKeys.geminiModel) private var geminiModel: String = "gemini-3.1-flash-tts-preview"
     @AppStorage(SettingsKeys.geminiVoice) private var geminiVoice: String = "Aoede"
     @AppStorage(SettingsKeys.customModel) private var customModel: String = ""
     @AppStorage(SettingsKeys.customVoice) private var customVoice: String = ""
-    var currentAPIKey: String {
-        if ttsProvider == "OpenAI" { return openaiAPIKey }
-        if ttsProvider == "Gemini" { return geminiAPIKey }
-        return customAPIKey
+
+    init(networkManager: TTSNetworkManager,
+         audioPlayer: AudioPlayerManager,
+         secretStore: SecretStoring = KeychainSecretStore()) {
+        self.networkManager = networkManager
+        self.audioPlayer = audioPlayer
+        _secretState = StateObject(wrappedValue: SettingsSecretState(secretStore: secretStore))
     }
 
-    var currentBaseURL: String {
-        if ttsProvider == "OpenAI" { return "https://api.openai.com/v1/audio/speech" }
-        if ttsProvider == "Gemini" { return "https://generativelanguage.googleapis.com/v1beta" }
-        return apiBaseURL
+    private var selectedProvider: APIKeyProvider {
+        APIKeyProvider(selectedProvider: ttsProvider)
     }
 
-    var currentModel: String {
-        if ttsProvider == "OpenAI" { return openaiModel }
-        if ttsProvider == "Gemini" { return geminiModel }
-        return customModel
+    private var currentAPIKey: String {
+        secretState.secret(for: selectedProvider)
     }
 
-    var currentVoice: String {
-        if ttsProvider == "OpenAI" { return openaiVoice }
-        if ttsProvider == "Gemini" { return geminiVoice }
-        return customVoice
+    private var currentBaseURL: String {
+        switch selectedProvider {
+        case .openAI:
+            return "https://api.openai.com/v1/audio/speech"
+        case .gemini:
+            return "https://generativelanguage.googleapis.com/v1beta"
+        case .custom:
+            return apiBaseURL
+        }
+    }
+
+    private var currentModel: String {
+        switch selectedProvider {
+        case .openAI:
+            return openaiModel
+        case .gemini:
+            return geminiModel
+        case .custom:
+            return customModel
+        }
+    }
+
+    private var currentVoice: String {
+        switch selectedProvider {
+        case .openAI:
+            return openaiVoice
+        case .gemini:
+            return geminiVoice
+        case .custom:
+            return customVoice
+        }
     }
 
     var body: some View {
@@ -55,9 +79,13 @@ struct SettingsView: View {
             Divider()
 
             Form {
-                if ttsProvider == "OpenAI" {
+                if let secretStoreError = secretState.errorMessage {
+                    Text(secretStoreError)
+                        .foregroundStyle(.red)
+                }
+                if selectedProvider == .openAI {
                     openAISettings
-                } else if ttsProvider == "Gemini" {
+                } else if selectedProvider == .gemini {
                     geminiSettings
                 } else {
                     customSettings
@@ -75,9 +103,8 @@ struct SettingsView: View {
     private var openAISettings: some View {
         Group {
             Section(header: Text("OpenAI Configuration").font(.headline)) {
-                SecureField("API Key", text: $openaiAPIKey)
+                SecureField("API Key", text: secretBinding(for: .openAI))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: openaiAPIKey) { _ in syncSettings() }
             }
 
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
@@ -90,9 +117,8 @@ struct SettingsView: View {
     private var geminiSettings: some View {
         Group {
             Section(header: Text("Gemini Configuration").font(.headline)) {
-                SecureField("API Key", text: $geminiAPIKey)
+                SecureField("API Key", text: secretBinding(for: .gemini))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: geminiAPIKey) { _ in syncSettings() }
             }
 
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
@@ -109,9 +135,8 @@ struct SettingsView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: apiBaseURL) { _ in syncSettings() }
 
-                SecureField("API Key", text: $customAPIKey)
+                SecureField("API Key", text: secretBinding(for: .custom))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: customAPIKey) { _ in syncSettings() }
             }
 
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
@@ -134,12 +159,13 @@ struct SettingsView: View {
     }
 
     func runTestVoice() {
+        normalizeSelectedProvider()
         networkManager.updateSettings(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
             model: currentModel,
             voice: currentVoice,
-            selectedProvider: ttsProvider
+            selectedProvider: selectedProvider.settingsValue
         )
         networkManager.stopStreaming()
         audioPlayer.stop()
@@ -154,28 +180,87 @@ struct SettingsView: View {
     }
 
     func syncSettings() {
+        normalizeSelectedProvider()
         networkManager.updateSettings(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
             model: currentModel,
             voice: currentVoice,
-            selectedProvider: ttsProvider
+            selectedProvider: selectedProvider.settingsValue
         )
         fetchMetadata()
     }
 
     func fetchMetadata() {
-        if ttsProvider == "Custom" { return }
+        guard selectedProvider != .custom else { return }
         networkManager.fetchAvailableModels(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
-            selectedProvider: ttsProvider
+            selectedProvider: selectedProvider.settingsValue
         )
         networkManager.fetchAvailableVoices(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
-            selectedProvider: ttsProvider
+            selectedProvider: selectedProvider.settingsValue
         )
+    }
+
+    private func normalizeSelectedProvider() {
+        let normalizedValue = selectedProvider.settingsValue
+        if ttsProvider != normalizedValue {
+            ttsProvider = normalizedValue
+        }
+    }
+
+    private func secretBinding(for provider: APIKeyProvider) -> Binding<String> {
+        Binding(
+            get: { secretState.secret(for: provider) },
+            set: {
+                secretState.saveSecret($0, for: provider)
+                syncSettings()
+            }
+        )
+    }
+}
+
+/// Holds the Settings form's API keys and surfaces safe Keychain failures to the user.
+final class SettingsSecretState: ObservableObject {
+    @Published private var secrets: [APIKeyProvider: String] = [:]
+    @Published private(set) var errorMessage: String?
+    private let secretStore: SecretStoring
+
+    init(secretStore: SecretStoring) {
+        self.secretStore = secretStore
+        for provider in APIKeyProvider.allCases {
+            do {
+                secrets[provider] = try secretStore.secret(for: provider) ?? ""
+            } catch {
+                secrets[provider] = ""
+                if errorMessage == nil {
+                    errorMessage = "Couldn't read the saved \(provider.displayName) API key. Check Keychain access and try again."
+                }
+            }
+        }
+    }
+
+    /// Returns the key currently shown for a provider without reading preferences or the Keychain again.
+    func secret(for provider: APIKeyProvider) -> String {
+        secrets[provider] ?? ""
+    }
+
+    /// Persists a user edit immediately so future clipboard and Services requests use the same key.
+    func saveSecret(_ secret: String, for provider: APIKeyProvider) {
+        do {
+            if secret.isEmpty {
+                try secretStore.deleteSecret(for: provider)
+            } else {
+                try secretStore.saveSecret(secret, for: provider)
+            }
+            errorMessage = nil
+            secrets[provider] = secret
+        } catch {
+            errorMessage = "Couldn't save the \(provider.displayName) API key. Check Keychain access and try again."
+        }
     }
 }
 
