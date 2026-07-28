@@ -53,7 +53,8 @@ extension TTSNetworkManager {
             failureMessage = "Couldn't reach the TTS service. Check your connection and try again."
         } else if result.provider == .gemini && !containsCompletePCMFrame(result.audioData) {
             failureMessage = "The TTS service returned no playable audio. Please try again."
-        } else if result.provider == .openAICompatible && !containsCompletePCMFrame(result.providerAudioByteCount) {
+        } else if (result.provider == .openAICompatible || result.provider == .custom)
+                    && !containsCompletePCMFrame(result.providerAudioByteCount) {
             failureMessage = "The TTS service returned no playable audio. Please try again."
         } else {
             failureMessage = nil

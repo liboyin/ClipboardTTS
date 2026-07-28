@@ -55,6 +55,8 @@ final class UserDefaultsSnapshotTests: XCTestCase {
             SettingsKeys.openAIVoice,
             SettingsKeys.geminiModel,
             SettingsKeys.geminiVoice,
+            SettingsKeys.customModel,
+            SettingsKeys.customVoice,
             SettingsKeys.legacyOpenAIAPIKey,
             SettingsKeys.legacyGeminiAPIKey,
             SettingsKeys.legacyCustomAPIKey

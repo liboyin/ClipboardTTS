@@ -4,6 +4,27 @@ import AppKit
 import Combine
 @testable import ClipboardTTSApp
 
+/// Returns a request body whether URLSession retained it as data or exposed it as a stream.
+func requestBodyData(from request: URLRequest) -> Data? {
+    if let httpBody = request.httpBody {
+        return httpBody
+    }
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+
+    stream.open()
+    defer { stream.close() }
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 1_024)
+    while true {
+        let bytesRead = stream.read(&buffer, maxLength: buffer.count)
+        guard bytesRead > 0 else { break }
+        body.append(buffer, count: bytesRead)
+    }
+    return body
+}
+
 extension XCTestCase {
     /// Waits for a request to publish its expected terminal state instead of relying on a timing delay.
     func assertTerminalState(of manager: TTSNetworkManager,
@@ -31,9 +52,7 @@ extension XCTestCase {
 /// Creates sessions and network managers whose requests are always routed through MockURLProtocol.
 enum TestNetworkFactory {
     static func makeManager(
-        requestBodyEncoder: @escaping ([String: Any]) throws -> Data = {
-            try JSONSerialization.data(withJSONObject: $0)
-        }
+        requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.currentTestIdentifier()
         return TTSNetworkManager(

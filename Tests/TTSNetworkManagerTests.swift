@@ -55,6 +55,68 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
+    func testCustomRequestRequiresConfiguredModelAndVoiceBeforeStartingANetworkTask() {
+        // WHY: Custom servers follow the OpenAI-compatible payload contract, so accepting blank
+        // model or voice values would send a request the server cannot interpret. The validation
+        // must fail through the menu's normal error state before a request reaches the endpoint.
+        isolateAppSettingsDefaults()
+        let manager = TestNetworkFactory.makeManager()
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("Invalid Custom configuration must not contact the endpoint")
+            return (HTTPURLResponse(), Data())
+        }
+
+        let invalidConfigurations = [
+            (model: "", voice: "custom-voice", description: "missing model"),
+            (model: " \n\t ", voice: "custom-voice", description: "whitespace model"),
+            (model: "custom-model", voice: "", description: "missing voice"),
+            (model: "custom-model", voice: " \n\t ", description: "whitespace voice")
+        ]
+
+        for configuration in invalidConfigurations {
+            manager.updateSettings(
+                baseURL: "https://custom.api/v1/audio/speech",
+                apiKey: "custom-token",
+                model: configuration.model,
+                voice: configuration.voice,
+                selectedProvider: "Custom"
+            )
+            manager.streamTTS(text: configuration.description) { _ in
+                XCTFail("Invalid Custom configuration must not deliver audio")
+            }
+
+            XCTAssertEqual(manager.lastError, "Custom TTS requires a model and voice. Update Settings and try again.")
+            XCTAssertFalse(manager.isStreaming)
+        }
+    }
+
+    func testNetworkManagerInitUsesPersistedCustomModelAndVoice() {
+        // WHY: Custom model and voice are required request fields, so a cold launch must restore
+        // them before Settings is opened. Falling back to empty values would make clipboard and
+        // Services speech fail despite the user having already configured the provider.
+        isolateAppSettingsDefaults()
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("https://custom.api/v1/audio/speech", forKey: SettingsKeys.apiBaseURL)
+        UserDefaults.standard.set("persisted-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
+        UserDefaults.standard.set("persisted-custom-model", forKey: SettingsKeys.customModel)
+        UserDefaults.standard.set("persisted-custom-voice", forKey: SettingsKeys.customVoice)
+
+        let manager = TestNetworkFactory.makeManager()
+        let requestEmitted = expectation(description: "Persisted Custom values form a request")
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer persisted-custom-key")
+            let bodyData = try XCTUnwrap(requestBodyData(from: request))
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: String])
+            XCTAssertEqual(body["model"], "persisted-custom-model")
+            XCTAssertEqual(body["voice"], "persisted-custom-voice")
+            requestEmitted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        manager.streamTTS(text: "Use persisted Custom settings") { _ in }
+        wait(for: [requestEmitted], timeout: 2.0)
+    }
+
     func testNetworkManagerStreamsDataChunks() {
         // WHY: The UI depends on receiving audio data quickly. This test ensures that when the server
         // sends data, the network manager relays it to the completion handler properly.

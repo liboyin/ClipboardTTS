@@ -177,23 +177,36 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
             XCTAssertFalse(manager.isStreaming)
     }
 
-    func testOpenAIResponseWithoutACompletePCMFramePublishesProviderAudioError() {
-        // WHY: PCM is 16-bit, so an empty response or one byte cannot be scheduled as audio and
-        // must be reported instead of silently completing a request with no playback.
-        for payload in [Data(), Data([0])] {
-            let manager = TestNetworkFactory.makeManager()
-            manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test")
-            MockURLProtocol.installRequestHandler { request in
-                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-                return (response, payload)
-            }
+    func testOpenAICompatibleResponsesWithoutACompletePCMFramePublishProviderAudioError() {
+        // WHY: OpenAI and Custom both request 16-bit PCM, so an empty response or one byte must
+        // report the same failure instead of silently completing without playback or guidance.
+        isolateAppSettingsDefaults()
+        let providers = [
+            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI"),
+            (baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom")
+        ]
+        for provider in providers {
+            for payload in [Data(), Data([0])] {
+                let manager = TestNetworkFactory.makeManager()
+                manager.updateSettings(
+                    baseURL: provider.baseURL,
+                    apiKey: "fake-key",
+                    model: "test",
+                    voice: "test",
+                    selectedProvider: provider.selectedProvider
+                )
+                MockURLProtocol.installRequestHandler { request in
+                    let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                    return (response, payload)
+                }
 
-            assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
-                manager.streamTTS(text: "Test incomplete PCM") { _ in }
-            }
+                assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
+                    manager.streamTTS(text: "Test incomplete PCM") { _ in }
+                }
 
                 XCTAssertEqual(manager.lastError, "The TTS service returned no playable audio. Please try again.")
                 XCTAssertFalse(manager.isStreaming)
+            }
         }
     }
 
@@ -332,7 +345,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
                 firstEncodingBegan.fulfill()
                 _ = releaseFirstEncoding.wait(timeout: .now() + 1.0)
             }
-            return try JSONSerialization.data(withJSONObject: body)
+            return body
         }
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test")
 

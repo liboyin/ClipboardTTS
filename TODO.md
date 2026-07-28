@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 10 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 9 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -74,7 +74,6 @@ Complete this checklist separately for each numbered task:
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
 | Seeking to the buffered end leaves false playing state | Blocking | 10 |
-| Custom requests send empty model and voice values | Blocking | 7 |
 | API keys use plaintext preferences, URL queries, and unsafe logging | Blocking | 8 |
 | Gemini buffers the full response instead of streaming | Blocking | 9 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
@@ -109,46 +108,11 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 3 — Define provider contracts and secure secrets
 
-### 7. Implement the OpenAI-compatible Custom model/voice contract
-
-**Classification:** Blocking
-
-**Depends on:** Phase 1 (complete) and the established request-error contract
-
-**Problem.** Custom settings return empty model and voice values, while request encoding still
-sends `"model": ""` and `"voice": ""`. The current test incorrectly claims those fields are
-omitted.
-
-**Required change.**
-
-1. Add persisted Custom model and voice fields using `SettingsKeys`.
-2. Require non-empty, non-whitespace model and voice values before issuing a Custom request.
-   Invalid configuration must use the established user-visible error path without contacting the
-   endpoint.
-3. Include both values in every Custom `/v1/audio/speech` payload. Do not preserve the current
-   empty-string behavior and do not conditionally omit the fields.
-4. Make request-body construction explicit and typed enough that required key inclusion is
-   testable without relying on dictionary accident.
-5. Correct `SettingsViewTests` so it inspects the emitted request rather than only computed
-   properties.
-6. Ensure Test Voice and normal clipboard/Services speech use the same validated contract.
-7. Record the OpenAI-compatible Custom contract in README Design Assumptions when implemented.
-
-**Tests and falsification.**
-
-- Decode an intercepted Custom request and assert exact model/voice key presence and values.
-- Cover missing, whitespace-only, and valid configuration.
-- Assert invalid configuration produces the established user-visible error without issuing a request.
-- Mutation-test empty-string acceptance and omission of either required field.
-
-**Done when.** The Custom payload, settings UI, tests, and README describe one consistent
-model/voice contract.
-
 ### 8. Move API keys to Keychain and remove key-bearing URLs/logs
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete), the established request-error contract, and Task 7
+**Depends on:** Phase 1 (complete) and the established request-error contract
 
 **Problem.** OpenAI, Gemini, and Custom keys are stored in plaintext `UserDefaults`. Gemini
 puts its key in the query string, and the invalid-URL path can print the composed URL.
@@ -256,7 +220,7 @@ possible without re-fetching audio.
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Tasks 7 and 10
+**Depends on:** Phase 1 (complete) and Task 10
 
 **Problem.** `AudioPlayerManager` always interprets PCM as 24-kHz mono 16-bit audio. A Custom
 endpoint returning 22.05 or 44.1/48 kHz therefore has wrong duration, speed, pitch, and seek
@@ -339,7 +303,7 @@ change.
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Task 7
+**Depends on:** Phase 1 (complete)
 
 **Problem.** Voice selection exists only in Settings, although `USER_STORIES.md` requires it
 in the menu and restricts changes to idle state.
@@ -350,7 +314,7 @@ in the menu and restricts changes to idle state.
 2. Populate it from provider-authoritative metadata that passed Task 5's freshness guard.
    Verify at execution time whether OpenAI exposes voice discovery; if it does not, use and
    document a version-appropriate list from official documentation rather than inventing an
-   endpoint. Define Custom behavior from Task 7's chosen contract.
+   endpoint. Define Custom behavior from the contract recorded in README Design Assumptions.
 3. Disable voice changes whenever streaming is active or audio remains buffered; "idle" means
    neither condition is true.
 4. When changed at idle, update the network manager's next-request settings without duplicating

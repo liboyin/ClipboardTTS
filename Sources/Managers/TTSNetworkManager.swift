@@ -14,7 +14,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     var session: URLSession!
     private var sessionInvalidated: ((URLSession) -> Void)?
-    private let requestBodyEncoder: ([String: Any]) throws -> Data
+    /// Transforms an already-typed JSON request body; tests inject failures and ordering barriers.
+    let requestBodyEncoder: (Data) throws -> Data
 
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
@@ -35,9 +36,14 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     enum ProviderKind: Equatable {
         case openAICompatible
         case gemini
+        case custom
 
-        init(baseURL: String) {
-            self = baseURL.contains("generativelanguage.googleapis.com") ? .gemini : .openAICompatible
+        init(baseURL: String, selectedProvider: String) {
+            if selectedProvider == "Custom" {
+                self = .custom
+            } else {
+                self = baseURL.contains("generativelanguage.googleapis.com") ? .gemini : .openAICompatible
+            }
         }
     }
 
@@ -67,9 +73,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     init(configuration: URLSessionConfiguration = .default,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
-         requestBodyEncoder: @escaping ([String: Any]) throws -> Data = {
-             try JSONSerialization.data(withJSONObject: $0)
-         }) {
+         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }) {
         let provider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         self.selectedMetadataProvider = provider
         if provider == "OpenAI" {
@@ -85,8 +89,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         } else {
             self.baseURL = UserDefaults.standard.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
             self.apiKey = UserDefaults.standard.string(forKey: SettingsKeys.legacyCustomAPIKey) ?? ""
-            self.model = ""
-            self.voice = ""
+            self.model = UserDefaults.standard.string(forKey: SettingsKeys.customModel) ?? ""
+            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.customVoice) ?? ""
         }
         self.requestBodyEncoder = requestBodyEncoder
 
@@ -132,7 +136,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
                 apiKey: apiKey,
                 model: model,
                 voice: voice,
-                provider: ProviderKind(baseURL: baseURL)
+                provider: ProviderKind(baseURL: baseURL, selectedProvider: selectedMetadataProvider)
             )
         }
     }
@@ -259,6 +263,10 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         }
         let requestGeneration = beginRequestAttempt(); clearLastError(requestGeneration: requestGeneration)
         let settings = requestSettingsSnapshot()
+        guard settings.provider != .custom || hasNonWhitespaceModelAndVoice(settings) else {
+            publishFailure("Custom TTS requires a model and voice. Update Settings and try again.", requestGeneration: requestGeneration)
+            return
+        }
         guard let url = requestURL(for: settings) else {
             publishFailure("TTS configuration is invalid. Check the API endpoint and try again.", requestGeneration: requestGeneration)
             return
@@ -268,37 +276,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if settings.provider == .openAICompatible {
+        if settings.provider != .gemini {
             request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
         }
 
         do {
-            let bodyData: Data
-            if settings.provider == .gemini {
-                let geminiBody: [String: Any] = [
-                    "contents": [["parts": [["text": text]]]],
-                    "generationConfig": [
-                        "responseModalities": ["AUDIO"],
-                        "speechConfig": [
-                            "voiceConfig": [
-                                "prebuiltVoiceConfig": [
-                                    "voiceName": settings.voice
-                                ]
-                            ]
-                        ]
-                    ]
-                ]
-                bodyData = try requestBodyEncoder(geminiBody)
-            } else {
-                let openaiBody: [String: Any] = [
-                    "model": settings.model,
-                    "input": text,
-                    "voice": settings.voice,
-                    "response_format": "pcm"
-                ]
-                bodyData = try requestBodyEncoder(openaiBody)
-            }
-            request.httpBody = bodyData
+            request.httpBody = try encodedRequestBody(text: text, settings: settings)
         } catch {
             publishFailure("Couldn't prepare the speech request. Check the settings and try again.", requestGeneration: requestGeneration)
             return

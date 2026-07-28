@@ -31,6 +31,7 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 ## Design Assumptions
 
 - **OpenAI-compatible endpoints**: Local TTS engines must expose `/v1/audio/speech`. Cloud APIs that differ (e.g. Google Gemini) get dedicated payload formatters.
+- **Custom provider contract**: Custom endpoints use the OpenAI-compatible speech payload. Users must configure a non-whitespace model and voice; every Custom request includes both values with `input` and PCM `response_format`. As with OpenAI, a successful response must contain at least one complete 16-bit PCM frame; otherwise the app reports a no-playable-audio failure.
 - **External toolchain**: `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them.
 
 ## Build & Test

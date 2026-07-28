@@ -13,6 +13,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.openAIVoice) private var openaiVoice: String = "alloy"
     @AppStorage(SettingsKeys.geminiModel) private var geminiModel: String = "gemini-3.1-flash-tts-preview"
     @AppStorage(SettingsKeys.geminiVoice) private var geminiVoice: String = "Aoede"
+    @AppStorage(SettingsKeys.customModel) private var customModel: String = ""
+    @AppStorage(SettingsKeys.customVoice) private var customVoice: String = ""
     var currentAPIKey: String {
         if ttsProvider == "OpenAI" { return openaiAPIKey }
         if ttsProvider == "Gemini" { return geminiAPIKey }
@@ -28,13 +30,13 @@ struct SettingsView: View {
     var currentModel: String {
         if ttsProvider == "OpenAI" { return openaiModel }
         if ttsProvider == "Gemini" { return geminiModel }
-        return ""
+        return customModel
     }
 
     var currentVoice: String {
         if ttsProvider == "OpenAI" { return openaiVoice }
         if ttsProvider == "Gemini" { return geminiVoice }
-        return ""
+        return customVoice
     }
 
     var body: some View {
@@ -111,6 +113,9 @@ struct SettingsView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
                     .onChange(of: customAPIKey) { _ in syncSettings() }
             }
+
+            ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
+                                        networkManager: networkManager, onSync: syncSettings)
 
             testVoiceButton
         }
