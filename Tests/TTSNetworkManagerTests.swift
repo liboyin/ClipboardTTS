@@ -228,7 +228,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         let expectation = XCTestExpectation(description: "Wait for Gemini request")
 
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:generateContent")
+            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com/v1beta/models/gemini-tts:streamGenerateContent?alt=sse")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), geminiKey)
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
             XCTAssertFalse(request.url?.absoluteString.contains(geminiKey) ?? true)
@@ -346,7 +346,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
         MockURLProtocol.installRequestHandler { request in
             XCTAssertEqual(request.url?.absoluteString,
-                           "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:generateContent")
+                           "https://generativelanguage.googleapis.com/v1beta/models/persisted-gemini-model:streamGenerateContent?alt=sse")
             XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "persisted-gemini-key")
             XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
 

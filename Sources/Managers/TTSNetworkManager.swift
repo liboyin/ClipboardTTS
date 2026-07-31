@@ -65,7 +65,9 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         let dataHandler: (Data) -> Void
         var isErrorResponse = false
         var responseStatusCode: Int?
-        var incrementalBuffer = Data()
+        var geminiEventParser = GeminiSSEEventParser()
+        var geminiIncompletePCM = Data()
+        var hasGeminiStreamFailure = false
         var providerAudioByteCount = 0
     }
 
@@ -251,7 +253,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     /// Builds a valid provider endpoint from a settings snapshot.
     private func requestURL(for settings: RequestSettings) -> URL? {
         let urlString = settings.provider == .gemini
-            ? "\(settings.baseURL)/models/\(settings.model):generateContent"
+            ? "\(settings.baseURL)/models/\(settings.model):streamGenerateContent?alt=sse"
             : settings.baseURL
         guard let url = URL(string: urlString),
               let scheme = url.scheme,
@@ -336,38 +338,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         completionHandler(shouldAllow ? .allow : .cancel)
     }
 
-    /// Validates and records an incoming task chunk before delivering OpenAI-compatible audio to the client.
-    ///
-    /// State validation and mutation finish under `stateQueue`. The client handler is captured there
-    /// but invoked only after the queue is released, so it may synchronously stop or replace the stream.
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let dataHandler: ((Data) -> Void)? = stateQueue.sync {
-            guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier else { return nil }
-            defer { activeRequest = context }
-            if context.isErrorResponse { return nil }
-            if context.provider == .gemini { context.incrementalBuffer.append(data); return nil }
-            guard !data.isEmpty else { return nil }
-            context.providerAudioByteCount += data.count
-            return context.dataHandler
-        }
-        dataHandler?(data)
-    }
-
     func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
         sessionInvalidated?(session)
-    }
-
-    /// Decodes the complete Gemini response's first inline-audio payload, if present.
-    func extractGeminiAudioData(from buffer: Data) -> Data? {
-        guard let json = try? JSONSerialization.jsonObject(with: buffer) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let content = candidates.first?["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]],
-              let inlineData = parts.first?["inlineData"] as? [String: Any],
-              let base64String = inlineData["data"] as? String else {
-            return nil
-        }
-        return Data(base64Encoded: base64String)
     }
 
 }

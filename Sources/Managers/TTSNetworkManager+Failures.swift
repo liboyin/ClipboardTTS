@@ -2,12 +2,12 @@ import Foundation
 
 extension TTSNetworkManager {
     private struct TaskCompletionResult {
-        let audioData: Data?
-        let handler: ((Data) -> Void)?
         let provider: ProviderKind?
         let requestGeneration: UInt64?
         let responseStatusCode: Int?
         let providerAudioByteCount: Int
+        let hasGeminiStreamFailure: Bool
+        let hasIncompleteGeminiEvent: Bool
         let isStale: Bool
     }
 
@@ -15,26 +15,23 @@ extension TTSNetworkManager {
         stateQueue.sync {
             guard let context = activeRequest, task.taskIdentifier == context.taskIdentifier else {
                 return TaskCompletionResult(
-                    audioData: nil,
-                    handler: nil,
                     provider: nil,
                     requestGeneration: nil,
                     responseStatusCode: nil,
                     providerAudioByteCount: 0,
+                    hasGeminiStreamFailure: false,
+                    hasIncompleteGeminiEvent: false,
                     isStale: true
                 )
             }
 
-            let audioData = context.provider == .gemini && !context.isErrorResponse
-                ? extractGeminiAudioData(from: context.incrementalBuffer)
-                : nil
             let result = TaskCompletionResult(
-                audioData: audioData,
-                handler: context.dataHandler,
                 provider: context.provider,
                 requestGeneration: context.requestGeneration,
                 responseStatusCode: context.responseStatusCode,
                 providerAudioByteCount: context.providerAudioByteCount,
+                hasGeminiStreamFailure: context.hasGeminiStreamFailure,
+                hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
                 isStale: false
             )
             activeRequest = nil
@@ -49,9 +46,13 @@ extension TTSNetworkManager {
         let failureMessage: String?
         if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
             failureMessage = userFacingHTTPError(statusCode: statusCode)
+        } else if result.provider == .gemini && result.hasGeminiStreamFailure {
+            failureMessage = "The TTS service returned no playable audio. Please try again."
         } else if error != nil {
             failureMessage = "Couldn't reach the TTS service. Check your connection and try again."
-        } else if result.provider == .gemini && !containsCompletePCMFrame(result.audioData) {
+        } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
+            failureMessage = "The TTS service returned no playable audio. Please try again."
+        } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
             failureMessage = "The TTS service returned no playable audio. Please try again."
         } else if (result.provider == .openAICompatible || result.provider == .custom)
                     && !containsCompletePCMFrame(result.providerAudioByteCount) {
@@ -60,21 +61,11 @@ extension TTSNetworkManager {
             failureMessage = nil
         }
 
-        if failureMessage == nil, let audioData = result.audioData {
-            result.handler?(audioData)
-        }
-
         if let failureMessage {
             publishFailure(failureMessage, requestGeneration: result.requestGeneration)
         } else {
             setStreaming(false, requestGeneration: result.requestGeneration)
         }
-    }
-
-    /// Returns whether the provider delivered at least one complete 16-bit PCM frame.
-    private func containsCompletePCMFrame(_ audioData: Data?) -> Bool {
-        guard let audioData else { return false }
-        return containsCompletePCMFrame(audioData.count)
     }
 
     /// Returns whether a byte count represents at least one whole 16-bit PCM frame.

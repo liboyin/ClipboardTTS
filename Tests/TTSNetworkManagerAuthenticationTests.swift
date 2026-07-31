@@ -95,11 +95,12 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             let requestEmitted = expectation(description: "\(provider.name) request is emitted")
             MockURLProtocol.installRequestHandler { request in
                 XCTAssertEqual(request.value(forHTTPHeaderField: provider.header), provider.value)
-                XCTAssertNil(request.url?.query)
                 XCTAssertFalse(request.url?.absoluteString.contains(token) ?? true)
                 if provider.name == "Gemini" {
+                    XCTAssertEqual(request.url?.query, "alt=sse")
                     XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
                 } else {
+                    XCTAssertNil(request.url?.query)
                     XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
                 }
                 requestEmitted.fulfill()

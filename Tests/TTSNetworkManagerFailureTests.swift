@@ -125,8 +125,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
     }
 
     func testMalformedGeminiAudioPublishesProviderDecodingError() {
-        // WHY: Gemini's response is decoded only after completion. A successful HTTP status with
-        // no decodable audio must not silently look like a successful read.
+        // WHY: A complete Gemini event without audio must not silently look like a successful read.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
@@ -137,7 +136,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
 
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{\"candidates\":[]}".utf8))
+            return (response, Data("data: {\"candidates\":[]}\r\n\r\n".utf8))
         }
 
         assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
@@ -163,7 +162,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
 
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            let payload = Data("{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\"AA==\"}}]}}]}".utf8)
+            let payload = Data("data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\"AA==\"}}]}}]}\r\n\r\n".utf8)
             return (response, payload)
         }
 

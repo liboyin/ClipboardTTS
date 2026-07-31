@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 8 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 7 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -74,7 +74,6 @@ Complete this checklist separately for each numbered task:
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
 | Seeking to the buffered end leaves false playing state | Blocking | 10 |
-| Gemini buffers the full response instead of streaming | Blocking | 9 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
@@ -104,46 +103,6 @@ Complete this checklist separately for each numbered task:
 ---
 
 ## Phase 2 — Repair network state and failure behavior
-
-## Phase 3 — Define provider contracts and secure secrets
-
-### 9. Stream Gemini audio incrementally
-
-**Classification:** Blocking
-
-**Depends on:** Task 8 and the established request-error contract (Phase 2 Task 3 complete)
-
-**Problem.** Gemini currently calls the non-streaming endpoint, buffers the complete JSON
-response, and delivers audio only after task completion. This violates the project's
-time-to-first-audio goal.
-
-**Required change.**
-
-1. Verify the current Gemini TTS streaming endpoint, authentication, event format, audio
-   encoding, and whether chunks are actually emitted incrementally using official Google
-   documentation. Provider formats are not stable enough to implement from memory.
-2. Put streaming parser state in the active-request context introduced by Phase 2 Task 3.
-3. Implement a small incremental event parser that accepts arbitrary byte boundaries, retains
-   incomplete events, handles the documented line-ending form, and emits only complete events.
-4. Decode and forward each complete audio chunk outside the state queue. Do not attempt base64
-   decoding on partial events.
-5. Convert malformed events, missing audio, and provider error events into the established error
-   model without corrupting already delivered audio.
-6. Update README's Network section so it accurately distinguishes verified streaming behavior
-   for each provider.
-
-**Tests and falsification.**
-
-- Feed one event split across several URL-session callbacks.
-- Feed multiple events in one callback and across awkward boundaries, including base64 padding.
-- Assert the first audio handler invocation occurs before task completion.
-- Cover malformed JSON, missing audio, an HTTP error stream, and cancellation mid-event.
-- Mutation-test parsing each callback as a complete event and buffering until completion.
-- If the user supplies a Gemini key, perform a manual timing smoke test without recording the
-  key or response content.
-
-**Done when.** Valid Gemini audio is delivered incrementally before response completion, and
-the two-second product target can be meaningfully measured.
 
 ## Phase 4 — Repair audio boundaries and Custom format
 
