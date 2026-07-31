@@ -18,7 +18,17 @@ struct ClipboardTTSApp: App {
 
     init() {
         let secretStore = KeychainSecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let persistedProvider = APIKeyProvider(selectedProvider: UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI")
+        let persistedCustomSampleRate: Double
+        if let storedSampleRate = UserDefaults.standard.object(forKey: SettingsKeys.customSampleRate) {
+            persistedCustomSampleRate = storedSampleRate as? Double ?? .nan
+        } else {
+            persistedCustomSampleRate = AudioPlayerManager.defaultSampleRate
+        }
+        let initialSampleRate = persistedProvider == .custom
+            ? persistedCustomSampleRate
+            : AudioPlayerManager.defaultSampleRate
+        let audioPlayer = AudioPlayerManager(sampleRate: initialSampleRate)
         let textExtraction = TextExtractionManager()
         let networkManager = TTSNetworkManager(secretStore: secretStore)
         self.secretStore = secretStore

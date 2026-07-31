@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 6 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 5 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -73,7 +73,6 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 | Playback starts immediately on the first playable packet | Requested implementation change | 12 |
@@ -105,45 +104,11 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 4 — Repair audio boundaries and Custom format
 
-### 11. Make the Custom PCM sample rate configurable
-
-**Classification:** Blocking
-
-**Depends on:** Phase 1 (complete)
-
-**Problem.** `AudioPlayerManager` always interprets PCM as 24-kHz mono 16-bit audio. A Custom
-endpoint returning 22.05 or 44.1/48 kHz therefore has wrong duration, speed, pitch, and seek
-math.
-
-**Required change.**
-
-1. Add a persisted Custom sample-rate field using `SettingsKeys`, defaulting to 24000 Hz.
-2. Validate a finite numeric value within the supported range selected by the implementation
-   (the existing decision suggested 8000–48000 Hz). Invalid input must produce clear inline or
-   established error feedback and must not partially rebuild the graph.
-3. Add a focused `AudioPlayerManager` API for changing sample rate.
-4. On actual change, stop playback, clear buffered data and progress, disconnect/reconnect the
-   fixed-format audio graph, and restart the engine safely.
-5. OpenAI and Gemini must select 24 kHz automatically; only Custom uses the override.
-6. Document the default and Custom override in README Design Assumptions.
-
-**Tests and falsification.**
-
-- At 48 kHz, 48,000 mono Int16 frames must report one second, not two.
-- Cover the default rate, a non-default valid rate, unchanged rate, invalid values, and engine
-  rebuild failure.
-- Assert a format change clears playing/buffer/progress state.
-- Verify schedule, seek, and timer math all derive from the rebuilt format.
-- Mutation-test retaining the hard-coded 24-kHz divisor in any one path.
-
-**Done when.** Supported Custom sample rates play and seek with correct timing, and changing
-format cannot leave mixed-format buffered audio.
-
 ### 12. Add a 0.1-second automatic-playback prebuffer
 
 **Classification:** Requested implementation change
 
-**Depends on:** Task 11
+**Depends on:** Task 11 (complete)
 
 **Problem.** `AudioPlayerManager.scheduleAudio` currently schedules the first playable PCM
 buffer and calls `play()` immediately. A small or slowly followed first packet can be consumed

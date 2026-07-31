@@ -1,8 +1,125 @@
 import XCTest
 import SwiftUI
+import AVFoundation
 @testable import ClipboardTTSApp
 
 final class SettingsViewTests: MockURLProtocolTestCase {
+
+    func testCustomSampleRatePersistsAndOtherProvidersResetTo24KHz() {
+        // WHY: Only Custom PCM may use a user override. Switching away must reset the live graph
+        // to the documented provider format so a later OpenAI or Gemini response is never decoded
+        // at the previous Custom rate.
+        isolateAppSettingsDefaults()
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set(48_000.0, forKey: SettingsKeys.customSampleRate)
+
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+
+        view.syncSettings()
+        XCTAssertEqual(audioPlayer.sampleRate, 48_000)
+
+        MockURLProtocol.installRequestHandler { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{ \"data\": [] }".utf8))
+        }
+        UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
+        view.providerDidChange(to: "OpenAI")
+
+        XCTAssertEqual(audioPlayer.sampleRate, 24_000)
+    }
+
+    func testInvalidCustomSampleRateIsReportedWithoutStartingTestVoice() {
+        // WHY: The Settings field must refuse invalid PCM rates before a Test Voice request can
+        // stream bytes into an unchanged graph, and its established error is rendered inline.
+        isolateAppSettingsDefaults()
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set(48_001.0, forKey: SettingsKeys.customSampleRate)
+
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("An invalid PCM rate must not start Test Voice")
+            return (HTTPURLResponse(), Data())
+        }
+
+        view.runTestVoice()
+
+        XCTAssertEqual(audioPlayer.sampleRate, 24_000)
+        XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+        XCTAssertFalse(networkManager.isStreaming)
+    }
+
+    func testInvalidCustomSampleRateEditKeepsTheLastKnownGoodPersistedValue() {
+        // WHY: A malformed draft must remain visible for correction without becoming startup
+        // configuration. Otherwise a relaunch could silently decode Custom PCM at the default rate.
+        isolateAppSettingsDefaults()
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set(24_000.0, forKey: SettingsKeys.customSampleRate)
+
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+
+        view.updateCustomSampleRate(from: "48001")
+
+        XCTAssertEqual(UserDefaults.standard.double(forKey: SettingsKeys.customSampleRate), 24_000)
+        XCTAssertFalse(audioPlayer.hasValidSampleRateConfiguration)
+        XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+    }
+
+    func testInvalidCustomSampleRateDraftBlocksTestVoiceAndSubsequentSettingsSync() {
+        // WHY: A visible invalid draft must remain the active validation state until corrected.
+        // Otherwise a later sync could silently recover the saved 24-kHz graph and speak despite
+        // the field still showing a Custom format the app refuses to decode.
+        isolateAppSettingsDefaults()
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("An invalid Custom PCM draft must not start Test Voice")
+            return (HTTPURLResponse(), Data())
+        }
+
+        view.updateCustomSampleRate(from: "48001")
+        view.syncSettings()
+
+        XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+        XCTAssertFalse(networkManager.isStreaming)
+
+        view.runTestVoice()
+
+        XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+        XCTAssertFalse(networkManager.isStreaming)
+    }
+
+    func testTestVoiceDoesNotStartRequestWhenDefaultRateEngineCannotRecover() {
+        // WHY: A sample rate can match the selected provider while its graph failed to start.
+        // Test Voice must retry that graph and keep its failure visible instead of sending a TTS
+        // request that cannot play.
+        isolateAppSettingsDefaults()
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager(engineStarter: { _ in throw EngineStartFailure.failed })
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("A stopped audio graph must not start Test Voice")
+            return (HTTPURLResponse(), Data())
+        }
+
+        view.runTestVoice()
+
+        XCTAssertEqual(audioPlayer.sampleRate, 24_000)
+        XCTAssertEqual(audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
+        XCTAssertFalse(networkManager.isStreaming)
+    }
 
     func testCustomTestVoiceEmitsConfiguredOpenAICompatiblePayload() {
         // WHY: Test Voice must synchronize persisted Custom settings into the production request
@@ -93,4 +210,8 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         }
         wait(for: [expectation], timeout: 2.0)
     }
+}
+
+private enum EngineStartFailure: Error {
+    case failed
 }

@@ -3,6 +3,30 @@ import XCTest
 
 final class ServicesCoordinatorTests: MockURLProtocolTestCase {
 
+    func testServiceNotificationDoesNotStartWhenThePersistedCustomRateIsInvalid() {
+        // WHY: Services can arrive before Settings has ever appeared. A corrupt persisted Custom
+        // rate must therefore block this normal speech path instead of decoding streamed PCM using
+        // a silent 24-kHz fallback.
+        isolateAppSettingsDefaults()
+        let audioPlayer = AudioPlayerManager(sampleRate: 48_001)
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("An invalid Custom PCM rate must not start a Services request")
+            return (HTTPURLResponse(), Data())
+        }
+
+        let center = NotificationCenter()
+        let coordinator = ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager, notificationCenter: center)
+
+        withExtendedLifetime(coordinator) {
+            center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: "Speak me")
+        }
+
+        XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+        XCTAssertFalse(networkManager.isStreaming)
+    }
+
     func testServiceNotificationStreamsSelectedTextToAudio() {
         // WHY: The macOS Services entry point ("Speak Selected Text with Clipboard TTS") must work
         // from app launch, before the menu bar dropdown (and thus MenuBarView) is ever built. The

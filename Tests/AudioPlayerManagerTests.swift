@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import ClipboardTTSApp
 
 final class AudioPlayerManagerTests: XCTestCase {
@@ -85,11 +86,99 @@ final class AudioPlayerManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
+    func testDefaultSampleRateIs24KHz() {
+        // WHY: OpenAI and Gemini PCM are fixed at 24 kHz, so the player must preserve the
+        // long-standing default until Settings selects a validated Custom override.
+        let player = AudioPlayerManager()
+
+        XCTAssertEqual(player.sampleRate, 24_000)
+        XCTAssertTrue(player.isReadyForNewStream)
+    }
+
+    func test48KHzPCMUsesRebuiltFormatForDurationAndSeek() {
+        // WHY: A 48-kHz Custom stream has twice as many Int16 frames per second as the default.
+        // Duration and seek must use the rebuilt format everywhere, or the menu would report and
+        // schedule positions at half their real time.
+        let scheduledBuffers = ScheduledBufferSpy()
+        let player = AudioPlayerManager { scheduledBuffers.record($0) }
+
+        XCTAssertEqual(player.setSampleRate(48_000), .updated)
+        let generation = player.startNewStream()
+        player.scheduleAudio(data: Data(repeating: 0, count: 96_000), streamGeneration: generation)
+
+        waitForAudio(toBeScheduledBy: player)
+        XCTAssertEqual(player.bufferDuration, 1.0, accuracy: 0.000_001)
+        XCTAssertEqual(player.progress(forRenderedSampleTime: 48_000) ?? -1.0, 1.0, accuracy: 0.000_001)
+        XCTAssertEqual(scheduledBuffers.lastSampleRate, 48_000)
+        XCTAssertEqual(scheduledBuffers.lastFrameLength, 48_000)
+
+        player.seek(to: 0.5)
+
+        XCTAssertEqual(player.playbackProgress, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(scheduledBuffers.lastSampleRate, 48_000)
+        XCTAssertEqual(scheduledBuffers.lastFrameLength, 24_000)
+    }
+
+    func testUnchangedSampleRatePreservesBufferedAudio() {
+        // WHY: Selecting the already-active Custom rate must not interrupt a read or discard its
+        // buffer, because no mixed-format data can exist when the graph did not change.
+        let player = AudioPlayerManager()
+        let generation = player.startNewStream()
+        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
+
+        waitForAudio(toBeScheduledBy: player)
+        XCTAssertEqual(player.setSampleRate(24_000), .unchanged)
+        XCTAssertTrue(player.hasAudio)
+        XCTAssertEqual(player.bufferDuration, 1.0, accuracy: 0.000_001)
+    }
+
+    func testInvalidSampleRateLeavesCurrentFormatAndBufferUntouched() {
+        // WHY: Rejecting an invalid Custom setting must be atomic. A partial graph rebuild would
+        // either lose the current read or leave audio interpreted by a format the UI did not accept.
+        let player = AudioPlayerManager()
+        let generation = player.startNewStream()
+        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
+
+        waitForAudio(toBeScheduledBy: player)
+        XCTAssertEqual(player.setSampleRate(7_999), .invalid)
+        XCTAssertEqual(player.setSampleRate(.infinity), .invalid)
+        XCTAssertEqual(player.sampleRate, 24_000)
+        XCTAssertFalse(player.hasValidSampleRateConfiguration)
+        XCTAssertTrue(player.hasAudio)
+        XCTAssertEqual(player.bufferDuration, 1.0, accuracy: 0.000_001)
+        XCTAssertEqual(player.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+    }
+
+    func testSampleRateChangeClearsPlaybackAndReportsEngineRestartFailure() {
+        // WHY: A valid format change invalidates already-scheduled PCM even when the engine cannot
+        // restart. The UI must then show a safe cleared state instead of claiming old-format audio
+        // remains playable.
+        let startController = AudioEngineStartController()
+        let player = AudioPlayerManager(engineStarter: startController.start)
+        let generation = player.startNewStream()
+        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
+
+        waitForAudio(toBeScheduledBy: player)
+        startController.shouldFail = true
+
+        XCTAssertEqual(player.setSampleRate(48_000), .engineStartFailed)
+        XCTAssertEqual(player.sampleRate, 48_000)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(player.hasAudio)
+        XCTAssertEqual(player.bufferDuration, 0.0)
+        XCTAssertEqual(player.playbackProgress, 0.0)
+        XCTAssertEqual(player.sampleRateError, "Couldn't start audio playback. Try again.")
+        XCTAssertFalse(player.isReadyForNewStream)
+
+        XCTAssertEqual(player.setSampleRate(48_000), .engineStartFailed)
+        XCTAssertEqual(player.sampleRateError, "Couldn't start audio playback. Try again.")
+    }
+
     func testSeekWhilePlayingClampsToBufferedRangeAndReplaysFromExactEnd() {
         // WHY: The progress slider must never advertise playback after it reaches the final buffered
         // frame; the retained buffer must still support replay without a new TTS request.
         let scheduledBuffers = ScheduledBufferSpy()
-        let player = AudioPlayerManager { _ in scheduledBuffers.record() }
+        let player = AudioPlayerManager { scheduledBuffers.record($0) }
         let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
         let gen = player.startNewStream()
         player.scheduleAudio(data: sampleData, streamGeneration: gen)
@@ -249,6 +338,8 @@ final class AudioPlayerManagerTests: XCTestCase {
 private final class ScheduledBufferSpy {
     private let lock = NSLock()
     private var scheduledBufferCount = 0
+    private var sampleRate: Double?
+    private var frameLength: AVAudioFrameCount?
 
     var count: Int {
         lock.lock()
@@ -256,9 +347,38 @@ private final class ScheduledBufferSpy {
         return scheduledBufferCount
     }
 
-    func record() {
+    var lastSampleRate: Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sampleRate
+    }
+
+    var lastFrameLength: AVAudioFrameCount? {
+        lock.lock()
+        defer { lock.unlock() }
+        return frameLength
+    }
+
+    func record(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
         scheduledBufferCount += 1
+        sampleRate = buffer.format.sampleRate
+        frameLength = buffer.frameLength
         lock.unlock()
     }
+}
+
+private final class AudioEngineStartController {
+    var shouldFail = false
+
+    func start(_ engine: AVAudioEngine) throws {
+        if shouldFail {
+            throw AudioEngineStartFailure.failed
+        }
+        try engine.start()
+    }
+}
+
+private enum AudioEngineStartFailure: Error {
+    case failed
 }

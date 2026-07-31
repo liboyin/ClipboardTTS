@@ -9,7 +9,7 @@ struct MenuBarView: View {
     @Environment(\.openWindow) var openWindow
 
     var errorMessage: String? {
-        networkManager.lastError
+        networkManager.lastError ?? audioPlayer.sampleRateError
     }
 
     var requestErrorView: RequestErrorView? {
@@ -93,6 +93,7 @@ struct MenuBarView: View {
             networkManager.stopStreaming()
             audioPlayer.stop()
         } else {
+            guard audioPlayer.isReadyForNewStream else { return }
             NSApp.deactivate()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if let text = textExtraction.getCopiedText() {

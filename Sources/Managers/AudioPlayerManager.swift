@@ -2,10 +2,24 @@ import Foundation
 import AVFoundation
 
 class AudioPlayerManager: ObservableObject {
+    static let defaultSampleRate = 24_000.0
+    static let supportedSampleRateRange = 8_000.0...48_000.0
+
+    enum SampleRateUpdateResult: Equatable {
+        case unchanged
+        case updated
+        case invalid
+        case engineStartFailed
+    }
+
     @Published var isPlaying = false
     @Published var playbackProgress: Double = 0.0
     @Published var bufferDuration: Double = 0.0
     @Published var hasAudio = false
+    @Published private(set) var sampleRate: Double = defaultSampleRate
+    @Published private(set) var sampleRateError: String?
+    @Published private(set) var hasValidSampleRateInput = true
+    @Published private(set) var hasValidSampleRateConfiguration = true
 
     @Published var playbackRate: Float = 1.0 {
         didSet {
@@ -29,32 +43,126 @@ class AudioPlayerManager: ObservableObject {
     private var baseProgressOffset: Double = 0.0
     private var scheduleGeneration: Int = 0
     private let scheduledBufferObserver: (AVAudioPCMBuffer) -> Void
+    private let engineStarter: (AVAudioEngine) throws -> Void
 
     private var progressTimer: Timer?
 
     /// Creates the audio graph. The observer is notified after each PCM buffer is passed to the node.
-    init(scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in }) {
+    init(sampleRate: Double = AudioPlayerManager.defaultSampleRate,
+         scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in },
+         engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() }) {
         self.scheduledBufferObserver = scheduledBufferObserver
-        setupEngine()
+        self.engineStarter = engineStarter
+        let hasValidInitialSampleRate = Self.isSupportedSampleRate(sampleRate)
+        let initialSampleRate = hasValidInitialSampleRate ? sampleRate : Self.defaultSampleRate
+        setupEngine(sampleRate: initialSampleRate)
+        if !hasValidInitialSampleRate {
+            hasValidSampleRateInput = false
+            hasValidSampleRateConfiguration = false
+            sampleRateError = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
+        }
     }
 
-    private func setupEngine() {
+    private func setupEngine(sampleRate: Double) {
         engine.attach(playerNode)
         engine.attach(timePitch)
 
-        let standardFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)
-        audioFormat = standardFormat
-
-        if let standardFormat = standardFormat {
-            engine.connect(playerNode, to: timePitch, format: standardFormat)
-            engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
+        guard let standardFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+            sampleRateError = "Couldn't configure the PCM sample rate. Try again."
+            return
         }
+        self.sampleRate = sampleRate
+        bufferQueue.sync {
+            audioFormat = standardFormat
+        }
+
+        engine.connect(playerNode, to: timePitch, format: standardFormat)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
 
         do {
-            try engine.start()
+            try engineStarter(engine)
         } catch {
-            print("Engine start error: \(error)")
+            hasValidSampleRateConfiguration = false
+            sampleRateError = "Couldn't start audio playback. Try again."
         }
+    }
+
+    /// Changes the PCM sample rate after clearing all audio that was decoded with the previous format.
+    @discardableResult
+    func setSampleRate(_ sampleRate: Double) -> SampleRateUpdateResult {
+        guard Self.isSupportedSampleRate(sampleRate) else {
+            hasValidSampleRateInput = false
+            hasValidSampleRateConfiguration = false
+            sampleRateError = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
+            return .invalid
+        }
+        hasValidSampleRateInput = true
+
+        let currentSampleRate = bufferQueue.sync { audioFormat?.sampleRate }
+        guard currentSampleRate != sampleRate else {
+            guard !engine.isRunning else {
+                hasValidSampleRateConfiguration = true
+                sampleRateError = nil
+                return .unchanged
+            }
+            do {
+                try engineStarter(engine)
+                hasValidSampleRateConfiguration = true
+                sampleRateError = nil
+                return .unchanged
+            } catch {
+                hasValidSampleRateConfiguration = false
+                sampleRateError = "Couldn't start audio playback. Try again."
+                return .engineStartFailed
+            }
+        }
+
+        stop()
+        engine.stop()
+        engine.disconnectNodeOutput(playerNode)
+        engine.disconnectNodeInput(timePitch)
+        engine.disconnectNodeOutput(timePitch)
+
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+            hasValidSampleRateConfiguration = false
+            sampleRateError = "Couldn't configure the PCM sample rate. Try again."
+            return .engineStartFailed
+        }
+
+        engine.connect(playerNode, to: timePitch, format: format)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+        bufferQueue.sync {
+            audioFormat = format
+        }
+        self.sampleRate = sampleRate
+
+        do {
+            try engineStarter(engine)
+            hasValidSampleRateConfiguration = true
+            sampleRateError = nil
+            return .updated
+        } catch {
+            hasValidSampleRateConfiguration = false
+            sampleRateError = "Couldn't start audio playback. Try again."
+            return .engineStartFailed
+        }
+    }
+
+    /// Returns whether a PCM sample rate can be represented by the app's mono Int16 graph.
+    static func isSupportedSampleRate(_ sampleRate: Double) -> Bool {
+        sampleRate.isFinite && supportedSampleRateRange.contains(sampleRate)
+    }
+
+    /// Whether the current configuration can start a new PCM stream without misinterpreting its format.
+    var isReadyForNewStream: Bool {
+        hasValidSampleRateConfiguration && engine.isRunning
+    }
+
+    /// Converts a player-node sample time to elapsed seconds using the active PCM format.
+    func progress(forRenderedSampleTime sampleTime: AVAudioFramePosition) -> Double? {
+        let sampleRate = bufferQueue.sync { audioFormat?.sampleRate }
+        guard let sampleRate else { return nil }
+        return baseProgressOffset + Double(sampleTime) / sampleRate
     }
 
     func startNewStream() -> Int {
@@ -68,11 +176,10 @@ class AudioPlayerManager: ObservableObject {
     }
 
     func scheduleAudio(data: Data, streamGeneration: Int) {
-        guard let format = audioFormat else { return }
-
         // Runs on the network delegate's background queue; serialize buffer access via bufferQueue.
         bufferQueue.async {
             guard self.scheduleGeneration == streamGeneration else { return }
+            guard let format = self.audioFormat else { return }
 
             self.accumulatedData.append(data)
             self.unprocessedData.append(data)
@@ -92,6 +199,7 @@ class AudioPlayerManager: ObservableObject {
             self.schedule(buffer)
 
             DispatchQueue.main.async {
+                guard self.bufferQueue.sync(execute: { self.scheduleGeneration == streamGeneration }) else { return }
                 self.bufferDuration = Double(bufferedFrameCount) / format.sampleRate
                 self.hasAudio = true
 
@@ -104,7 +212,13 @@ class AudioPlayerManager: ObservableObject {
 
     func play() {
         if !engine.isRunning {
-            try? engine.start()
+            do {
+                try engineStarter(engine)
+            } catch {
+                hasValidSampleRateConfiguration = false
+                sampleRateError = "Couldn't start audio playback. Try again."
+                return
+            }
         }
 
         if playbackProgress >= bufferDuration && bufferDuration > 0 {
@@ -137,11 +251,16 @@ class AudioPlayerManager: ObservableObject {
         playerNode.stop()
         baseProgressOffset = 0.0
 
-        DispatchQueue.main.async {
+        let updatePublishedState = {
             self.isPlaying = false
             self.hasAudio = false
             self.bufferDuration = 0.0
             self.playbackProgress = 0.0
+        }
+        if Thread.isMainThread {
+            updatePublishedState()
+        } else {
+            DispatchQueue.main.async(execute: updatePublishedState)
         }
         stopProgressTimer()
     }
@@ -149,7 +268,6 @@ class AudioPlayerManager: ObservableObject {
     /// Moves playback to a buffered position, clamping requests outside the available PCM range.
     /// Seeking to the end stops playback but preserves the buffered data for replay.
     func seek(to progress: Double) {
-        guard let format = audioFormat else { return }
         let wasPlaying = isPlaying
         let requestedProgress = progress.isFinite ? progress : 0.0
         var clampedProgress = 0.0
@@ -159,6 +277,7 @@ class AudioPlayerManager: ObservableObject {
         // those operations on bufferQueue means a seek runs after all earlier scheduling work, then
         // prevents it from surviving playerNode.stop() and being replayed alongside the seek buffer.
         bufferQueue.sync {
+            guard let format = audioFormat else { return }
             let bytesPerNetworkFrame = 2
             let bufferedDuration = Double(bufferedPCMFrameCount) / format.sampleRate
             let frameOffset: Int
@@ -229,8 +348,7 @@ class AudioPlayerManager: ObservableObject {
                   let playerTime = self.playerNode.playerTime(forNodeTime: nodeTime) else { return }
 
             DispatchQueue.main.async {
-                if let format = self.audioFormat {
-                    let newProgress = self.baseProgressOffset + Double(playerTime.sampleTime) / format.sampleRate
+                if let newProgress = self.progress(forRenderedSampleTime: playerTime.sampleTime) {
                     if newProgress > 0 && newProgress <= self.bufferDuration {
                         self.playbackProgress = newProgress
                     } else if newProgress > self.bufferDuration {

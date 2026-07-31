@@ -40,6 +40,7 @@ final class ServicesCoordinator: ObservableObject {
     }
 
     private func speak(_ text: String) {
+        guard audioPlayer.isReadyForNewStream else { return }
         networkManager.stopStreaming()
         audioPlayer.stop()
         let gen = audioPlayer.startNewStream()

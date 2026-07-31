@@ -13,6 +13,9 @@ struct SettingsView: View {
     @AppStorage(SettingsKeys.geminiVoice) private var geminiVoice: String = "Aoede"
     @AppStorage(SettingsKeys.customModel) private var customModel: String = ""
     @AppStorage(SettingsKeys.customVoice) private var customVoice: String = ""
+    @AppStorage(SettingsKeys.customSampleRate) private var customSampleRate: Double = AudioPlayerManager.defaultSampleRate
+    @State private var customSampleRateText = ""
+    @State private var isCustomSampleRateDraftValid = true
 
     init(networkManager: TTSNetworkManager,
          audioPlayer: AudioPlayerManager,
@@ -96,6 +99,8 @@ struct SettingsView: View {
         }
         .frame(width: 600, height: 350)
         .onAppear {
+            customSampleRateText = String(format: "%.0f", customSampleRate)
+            isCustomSampleRateDraftValid = AudioPlayerManager.isSupportedSampleRate(customSampleRate)
             syncSettings()
         }
     }
@@ -142,6 +147,16 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
                                         networkManager: networkManager, onSync: syncSettings)
 
+            Section(header: Text("Audio Format").font(.headline)) {
+                TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .onChange(of: customSampleRateText) { updateCustomSampleRate(from: $0) }
+                if let sampleRateError = audioPlayer.sampleRateError {
+                    Text(sampleRateError)
+                        .foregroundStyle(.red)
+                }
+            }
+
             testVoiceButton
         }
     }
@@ -160,6 +175,7 @@ struct SettingsView: View {
 
     func runTestVoice() {
         normalizeSelectedProvider()
+        guard syncAudioFormat() else { return }
         networkManager.updateSettings(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
@@ -188,7 +204,46 @@ struct SettingsView: View {
             voice: currentVoice,
             selectedProvider: selectedProvider.settingsValue
         )
+        _ = syncAudioFormat()
         fetchMetadata()
+    }
+
+    /// Selects the fixed provider format or the validated Custom override for future audio.
+    @discardableResult
+    func syncAudioFormat() -> Bool {
+        guard selectedProvider != .custom || (isCustomSampleRateDraftValid && audioPlayer.hasValidSampleRateInput) else {
+            _ = audioPlayer.setSampleRate(.nan)
+            return false
+        }
+        let customDraftSampleRate = Double(customSampleRateText) ?? customSampleRate
+        let targetSampleRate = selectedProvider == .custom ? customDraftSampleRate : AudioPlayerManager.defaultSampleRate
+        switch audioPlayer.setSampleRate(targetSampleRate) {
+        case .updated, .unchanged:
+            if selectedProvider == .custom {
+                customSampleRate = customDraftSampleRate
+            }
+            return true
+        case .invalid, .engineStartFailed:
+            return false
+        }
+    }
+
+    /// Validates a Custom sample-rate edit before replacing the persisted last-known-good value.
+    func updateCustomSampleRate(from text: String) {
+        guard let sampleRate = Double(text) else {
+            isCustomSampleRateDraftValid = false
+            _ = audioPlayer.setSampleRate(.nan)
+            return
+        }
+        switch audioPlayer.setSampleRate(sampleRate) {
+        case .updated, .unchanged:
+            isCustomSampleRateDraftValid = true
+            customSampleRate = sampleRate
+        case .invalid:
+            isCustomSampleRateDraftValid = false
+        case .engineStartFailed:
+            isCustomSampleRateDraftValid = true
+        }
     }
 
     func fetchMetadata() {

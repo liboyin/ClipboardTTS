@@ -14,6 +14,7 @@ enum SettingsKeys {
     static let geminiVoice = "geminiVoice"
     static let customModel = "customModel"
     static let customVoice = "customVoice"
+    static let customSampleRate = "customSampleRate"
 
     static let legacyOpenAIAPIKey = "apiKey"
     static let legacyGeminiAPIKey = "geminiAPIKey"
@@ -29,6 +30,7 @@ enum SettingsKeys {
         geminiVoice,
         customModel,
         customVoice,
+        customSampleRate,
         legacyOpenAIAPIKey,
         legacyGeminiAPIKey,
         legacyCustomAPIKey
