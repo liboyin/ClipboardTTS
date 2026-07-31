@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 7 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 6 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -73,7 +73,6 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Seeking to the buffered end leaves false playing state | Blocking | 10 |
 | Custom audio is always interpreted as 24-kHz PCM | Blocking | 11 |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
@@ -106,40 +105,11 @@ Complete this checklist separately for each numbered task:
 
 ## Phase 4 — Repair audio boundaries and Custom format
 
-### 10. Correct exact-end seek state
-
-**Classification:** Blocking
-
-**Depends on:** Nothing
-
-**Problem.** Seeking to `bufferDuration` stops `AVAudioPlayerNode` but leaves `isPlaying`
-true because no remaining buffer is scheduled and no paused/stopped state is published.
-
-**Required change.**
-
-1. Clamp requested progress to the valid buffered range.
-2. Define exact-end behavior explicitly: stop/pause the node, set progress to the buffer end,
-   set `isPlaying` false, and stop the progress timer while retaining the buffer for replay.
-3. Preserve current behavior for a middle seek and replay from zero after completion.
-4. Keep `playerNode` operations and buffered-data reads consistently ordered. While working in
-   this area, add evidence for any claimed scheduling race rather than assuming
-   `AVAudioPlayerNode` semantics.
-
-**Tests and falsification.**
-
-- Seek to zero, middle, exact end, just below end, and beyond end.
-- Cover both playing and paused preconditions.
-- Assert exact end is silent, not playing, and still has buffered audio available for replay.
-- Mutation-test the existing early return that leaves `isPlaying` true.
-
-**Done when.** Slider boundary values produce truthful playback state and replay remains
-possible without re-fetching audio.
-
 ### 11. Make the Custom PCM sample rate configurable
 
 **Classification:** Blocking
 
-**Depends on:** Phase 1 (complete) and Task 10
+**Depends on:** Phase 1 (complete)
 
 **Problem.** `AudioPlayerManager` always interprets PCM as 24-kHz mono 16-bit audio. A Custom
 endpoint returning 22.05 or 44.1/48 kHz therefore has wrong duration, speed, pitch, and seek
@@ -173,7 +143,7 @@ format cannot leave mixed-format buffered audio.
 
 **Classification:** Requested implementation change
 
-**Depends on:** Tasks 10 and 11
+**Depends on:** Task 11
 
 **Problem.** `AudioPlayerManager.scheduleAudio` currently schedules the first playable PCM
 buffer and calls `play()` immediately. A small or slowly followed first packet can be consumed

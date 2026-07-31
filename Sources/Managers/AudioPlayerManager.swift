@@ -25,12 +25,16 @@ class AudioPlayerManager: ObservableObject {
     private let bufferQueue = DispatchQueue(label: "com.clipboardtts.audiobuffer")
     private var accumulatedData = Data()
     private var unprocessedData = Data()
+    private var bufferedPCMFrameCount = 0
     private var baseProgressOffset: Double = 0.0
     private var scheduleGeneration: Int = 0
+    private let scheduledBufferObserver: (AVAudioPCMBuffer) -> Void
 
     private var progressTimer: Timer?
 
-    init() {
+    /// Creates the audio graph. The observer is notified after each PCM buffer is passed to the node.
+    init(scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in }) {
+        self.scheduledBufferObserver = scheduledBufferObserver
         setupEngine()
     }
 
@@ -58,6 +62,7 @@ class AudioPlayerManager: ObservableObject {
             scheduleGeneration += 1
             accumulatedData.removeAll()
             unprocessedData.removeAll()
+            bufferedPCMFrameCount = 0
             return scheduleGeneration
         }
     }
@@ -73,6 +78,8 @@ class AudioPlayerManager: ObservableObject {
             self.unprocessedData.append(data)
 
             let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
+            self.bufferedPCMFrameCount = self.accumulatedData.count / bytesPerNetworkFrame
+            let bufferedFrameCount = self.bufferedPCMFrameCount
             let frameCapacity = AVAudioFrameCount(self.unprocessedData.count / bytesPerNetworkFrame)
             guard frameCapacity > 0 else { return }
 
@@ -82,10 +89,10 @@ class AudioPlayerManager: ObservableObject {
 
             guard let buffer = self.makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
 
-            self.playerNode.scheduleBuffer(buffer)
+            self.schedule(buffer)
 
             DispatchQueue.main.async {
-                self.bufferDuration += Double(frameCapacity) / format.sampleRate
+                self.bufferDuration = Double(bufferedFrameCount) / format.sampleRate
                 self.hasAudio = true
 
                 if !self.isPlaying {
@@ -105,17 +112,13 @@ class AudioPlayerManager: ObservableObject {
         }
         playerNode.play()
 
-        DispatchQueue.main.async {
-            self.isPlaying = true
-        }
+        isPlaying = true
         startProgressTimer()
     }
 
     func pause() {
         playerNode.pause()
-        DispatchQueue.main.async {
-            self.isPlaying = false
-        }
+        isPlaying = false
         stopProgressTimer()
     }
 
@@ -129,6 +132,7 @@ class AudioPlayerManager: ObservableObject {
             scheduleGeneration += 1
             accumulatedData.removeAll()
             unprocessedData.removeAll()
+            bufferedPCMFrameCount = 0
         }
         playerNode.stop()
         baseProgressOffset = 0.0
@@ -142,30 +146,65 @@ class AudioPlayerManager: ObservableObject {
         stopProgressTimer()
     }
 
+    /// Moves playback to a buffered position, clamping requests outside the available PCM range.
+    /// Seeking to the end stops playback but preserves the buffered data for replay.
     func seek(to progress: Double) {
         guard let format = audioFormat else { return }
-        self.playbackProgress = progress
-        self.baseProgressOffset = progress
         let wasPlaying = isPlaying
+        let requestedProgress = progress.isFinite ? progress : 0.0
+        var clampedProgress = 0.0
+        var reachedBufferEnd = false
 
-        playerNode.stop()
-
-        // Reading accumulatedData must be serialized against background appends in scheduleAudio.
+        // Both scheduleAudio and seek manipulate the player node based on accumulatedData. Keeping
+        // those operations on bufferQueue means a seek runs after all earlier scheduling work, then
+        // prevents it from surviving playerNode.stop() and being replayed alongside the seek buffer.
         bufferQueue.sync {
             let bytesPerNetworkFrame = 2
-            let byteOffset = Int(progress * format.sampleRate) * bytesPerNetworkFrame
-            guard byteOffset < accumulatedData.count else { return }
+            let bufferedDuration = Double(bufferedPCMFrameCount) / format.sampleRate
+            let frameOffset: Int
+            if requestedProgress >= bufferedDuration {
+                frameOffset = bufferedPCMFrameCount
+            } else if requestedProgress <= 0.0 {
+                frameOffset = 0
+            } else {
+                frameOffset = min(Int(requestedProgress * format.sampleRate), bufferedPCMFrameCount)
+            }
+            clampedProgress = Double(frameOffset) / format.sampleRate
+            let byteOffset = frameOffset * bytesPerNetworkFrame
+            let completeByteCount = bufferedPCMFrameCount * bytesPerNetworkFrame
 
-            let remainingData = accumulatedData.subdata(in: byteOffset..<accumulatedData.count)
+            playerNode.stop()
+
+            guard byteOffset < completeByteCount else {
+                reachedBufferEnd = true
+                return
+            }
+
+            let remainingData = accumulatedData.subdata(in: byteOffset..<completeByteCount)
             let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
             guard frameCapacity > 0,
                   let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
 
-            playerNode.scheduleBuffer(buffer)
+            schedule(buffer)
             if wasPlaying {
                 playerNode.play()
             }
         }
+
+        playbackProgress = clampedProgress
+        baseProgressOffset = clampedProgress
+
+        guard reachedBufferEnd else { return }
+
+        // playerNode.stop() above clears every scheduled buffer, while accumulatedData is retained
+        // for play() to seek back to zero and replay without requesting audio again.
+        isPlaying = false
+        stopProgressTimer()
+    }
+
+    private func schedule(_ buffer: AVAudioPCMBuffer) {
+        playerNode.scheduleBuffer(buffer)
+        scheduledBufferObserver(buffer)
     }
 
     private func makePCMBuffer(from data: Data, format: AVAudioFormat, frameCapacity: AVAudioFrameCount) -> AVAudioPCMBuffer? {

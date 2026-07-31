@@ -85,20 +85,180 @@ final class AudioPlayerManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 1.0)
     }
 
-    func testSeek() {
-        // WHY: User seeking the slider should change playbackProgress and restart playing.
+    func testSeekWhilePlayingClampsToBufferedRangeAndReplaysFromExactEnd() {
+        // WHY: The progress slider must never advertise playback after it reaches the final buffered
+        // frame; the retained buffer must still support replay without a new TTS request.
+        let scheduledBuffers = ScheduledBufferSpy()
+        let player = AudioPlayerManager { _ in scheduledBuffers.record() }
+        let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
+        let gen = player.startNewStream()
+        player.scheduleAudio(data: sampleData, streamGeneration: gen)
+
+        waitForAudio(toBeScheduledBy: player)
+        XCTAssertTrue(player.isPlaying)
+
+        player.seek(to: 0.0)
+        XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
+        XCTAssertTrue(player.isPlaying)
+
+        player.seek(to: 0.5)
+        XCTAssertEqual(player.playbackProgress, 0.5, accuracy: 0.000_001)
+        XCTAssertTrue(player.isPlaying)
+
+        player.seek(to: player.bufferDuration - 0.001)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration - 0.001, accuracy: 0.000_001)
+        XCTAssertTrue(player.isPlaying)
+
+        player.seek(to: player.bufferDuration)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertTrue(player.hasAudio)
+
+        player.play()
+        player.seek(to: player.bufferDuration)
+        waitForPlayingState(of: player, toBecome: false)
+
+        let scheduledBufferCountBeforeReplay = scheduledBuffers.count
+        player.play()
+        XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
+        XCTAssertEqual(scheduledBuffers.count, scheduledBufferCountBeforeReplay + 1)
+        waitForPlayingState(of: player, toBecome: true)
+
+        player.seek(to: player.bufferDuration + 1.0)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertTrue(player.hasAudio)
+    }
+
+    func testSeekToCompletePCMEndStopsPlaybackWithRoundingSensitiveOrTrailingData() {
+        // WHY: Network chunks may end at any byte boundary. End seeking must use complete PCM-frame
+        // boundaries, rather than floating-point conversion or the raw byte count.
+        let expectedDuration = Double(24_007) / 24_000.0
+        for byteCount in [48_014, 48_015] {
+            let player = AudioPlayerManager()
+            let gen = player.startNewStream()
+            player.scheduleAudio(data: Data(repeating: 0, count: byteCount), streamGeneration: gen)
+
+            waitForAudio(toBeScheduledBy: player)
+            XCTAssertTrue(player.isPlaying)
+
+            player.seek(to: player.bufferDuration)
+
+            XCTAssertEqual(player.playbackProgress, expectedDuration, accuracy: 0.000_001)
+            XCTAssertFalse(player.isPlaying)
+            XCTAssertTrue(player.hasAudio)
+        }
+    }
+
+    func testSeekToPublishedEndStopsPlaybackAcrossRoundingSensitiveChunks() {
+        // WHY: The slider maximum is a duration published after each network chunk. It must remain
+        // the same complete-frame boundary used by seek, even when individual Double durations round.
+        let framesPerChunk = 24_001
+        let expectedDuration = Double(framesPerChunk * 7) / 24_000.0
+
+        for shouldPause in [false, true] {
+            let player = AudioPlayerManager()
+            let gen = player.startNewStream()
+            for _ in 0..<7 {
+                player.scheduleAudio(data: Data(repeating: 0, count: framesPerChunk * 2), streamGeneration: gen)
+            }
+
+            waitForBufferDuration(of: player, toBecome: expectedDuration)
+            if shouldPause {
+                player.pause()
+                waitForPlayingState(of: player, toBecome: false)
+            } else {
+                XCTAssertTrue(player.isPlaying)
+            }
+
+            player.seek(to: player.bufferDuration)
+
+            XCTAssertEqual(player.playbackProgress, expectedDuration, accuracy: 0.000_001)
+            XCTAssertFalse(player.isPlaying)
+            XCTAssertTrue(player.hasAudio)
+        }
+    }
+
+    func testSeekWhilePausedClampsToBufferedRangeWithoutResuming() {
+        // WHY: Dragging the progress slider while paused must retain the paused state at every
+        // boundary, including a request beyond the buffered audio.
         let player = AudioPlayerManager()
         let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
         let gen = player.startNewStream()
         player.scheduleAudio(data: sampleData, streamGeneration: gen)
 
-        let expectation = XCTestExpectation(description: "Wait for audio schedule")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            player.seek(to: 0.5)
+        waitForAudio(toBeScheduledBy: player)
+        player.pause()
+        waitForPlayingState(of: player, toBecome: false)
 
-            XCTAssertEqual(player.playbackProgress, 0.5)
+        player.seek(to: -1.0)
+        XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+
+        player.seek(to: 0.0)
+        XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+
+        player.seek(to: 0.5)
+        XCTAssertEqual(player.playbackProgress, 0.5, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+
+        player.seek(to: player.bufferDuration - 0.001)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration - 0.001, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+
+        player.seek(to: player.bufferDuration)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertTrue(player.hasAudio)
+
+        player.seek(to: player.bufferDuration + 1.0)
+        XCTAssertEqual(player.playbackProgress, player.bufferDuration, accuracy: 0.000_001)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertTrue(player.hasAudio)
+    }
+
+    private func waitForAudio(toBeScheduledBy player: AudioPlayerManager) {
+        let expectation = XCTestExpectation(description: "Audio is scheduled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertTrue(player.hasAudio)
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)
+    }
+
+    private func waitForPlayingState(of player: AudioPlayerManager, toBecome expectedState: Bool) {
+        let expectation = XCTestExpectation(description: "Playback state is updated")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertEqual(player.isPlaying, expectedState)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    private func waitForBufferDuration(of player: AudioPlayerManager, toBecome expectedDuration: Double) {
+        let expectation = XCTestExpectation(description: "Buffer duration is updated")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            XCTAssertEqual(player.bufferDuration, expectedDuration, accuracy: 0.000_001)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+}
+
+private final class ScheduledBufferSpy {
+    private let lock = NSLock()
+    private var scheduledBufferCount = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return scheduledBufferCount
+    }
+
+    func record() {
+        lock.lock()
+        scheduledBufferCount += 1
+        lock.unlock()
     }
 }
