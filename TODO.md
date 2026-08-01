@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 5 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 4 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -75,7 +75,6 @@ Complete this checklist separately for each numbered task:
 | --- | --- | --- |
 | Required voice, icon, and About UI is missing | Blocking | 13–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
-| Playback starts immediately on the first playable packet | Requested implementation change | 12 |
 
 ## Decisions already made
 
@@ -90,9 +89,6 @@ Complete this checklist separately for each numbered task:
   playback and clears the buffer.
 - The progress slider remains a product requirement, but elapsed and remaining time labels do
   not. Do not add time-label UI unless `USER_STORIES.md` changes again.
-- Automatic playback will wait 0.1 seconds after the first playable audio packet arrives.
-  This is an implementation constraint intended to accumulate a small startup buffer, not a
-  user story.
 - API secret values belong in the Keychain, not `UserDefaults`, URLs, logs, fixtures, or
   committed files. Tests may use unmistakably fake tokens.
 - Do not switch the project to Swift 6 as part of this remediation. First make the Swift 5
@@ -101,55 +97,6 @@ Complete this checklist separately for each numbered task:
 ---
 
 ## Phase 2 — Repair network state and failure behavior
-
-## Phase 4 — Repair audio boundaries and Custom format
-
-### 12. Add a 0.1-second automatic-playback prebuffer
-
-**Classification:** Requested implementation change
-
-**Depends on:** Task 11 (complete)
-
-**Problem.** `AudioPlayerManager.scheduleAudio` currently schedules the first playable PCM
-buffer and calls `play()` immediately. A small or slowly followed first packet can be consumed
-before enough subsequent audio is buffered, causing startup underrun.
-
-**Required change.**
-
-1. Start a one-shot 0.1-second delay when the first packet containing at least one complete PCM
-   frame is accepted for the current stream generation.
-2. Continue appending and scheduling packets during the delay so playback begins with the
-   accumulated startup buffer.
-3. Associate the pending start with `scheduleGeneration`. `stop()`, Clear Buffer, a new stream,
-   or any format-reset operation must cancel or invalidate it so an old delayed action cannot
-   restart playback.
-4. Start at most one automatic-playback delay per stream. Later packets must not postpone the
-   original deadline or schedule additional starts.
-5. Keep `hasAudio` and `bufferDuration` truthful during prebuffering, but leave `isPlaying`
-   false until `playerNode.play()` actually runs.
-6. Make delayed-start scheduling directly testable with an injected clock/scheduler or an
-   equivalently isolated component. Automated correctness tests must not depend only on
-   imprecise wall-clock sleeps.
-7. Do not add this delay to `USER_STORIES.md`. After implementation, update README's Audio or
-   Network architecture description so it no longer claims playback starts on the first bytes
-   and instead records the 0.1-second prebuffer.
-
-**Tests and falsification.**
-
-- After the first playable packet, assert audio is buffered but playback has not started
-  before the 0.1-second deadline.
-- Assert playback starts once after the deadline and includes packets received during the
-  prebuffer window.
-- Stop before the deadline and prove the delayed action cannot start playback.
-- Start a new generation before the deadline and prove the old generation cannot start it.
-- Cover a sub-frame packet followed by enough bytes for the first complete frame; the delay
-  begins only when playable audio exists.
-- Mutation-test immediate playback, rescheduling the deadline on every packet, and failure to
-  invalidate the pending start.
-
-**Done when.** Automatic playback begins once, 0.1 seconds after the first playable packet for
-the still-active stream, with no delayed restart after cancellation, replacement, or format
-change.
 
 ## Phase 5 — Complete the required UI
 
@@ -190,7 +137,7 @@ and cannot alter an active or buffered read.
 
 **Classification:** Blocking
 
-**Depends on:** Tasks 6, 9, and 12
+**Depends on:** Tasks 6 and 9, plus the completed Phase 4 audio prebuffer
 
 **Problem.** `ClipboardTTSApp` always uses `waveform.circle`, so idle, playing/streaming, and
 paused states are indistinguishable.

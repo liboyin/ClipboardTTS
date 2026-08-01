@@ -1,17 +1,15 @@
 import Foundation
 import AVFoundation
-
 class AudioPlayerManager: ObservableObject {
     static let defaultSampleRate = 24_000.0
     static let supportedSampleRateRange = 8_000.0...48_000.0
-
+    private static let automaticPlaybackPrebufferDuration: TimeInterval = 0.1
     enum SampleRateUpdateResult: Equatable {
         case unchanged
         case updated
         case invalid
         case engineStartFailed
     }
-
     @Published var isPlaying = false
     @Published var playbackProgress: Double = 0.0
     @Published var bufferDuration: Double = 0.0
@@ -20,39 +18,48 @@ class AudioPlayerManager: ObservableObject {
     @Published private(set) var sampleRateError: String?
     @Published private(set) var hasValidSampleRateInput = true
     @Published private(set) var hasValidSampleRateConfiguration = true
-
     @Published var playbackRate: Float = 1.0 {
         didSet {
             timePitch.rate = playbackRate
         }
     }
-
     private var engine = AVAudioEngine()
     private var playerNode = AVAudioPlayerNode()
     private var timePitch = AVAudioUnitTimePitch()
-
     private var audioFormat: AVAudioFormat?
-
-    // accumulatedData/unprocessedData are written from the network delegate's background queue
-    // (scheduleAudio) and read/cleared from the main thread (seek/stop). All access to them MUST
+    // pcmData is written from the network delegate's background queue (scheduleAudio) and
+    // read/cleared from the main thread (seek/stop). All access MUST
     // go through bufferQueue to avoid a data race.
     private let bufferQueue = DispatchQueue(label: "com.clipboardtts.audiobuffer")
-    private var accumulatedData = Data()
-    private var unprocessedData = Data()
+    private var pcmData = (accumulated: Data(), unprocessed: Data())
     private var bufferedPCMFrameCount = 0
     private var baseProgressOffset: Double = 0.0
     private var scheduleGeneration: Int = 0
+    private var automaticPlaybackGeneration: Int?
+    private var automaticPlaybackSuppressedGeneration: Int?
     private let scheduledBufferObserver: (AVAudioPCMBuffer) -> Void
     private let engineStarter: (AVAudioEngine) throws -> Void
-
+    private let automaticPlaybackScheduler: (TimeInterval, @escaping () -> Void) -> Void
+    private let audioObservers: (processed: () -> Void, statePublished: () -> Void)
     private var progressTimer: Timer?
-
-    /// Creates the audio graph. The observer is notified after each PCM buffer is passed to the node.
+    /// Creates the audio graph. The buffer observer is notified after each buffer is passed to the node.
+    /// The scheduler defers automatic playback after the first complete PCM frame. The processing
+    /// observer runs after the audio queue handles a packet, and the state observer runs after publication.
     init(sampleRate: Double = AudioPlayerManager.defaultSampleRate,
          scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in },
-         engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() }) {
+         engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() },
+         automaticPlaybackScheduler: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, action in
+             DispatchQueue.main.asyncAfter(
+                 deadline: .now() + delay,
+                 execute: action
+             )
+         },
+         audioDataProcessingObserver: @escaping () -> Void = {},
+         audioStateObserver: @escaping () -> Void = {}) {
         self.scheduledBufferObserver = scheduledBufferObserver
         self.engineStarter = engineStarter
+        self.automaticPlaybackScheduler = automaticPlaybackScheduler
+        self.audioObservers = (processed: audioDataProcessingObserver, statePublished: audioStateObserver)
         let hasValidInitialSampleRate = Self.isSupportedSampleRate(sampleRate)
         let initialSampleRate = hasValidInitialSampleRate ? sampleRate : Self.defaultSampleRate
         setupEngine(sampleRate: initialSampleRate)
@@ -62,11 +69,9 @@ class AudioPlayerManager: ObservableObject {
             sampleRateError = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
         }
     }
-
     private func setupEngine(sampleRate: Double) {
         engine.attach(playerNode)
         engine.attach(timePitch)
-
         guard let standardFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
             sampleRateError = "Couldn't configure the PCM sample rate. Try again."
             return
@@ -75,10 +80,8 @@ class AudioPlayerManager: ObservableObject {
         bufferQueue.sync {
             audioFormat = standardFormat
         }
-
         engine.connect(playerNode, to: timePitch, format: standardFormat)
         engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
-
         do {
             try engineStarter(engine)
         } catch {
@@ -86,7 +89,6 @@ class AudioPlayerManager: ObservableObject {
             sampleRateError = "Couldn't start audio playback. Try again."
         }
     }
-
     /// Changes the PCM sample rate after clearing all audio that was decoded with the previous format.
     @discardableResult
     func setSampleRate(_ sampleRate: Double) -> SampleRateUpdateResult {
@@ -97,7 +99,6 @@ class AudioPlayerManager: ObservableObject {
             return .invalid
         }
         hasValidSampleRateInput = true
-
         let currentSampleRate = bufferQueue.sync { audioFormat?.sampleRate }
         guard currentSampleRate != sampleRate else {
             guard !engine.isRunning else {
@@ -116,26 +117,22 @@ class AudioPlayerManager: ObservableObject {
                 return .engineStartFailed
             }
         }
-
         stop()
         engine.stop()
         engine.disconnectNodeOutput(playerNode)
         engine.disconnectNodeInput(timePitch)
         engine.disconnectNodeOutput(timePitch)
-
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
             hasValidSampleRateConfiguration = false
             sampleRateError = "Couldn't configure the PCM sample rate. Try again."
             return .engineStartFailed
         }
-
         engine.connect(playerNode, to: timePitch, format: format)
         engine.connect(timePitch, to: engine.mainMixerNode, format: format)
         bufferQueue.sync {
             audioFormat = format
         }
         self.sampleRate = sampleRate
-
         do {
             try engineStarter(engine)
             hasValidSampleRateConfiguration = true
@@ -166,11 +163,9 @@ class AudioPlayerManager: ObservableObject {
     }
 
     func startNewStream() -> Int {
+        stop()
         return bufferQueue.sync {
             scheduleGeneration += 1
-            accumulatedData.removeAll()
-            unprocessedData.removeAll()
-            bufferedPCMFrameCount = 0
             return scheduleGeneration
         }
     }
@@ -178,34 +173,41 @@ class AudioPlayerManager: ObservableObject {
     func scheduleAudio(data: Data, streamGeneration: Int) {
         // Runs on the network delegate's background queue; serialize buffer access via bufferQueue.
         bufferQueue.async {
+            defer { self.audioObservers.processed() }
             guard self.scheduleGeneration == streamGeneration else { return }
             guard let format = self.audioFormat else { return }
 
-            self.accumulatedData.append(data)
-            self.unprocessedData.append(data)
+            self.pcmData.accumulated.append(data)
+            self.pcmData.unprocessed.append(data)
 
             let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
-            self.bufferedPCMFrameCount = self.accumulatedData.count / bytesPerNetworkFrame
+            self.bufferedPCMFrameCount = self.pcmData.accumulated.count / bytesPerNetworkFrame
             let bufferedFrameCount = self.bufferedPCMFrameCount
-            let frameCapacity = AVAudioFrameCount(self.unprocessedData.count / bytesPerNetworkFrame)
+            let frameCapacity = AVAudioFrameCount(self.pcmData.unprocessed.count / bytesPerNetworkFrame)
             guard frameCapacity > 0 else { return }
 
             let bytesToProcess = Int(frameCapacity) * bytesPerNetworkFrame
-            let dataToProcess = self.unprocessedData.prefix(bytesToProcess)
-            self.unprocessedData.removeFirst(bytesToProcess)
+            let dataToProcess = self.pcmData.unprocessed.prefix(bytesToProcess)
+            self.pcmData.unprocessed.removeFirst(bytesToProcess)
 
             guard let buffer = self.makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
 
             self.schedule(buffer)
+            let shouldScheduleAutomaticPlayback = self.automaticPlaybackGeneration != streamGeneration
+            if shouldScheduleAutomaticPlayback {
+                self.automaticPlaybackGeneration = streamGeneration
+                self.automaticPlaybackScheduler(Self.automaticPlaybackPrebufferDuration) { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.startAutomaticPlayback(streamGeneration: streamGeneration)
+                    }
+                }
+            }
 
             DispatchQueue.main.async {
                 guard self.bufferQueue.sync(execute: { self.scheduleGeneration == streamGeneration }) else { return }
                 self.bufferDuration = Double(bufferedFrameCount) / format.sampleRate
                 self.hasAudio = true
-
-                if !self.isPlaying {
-                    self.play()
-                }
+                self.audioObservers.statePublished()
             }
         }
     }
@@ -244,8 +246,10 @@ class AudioPlayerManager: ObservableObject {
         // in-flight scheduleAudio schedule one buffer onto the node after it was stopped.
         bufferQueue.sync {
             scheduleGeneration += 1
-            accumulatedData.removeAll()
-            unprocessedData.removeAll()
+            automaticPlaybackGeneration = nil
+            automaticPlaybackSuppressedGeneration = nil
+            pcmData.accumulated.removeAll()
+            pcmData.unprocessed.removeAll()
             bufferedPCMFrameCount = 0
         }
         playerNode.stop()
@@ -273,7 +277,7 @@ class AudioPlayerManager: ObservableObject {
         var clampedProgress = 0.0
         var reachedBufferEnd = false
 
-        // Both scheduleAudio and seek manipulate the player node based on accumulatedData. Keeping
+        // Both scheduleAudio and seek manipulate the player node based on pcmData.accumulated. Keeping
         // those operations on bufferQueue means a seek runs after all earlier scheduling work, then
         // prevents it from surviving playerNode.stop() and being replayed alongside the seek buffer.
         bufferQueue.sync {
@@ -296,10 +300,11 @@ class AudioPlayerManager: ObservableObject {
 
             guard byteOffset < completeByteCount else {
                 reachedBufferEnd = true
+                automaticPlaybackSuppressedGeneration = scheduleGeneration
                 return
             }
 
-            let remainingData = accumulatedData.subdata(in: byteOffset..<completeByteCount)
+            let remainingData = pcmData.accumulated.subdata(in: byteOffset..<completeByteCount)
             let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
             guard frameCapacity > 0,
                   let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
@@ -315,7 +320,7 @@ class AudioPlayerManager: ObservableObject {
 
         guard reachedBufferEnd else { return }
 
-        // playerNode.stop() above clears every scheduled buffer, while accumulatedData is retained
+        // playerNode.stop() above clears every scheduled buffer, while pcmData.accumulated is retained
         // for play() to seek back to zero and replay without requesting audio again.
         isPlaying = false
         stopProgressTimer()
@@ -339,14 +344,12 @@ class AudioPlayerManager: ObservableObject {
         }
         return buffer
     }
-
     private func startProgressTimer() {
         stopProgressTimer()
         progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self,
                   let nodeTime = self.playerNode.lastRenderTime,
                   let playerTime = self.playerNode.playerTime(forNodeTime: nodeTime) else { return }
-
             DispatchQueue.main.async {
                 if let newProgress = self.progress(forRenderedSampleTime: playerTime.sampleTime) {
                     if newProgress > 0 && newProgress <= self.bufferDuration {
@@ -354,7 +357,6 @@ class AudioPlayerManager: ObservableObject {
                     } else if newProgress > self.bufferDuration {
                         self.playbackProgress = self.bufferDuration
                     }
-
                     if self.isPlaying && self.playbackProgress >= self.bufferDuration && self.bufferDuration > 0 {
                         self.pause()
                     }
@@ -366,5 +368,33 @@ class AudioPlayerManager: ObservableObject {
     private func stopProgressTimer() {
         progressTimer?.invalidate()
         progressTimer = nil
+    }
+}
+
+private extension AudioPlayerManager {
+    func startAutomaticPlayback(streamGeneration: Int) {
+        let result = bufferQueue.sync { () -> (started: Bool, engineStartFailed: Bool) in
+            guard scheduleGeneration == streamGeneration,
+                  automaticPlaybackSuppressedGeneration != streamGeneration,
+                  !isPlaying else { return (false, false) }
+            if !engine.isRunning {
+                do {
+                    try engineStarter(engine)
+                } catch {
+                    return (false, true)
+                }
+            }
+            playerNode.play()
+            return (true, false)
+        }
+        guard result.started else {
+            if result.engineStartFailed {
+                hasValidSampleRateConfiguration = false
+                sampleRateError = "Couldn't start audio playback. Try again."
+            }
+            return
+        }
+        isPlaying = true
+        startProgressTimer()
     }
 }
