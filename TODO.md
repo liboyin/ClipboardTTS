@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 3 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 2 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -26,7 +26,7 @@ Keep those documents current rather than duplicating their content here.
 - Unit tests MUST NOT contact external services, write to `NSPasteboard.general`, use the
   developer's Keychain, or leave changes in the app's real `UserDefaults` domain.
 - Documentation and tests required to explain and verify a task belong in that task's commit.
-  None of the 15 implementation tasks may use the documentation-only review exemption for the
+  None of the 14 implementation tasks may use the documentation-only review exemption for the
   task as a whole.
 - Remove a completed task from this file in its implementation commit. Move durable decisions
   or architectural facts into `README.md` rather than leaving completed history here. A concise
@@ -73,7 +73,7 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Required icon and About UI is missing | Blocking | 14–15 |
+| Required About UI is missing | Blocking | 15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 
 ## Decisions already made
@@ -96,37 +96,7 @@ Complete this checklist separately for each numbered task:
 
 ---
 
-## Phase 2 — Repair network state and failure behavior
-
 ## Phase 5 — Complete the required UI
-
-### 14. Make the menu-bar icon reflect playback state
-
-**Classification:** Blocking
-
-**Depends on:** Tasks 6 and 9, plus the completed Phase 4 audio prebuffer
-
-**Problem.** `ClipboardTTSApp` always uses `waveform.circle`, so idle, playing/streaming, and
-paused states are indistinguishable.
-
-**Required change.**
-
-1. Use a state-driven `MenuBarExtra` label rather than a constant `systemImage` initializer.
-2. Define one symbol and accessibility label for:
-   - idle: no stream and no buffered audio;
-   - active: network streaming or audio playing;
-   - paused: buffered audio exists but neither streaming nor playing.
-3. Make state precedence explicit so startup, prebuffer delay, completion, pause, clear, and
-   error transitions cannot select contradictory icons.
-
-**Tests and falsification.**
-
-- Put state-to-symbol selection in a pure helper and test every meaningful boolean combination.
-- Test transition sequences: idle → streaming → playing → paused → playing → cleared.
-- Mutation-test precedence that labels buffered-and-playing audio as paused.
-
-**Done when.** The status item and accessibility label truthfully reflect idle, active, and
-paused state through the complete lifecycle.
 
 ### 15. Add an About action
 
@@ -209,8 +179,8 @@ all normal gates pass.
 
 After the numbered tasks are complete:
 
-This sweep supplements the 15 per-task reviews. It is not Task 17 and cannot replace or defer
-testing, linting, or adversarial review required before any of the 15 implementation commits.
+This sweep supplements the 14 per-task reviews. It is not Task 17 and cannot replace or defer
+testing, linting, or adversarial review required before any of the 14 implementation commits.
 If it discovers new work, record and execute that work as a new self-contained task rather
 than folding it retroactively into a completed commit.
 
@@ -226,8 +196,7 @@ than folding it retroactively into a completed commit.
    - persisted settings keys have one declaration.
 4. Perform manual smoke tests for clipboard and Services input, Clear Buffer, provider
    switching during a request, bad credentials, Gemini first-audio latency, seek-to-end and
-   replay, Custom non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, status
-   icons, and About.
+   replay, Custom non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, and About.
    Obtain user permission and credentials before any live provider test; never record keys.
 5. Run the adversarial-review loop on the complete remediation range until no blocking
    findings remain. Resolve or obtain explicit user disposition for every remaining
