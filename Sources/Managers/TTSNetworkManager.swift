@@ -56,6 +56,14 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         let provider: ProviderKind
     }
 
+    /// The selected source and credentials needed to refresh provider metadata.
+    struct MetadataSettingsSnapshot {
+        let baseURL: String
+        let apiKey: String
+        let model: String
+        let provider: String
+    }
+
     /// State that belongs exclusively to the active URL session task and is guarded by `stateQueue`.
     struct ActiveRequestContext {
         let task: URLSessionDataTask
@@ -135,6 +143,32 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         }
         if let invalidatedGeneration {
             clearMetadataLists(for: invalidatedGeneration)
+        }
+    }
+
+    /// Updates only the voice captured by speech requests that start after this call.
+    func updateVoice(_ voice: String) {
+        stateQueue.sync {
+            self.voice = voice
+        }
+    }
+
+    /// Returns whether the manager's future-request settings belong to the supplied persisted provider.
+    func isCurrentProvider(_ provider: String) -> Bool {
+        stateQueue.sync {
+            selectedMetadataProvider == provider
+        }
+    }
+
+    /// Captures the selected source and credentials required to refresh metadata without changing request settings.
+    func metadataSettingsSnapshot() -> MetadataSettingsSnapshot {
+        stateQueue.sync {
+            MetadataSettingsSnapshot(
+                baseURL: baseURL,
+                apiKey: apiKey,
+                model: model,
+                provider: selectedMetadataProvider
+            )
         }
     }
 

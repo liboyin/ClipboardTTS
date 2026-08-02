@@ -4,6 +4,175 @@ import SwiftUI
 @testable import ClipboardTTSApp
 
 final class MenuBarViewTests: MockURLProtocolTestCase {
+    override func setUp() {
+        super.setUp()
+        isolateAppSettingsDefaults()
+    }
+
+    func testMenuLoadsProviderVoiceMetadataBeforeSettingsAppears() {
+        // WHY: The menu is the primary interaction surface, so its voice picker cannot depend on
+        // the Settings window having been opened to populate the provider-authoritative choices.
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+
+        XCTAssertEqual(view.voiceOptions, [])
+        host.layoutSubtreeIfNeeded()
+
+        let voicesLoaded = expectation(description: "Menu receives initial OpenAI voice metadata")
+        DispatchQueue.main.async {
+            host.layoutSubtreeIfNeeded()
+            XCTAssertEqual(
+                view.voiceOptions,
+                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+            )
+            voicesLoaded.fulfill()
+        }
+        wait(for: [voicesLoaded], timeout: 1.0)
+    }
+
+    func testMenuCustomVoiceOptionsReflectConfiguredVoiceOnly() {
+        // WHY: Custom has no voice-discovery contract, so the menu must expose exactly its shared
+        // configured voice rather than an unrelated provider list; blank configuration is not a
+        // selectable voice and must remain an explicit Settings correction.
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("custom-voice", forKey: SettingsKeys.customVoice)
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(
+            baseURL: "https://custom.api/v1/audio/speech",
+            apiKey: "test-key",
+            model: "custom-model",
+            voice: "custom-voice",
+            selectedProvider: "Custom"
+        )
+        let configuredVoiceView = MenuBarView(
+            audioPlayer: audioPlayer,
+            textExtraction: textExtraction,
+            networkManager: networkManager
+        )
+        XCTAssertEqual(configuredVoiceView.voiceOptions, ["custom-voice"])
+
+        UserDefaults.standard.set(" \t\n", forKey: SettingsKeys.customVoice)
+        let emptyVoiceView = MenuBarView(
+            audioPlayer: audioPlayer,
+            textExtraction: textExtraction,
+            networkManager: networkManager
+        )
+        XCTAssertEqual(emptyVoiceView.voiceOptions, [])
+    }
+
+    func testMenuVoiceSelectionUsesCurrentProviderOptionsAndNextRequest() throws {
+        // WHY: The menu must choose an OpenAI voice from fresh provider metadata, persist it in
+        // the same setting as Settings, and use it on the next request without changing its model
+        // or endpoint configuration.
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(
+            baseURL: "https://mock.api/v1/audio/speech",
+            apiKey: "test-key",
+            model: "tts-1",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
+        )
+        networkManager.availableVoices = ["alloy", "nova"]
+        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+
+        XCTAssertEqual(view.voiceOptions, ["alloy", "nova"])
+        view.selectVoice("nova")
+        XCTAssertEqual(view.selectedVoice, "nova")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), "nova")
+
+        let requestStarted = expectation(description: "Menu voice is used by the next TTS request")
+        MockURLProtocol.installRequestHandler { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            guard let bodyData = requestBodyData(from: request),
+                  let body = try? JSONSerialization.jsonObject(with: bodyData) as? [String: String] else {
+                XCTFail("The menu request should contain a JSON speech payload.")
+                return (response, Data())
+            }
+            XCTAssertEqual(body["voice"], "nova")
+            requestStarted.fulfill()
+            return (response, Data())
+        }
+
+        networkManager.streamTTS(text: "Use the selected voice") { _ in }
+        wait(for: [requestStarted], timeout: 1.0)
+    }
+
+    func testMenuVoiceSelectionRejectsStaleProviderOptionsAndBufferedPlayback() {
+        // WHY: Changing a voice while paused with retained audio would make the visible setting
+        // disagree with the already-buffered read. A switch must also not retain the prior
+        // provider's options long enough to write a stale voice into the new provider's setting.
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(
+            baseURL: "https://mock.api/v1/audio/speech",
+            apiKey: "test-key",
+            model: "tts-1",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
+        )
+        networkManager.availableVoices = ["alloy", "nova"]
+        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+
+        UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
+        XCTAssertEqual(view.voiceOptions, [])
+        view.selectVoice("nova")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice), nil)
+
+        networkManager.updateSettings(
+            baseURL: "https://generativelanguage.googleapis.com/v1beta",
+            apiKey: "test-key",
+            model: "gemini-3.1-flash-tts-preview",
+            voice: "Aoede",
+            selectedProvider: "Gemini"
+        )
+        networkManager.availableVoices = ["Aoede", "Puck"]
+        let geminiView = MenuBarView(
+            audioPlayer: audioPlayer,
+            textExtraction: textExtraction,
+            networkManager: networkManager
+        )
+        XCTAssertEqual(geminiView.voiceOptions, ["Aoede", "Puck"])
+        geminiView.selectVoice("Puck")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice), "Puck")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), nil)
+
+        UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
+        networkManager.updateSettings(
+            baseURL: "https://mock.api/v1/audio/speech",
+            apiKey: "test-key",
+            model: "tts-1",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
+        )
+        networkManager.availableVoices = ["alloy", "nova"]
+        let openAIView = MenuBarView(
+            audioPlayer: audioPlayer,
+            textExtraction: textExtraction,
+            networkManager: networkManager
+        )
+        audioPlayer.hasAudio = true
+        XCTAssertFalse(openAIView.isVoiceSelectionEnabled)
+        openAIView.selectVoice("nova")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), nil)
+
+        audioPlayer.hasAudio = false
+        networkManager.isStreaming = true
+        XCTAssertFalse(openAIView.isVoiceSelectionEnabled)
+        networkManager.isStreaming = false
+        XCTAssertTrue(openAIView.isVoiceSelectionEnabled)
+        openAIView.selectVoice("nova")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), "nova")
+    }
+
     func testSpeakCopiedTextStartsStreamingFromClipboard() {
         // WHY: This is the core "Speak Copied Text" story - with text on the clipboard and nothing
         // playing, the button must pull the clipboard text and start a network request. Audio

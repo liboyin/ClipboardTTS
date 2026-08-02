@@ -70,10 +70,60 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         let openAIVoicesPublished = expectation(description: "OpenAI voices published")
         DispatchQueue.main.async {
-            XCTAssertTrue(manager.availableVoices.contains("alloy"))
+            XCTAssertEqual(
+                manager.availableVoices,
+                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+            )
             openAIVoicesPublished.fulfill()
         }
         wait(for: [openAIVoicesPublished], timeout: 1.0)
+
+        manager.updateSettings(
+            baseURL: "https://api.openai.com/v1/audio/speech",
+            apiKey: "openai-token",
+            model: "tts-1-hd",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
+        )
+        manager.fetchAvailableVoices(
+            baseURL: "https://api.openai.com/v1/audio/speech",
+            apiKey: "openai-token",
+            selectedProvider: "OpenAI"
+        )
+        let openAIHDVoicesPublished = expectation(description: "OpenAI HD voices published")
+        DispatchQueue.main.async {
+            XCTAssertEqual(
+                manager.availableVoices,
+                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+            )
+            openAIHDVoicesPublished.fulfill()
+        }
+        wait(for: [openAIHDVoicesPublished], timeout: 1.0)
+
+        manager.updateSettings(
+            baseURL: "https://api.openai.com/v1/audio/speech",
+            apiKey: "openai-token",
+            model: "gpt-4o-mini-tts",
+            voice: "marin",
+            selectedProvider: "OpenAI"
+        )
+        manager.fetchAvailableVoices(
+            baseURL: "https://api.openai.com/v1/audio/speech",
+            apiKey: "openai-token",
+            selectedProvider: "OpenAI"
+        )
+        let currentOpenAIVoicesPublished = expectation(description: "Current OpenAI voices published")
+        DispatchQueue.main.async {
+            XCTAssertEqual(
+                manager.availableVoices,
+                [
+                    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
+                    "shimmer", "verse", "marin", "cedar"
+                ]
+            )
+            currentOpenAIVoicesPublished.fulfill()
+        }
+        wait(for: [currentOpenAIVoicesPublished], timeout: 1.0)
 
         manager.updateSettings(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",

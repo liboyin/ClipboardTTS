@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 4 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There are exactly 3 remaining numbered tasks. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -73,7 +73,7 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Required voice, icon, and About UI is missing | Blocking | 13–15 |
+| Required icon and About UI is missing | Blocking | 14–15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 
 ## Decisions already made
@@ -99,39 +99,6 @@ Complete this checklist separately for each numbered task:
 ## Phase 2 — Repair network state and failure behavior
 
 ## Phase 5 — Complete the required UI
-
-### 13. Add provider-aware voice selection to the menu
-
-**Classification:** Blocking
-
-**Depends on:** Phase 1 (complete)
-
-**Problem.** Voice selection exists only in Settings, although `USER_STORIES.md` requires it
-in the menu and restricts changes to idle state.
-
-**Required change.**
-
-1. Add a menu voice control bound to the selected provider's persisted voice.
-2. Populate it from provider-authoritative metadata that passed Task 5's freshness guard.
-   Verify at execution time whether OpenAI exposes voice discovery; if it does not, use and
-   document a version-appropriate list from official documentation rather than inventing an
-   endpoint. Define Custom behavior from the contract recorded in README Design Assumptions.
-3. Disable voice changes whenever streaming is active or audio remains buffered; "idle" means
-   neither condition is true.
-4. When changed at idle, update the network manager's next-request settings without duplicating
-   setting-key literals or reconstructing unrelated state.
-5. Keep Settings and menu selection synchronized through the shared persisted value.
-
-**Tests and falsification.**
-
-- Verify the binding selects the correct provider-specific voice.
-- Verify the control is enabled only when idle.
-- Switch provider and assert stale voices cannot be selected.
-- Verify a menu change is used by the next intercepted TTS request.
-- Mutation-test allowing a change while paused with buffered audio.
-
-**Done when.** The menu offers only current-provider voices, stays synchronized with Settings,
-and cannot alter an active or buffered read.
 
 ### 14. Make the menu-bar icon reflect playback state
 

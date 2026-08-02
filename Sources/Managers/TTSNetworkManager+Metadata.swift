@@ -16,6 +16,14 @@ extension TTSNetworkManager {
         var task: URLSessionDataTask?
     }
 
+    private static let legacyOpenAIVoices = [
+        "alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"
+    ]
+    private static let currentOpenAIVoices = [
+        "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
+        "shimmer", "verse", "marin", "cedar"
+    ]
+
     private struct MetadataSource: Equatable {
         let baseURL: String
         let provider: String
@@ -217,11 +225,15 @@ extension TTSNetworkManager {
     func fetchAvailableVoices(baseURL: String, apiKey: String, selectedProvider: String) {
         let source = MetadataSource(baseURL: baseURL, provider: selectedProvider)
         guard let token = beginMetadataRequest(for: .voices, source: source) else { return }
-        if baseURL.contains("api.openai.com") {
-            publishMetadata(["alloy", "echo", "fable", "onyx", "nova", "shimmer"], for: .voices, token: token)
+        if selectedProvider == "OpenAI" {
+            publishMetadata(
+                openAIVoices(for: metadataSettingsSnapshot().model),
+                for: .voices,
+                token: token
+            )
             return
         }
-        if baseURL.contains("generativelanguage.googleapis.com") {
+        if selectedProvider == "Gemini" {
             publishMetadata(["Aoede", "Charon", "Fenrir", "Kore", "Puck"], for: .voices, token: token)
             return
         }
@@ -251,6 +263,26 @@ extension TTSNetworkManager {
             return
         }
         task.resume()
+    }
+
+    /// Refreshes voice metadata for the manager's selected provider without reconstructing request settings.
+    func fetchAvailableVoicesForCurrentProvider() {
+        let settings = metadataSettingsSnapshot()
+        guard settings.provider != APIKeyProvider.custom.settingsValue else { return }
+        fetchAvailableVoices(
+            baseURL: settings.baseURL,
+            apiKey: settings.apiKey,
+            selectedProvider: settings.provider
+        )
+    }
+
+    private func openAIVoices(for model: String) -> [String] {
+        switch model {
+        case "tts-1", "tts-1-hd":
+            return Self.legacyOpenAIVoices
+        default:
+            return Self.currentOpenAIVoices
+        }
     }
 
     private func decodeVoices(from data: Data) -> [String]? {

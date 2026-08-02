@@ -8,12 +8,50 @@ struct MenuBarView: View {
 
     @Environment(\.openWindow) var openWindow
 
+    @AppStorage(SettingsKeys.ttsProvider) private var ttsProvider: String = "OpenAI"
+    @AppStorage(SettingsKeys.openAIVoice) private var openAIVoice: String = "alloy"
+    @AppStorage(SettingsKeys.geminiVoice) private var geminiVoice: String = "Aoede"
+    @AppStorage(SettingsKeys.customVoice) private var customVoice: String = ""
+
     var errorMessage: String? {
         networkManager.lastError ?? audioPlayer.sampleRateError
     }
 
     var requestErrorView: RequestErrorView? {
         errorMessage.map(RequestErrorView.init)
+    }
+
+    var selectedProvider: APIKeyProvider {
+        APIKeyProvider(selectedProvider: ttsProvider)
+    }
+
+    var selectedVoice: String {
+        switch selectedProvider {
+        case .openAI:
+            return openAIVoice
+        case .gemini:
+            return geminiVoice
+        case .custom:
+            return customVoice
+        }
+    }
+
+    /// Voices eligible for selection by the menu's currently synchronized provider.
+    var voiceOptions: [String] {
+        guard networkManager.isCurrentProvider(selectedProvider.settingsValue) else { return [] }
+        if selectedProvider == .custom {
+            return customVoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [customVoice]
+        }
+        return networkManager.availableVoices
+    }
+
+    /// Whether neither a network stream nor a retained audio buffer prevents a voice change.
+    var isVoiceSelectionEnabled: Bool {
+        !networkManager.isStreaming && !audioPlayer.hasAudio
+    }
+
+    private var voiceBinding: Binding<String> {
+        Binding(get: { selectedVoice }, set: { selectVoice($0) })
     }
 
     var body: some View {
@@ -83,9 +121,22 @@ struct MenuBarView: View {
                     .frame(width: 40, alignment: .trailing)
             }
             .padding(.horizontal)
+
+            HStack {
+                Text("Voice:")
+                Picker("Voice", selection: voiceBinding) {
+                    ForEach(voiceOptions, id: \.self) { voice in
+                        Text(voice).tag(voice)
+                    }
+                }
+                .labelsHidden()
+                .disabled(!isVoiceSelectionEnabled)
+            }
+            .padding(.horizontal)
             .padding(.bottom)
         }
         .frame(width: 300)
+        .onAppear(perform: fetchVoiceMetadata)
     }
 
     func speakCopiedText() {
@@ -112,6 +163,24 @@ struct MenuBarView: View {
         } else {
             audioPlayer.play()
         }
+    }
+
+    /// Saves an idle menu choice for the selected provider and applies it to future requests only.
+    func selectVoice(_ voice: String) {
+        guard isVoiceSelectionEnabled, voiceOptions.contains(voice) else { return }
+        switch selectedProvider {
+        case .openAI:
+            openAIVoice = voice
+        case .gemini:
+            geminiVoice = voice
+        case .custom:
+            customVoice = voice
+        }
+        networkManager.updateVoice(voice)
+    }
+
+    private func fetchVoiceMetadata() {
+        networkManager.fetchAvailableVoicesForCurrentProvider()
     }
 }
 
