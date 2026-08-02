@@ -4,6 +4,7 @@ struct SettingsView: View {
     @ObservedObject private var networkManager: TTSNetworkManager
     @ObservedObject private var audioPlayer: AudioPlayerManager
     @StateObject private var secretState: SettingsSecretState
+    private let aboutAction: AboutAction
 
     @AppStorage(SettingsKeys.ttsProvider) private var ttsProvider: String = "OpenAI"
     @AppStorage(SettingsKeys.apiBaseURL) private var apiBaseURL: String = "https://api.openai.com/v1/audio/speech"
@@ -19,9 +20,11 @@ struct SettingsView: View {
 
     init(networkManager: TTSNetworkManager,
          audioPlayer: AudioPlayerManager,
-         secretStore: SecretStoring = KeychainSecretStore()) {
+         secretStore: SecretStoring = KeychainSecretStore(),
+         aboutAction: AboutAction = AboutAction()) {
         self.networkManager = networkManager
         self.audioPlayer = audioPlayer
+        self.aboutAction = aboutAction
         _secretState = StateObject(wrappedValue: SettingsSecretState(secretStore: secretStore))
     }
 
@@ -81,20 +84,24 @@ struct SettingsView: View {
 
             Divider()
 
-            Form {
-                if let secretStoreError = secretState.errorMessage {
-                    Text(secretStoreError)
-                        .foregroundStyle(.red)
+            VStack(spacing: 0) {
+                Form {
+                    if let secretStoreError = secretState.errorMessage {
+                        Text(secretStoreError)
+                            .foregroundStyle(.red)
+                    }
+                    if selectedProvider == .openAI {
+                        openAISettings
+                    } else if selectedProvider == .gemini {
+                        geminiSettings
+                    } else {
+                        customSettings
+                    }
                 }
-                if selectedProvider == .openAI {
-                    openAISettings
-                } else if selectedProvider == .gemini {
-                    geminiSettings
-                } else {
-                    customSettings
-                }
+                .padding(20)
+
+                aboutButton
             }
-            .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 600, height: 350)
@@ -171,6 +178,25 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(.top)
+    }
+
+    private var aboutButton: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            HStack {
+                SettingsAboutButton(action: showAbout)
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    func showAbout() {
+        aboutAction.showAbout()
     }
 
     func runTestVoice() {

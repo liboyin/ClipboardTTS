@@ -11,7 +11,7 @@ Keep those documents current rather than duplicating their content here.
 ## Working rules
 
 - Execute tasks in the order shown unless a task explicitly says it is independent.
-- There are exactly 2 remaining numbered tasks. Each task MUST be one self-contained implementation
+- There is exactly 1 remaining numbered task. Each task MUST be one self-contained implementation
   commit: do not combine tasks in one commit, split a task across commits, or include code
   belonging to a later task.
 - Every task must leave the repository coherent and independently pass all required tests,
@@ -73,7 +73,6 @@ Complete this checklist separately for each numbered task:
 
 | Issue or requested change | Classification | Remediation task |
 | --- | --- | --- |
-| Required About UI is missing | Blocking | 15 |
 | The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
 
 ## Decisions already made
@@ -95,33 +94,6 @@ Complete this checklist separately for each numbered task:
   build clean with complete concurrency checking; a language-mode migration is separate work.
 
 ---
-
-## Phase 5 — Complete the required UI
-
-### 15. Add an About action
-
-**Classification:** Blocking
-
-**Depends on:** Nothing
-
-**Problem.** Settings lacks the About entry required by `USER_STORIES.md`.
-
-**Required change.**
-
-1. Add a conventional About action in Settings or its standard macOS command location.
-2. Prefer the system About panel and bundle metadata over a custom window unless product
-   requirements demand more.
-3. Show application name and version from bundle metadata. Reference the existing license
-   without duplicating its full text in source.
-4. Keep this task separate from release, notarization, or marketing work.
-
-**Tests and falsification.**
-
-- Add a construction or action-routing test that does not display an interactive panel during
-  the automated suite.
-- Verify version text comes from bundle metadata rather than a second hard-coded value.
-
-**Done when.** A user can open standard About information from the application UI.
 
 ## Phase 6 — Concurrency hardening
 

@@ -6,7 +6,10 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
-    sources: [Sources]
+    sources:
+      - Sources
+      - path: LICENSE
+        buildPhase: resources
     preBuildScripts:
       - name: SwiftLint
         basedOnDependencyAnalysis: false
