@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// The focused behavior tests intentionally remain alongside their shared playback helpers so
+// their timing and lifecycle contracts are readable in one place.
 import XCTest
 import AVFoundation
 @testable import ClipboardTTSApp
@@ -258,6 +261,29 @@ final class AudioPlayerManagerTests: XCTestCase {
             XCTAssertFalse(player.isPlaying)
             XCTAssertTrue(player.hasAudio)
         }
+    }
+
+    func testConcurrentScheduleAudioKeepsExactFrameAccounting() {
+        // WHY: scheduleAudio enters from the network delegate queue, so a burst of chunks can
+        // arrive concurrently. bufferQueue must serialize every append, or the buffered-frame
+        // total the UI publishes (and the slider clamps to) would drift from the retained PCM.
+        let chunkCount = 32
+        let allPublished = expectation(description: "Every scheduled packet publishes its buffered state")
+        allPublished.expectedFulfillmentCount = chunkCount
+        let player = AudioPlayerManager(
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: { allPublished.fulfill() }
+        )
+        defer { player.stop() }
+        let generation = player.startNewStream()
+
+        DispatchQueue.concurrentPerform(iterations: chunkCount) { _ in
+            player.scheduleAudio(data: Data(repeating: 0, count: 2), streamGeneration: generation)
+        }
+
+        wait(for: [allPublished], timeout: 2.0)
+        XCTAssertEqual(player.bufferDuration, Double(chunkCount) / 24_000.0, accuracy: 0.000_001)
+        XCTAssertTrue(player.hasAudio)
     }
 
     func testSeekWhilePausedClampsToBufferedRangeWithoutResuming() {

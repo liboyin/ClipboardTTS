@@ -1,6 +1,17 @@
 import Foundation
 
-class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
+/// Streams speech audio for one request at a time and publishes request state to the menu bar.
+///
+/// Marked `@unchecked Sendable` because the `URLSessionDataDelegate` conformance requires
+/// `Sendable` and URLSession invokes delegate methods on its own queue. Two confinement rules
+/// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
+/// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
+///   `baseURL`, `apiKey`, `model`, `voice`, `selectedMetadataProvider`, the metadata request
+///   records, and the publication-depth counter) is read and written only under `stateQueue`.
+/// - The `@Published` properties and `isPublishingMetadata` are written only on the main queue
+///   (every write path dispatches or already runs there) and are observed by SwiftUI on main.
+/// `session` and `sessionInvalidated` are assigned once during init, before the manager is shared.
+final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate, @unchecked Sendable {
     @Published var isStreaming = false
     /// A short, sanitized explanation of the most recent speech-request failure.
     @Published private(set) var lastError: String?
@@ -13,12 +24,17 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private var voice: String
 
     var session: URLSession!
-    private var sessionInvalidated: ((URLSession) -> Void)?
+    private let sessionInvalidated: ((URLSession) -> Void)?
     /// Transforms an already-typed JSON request body; tests inject failures and ordering barriers.
     let requestBodyEncoder: (Data) throws -> Data
 
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
+    /// Delivers request-owned PCM in the same order that `stateQueue` accepts delegate callbacks.
+    ///
+    /// Keeping this separate from `stateQueue` lets a handler synchronously stop or replace its
+    /// stream without deadlocking the request-state lock.
+    let audioDeliveryQueue: DispatchQueue
     var activeRequest: ActiveRequestContext?; private var requestGeneration: UInt64 = 0
     private var requestStatePublicationDepth = 0
     private(set) var selectedMetadataProvider: String
@@ -70,7 +86,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         let taskIdentifier: Int
         let requestGeneration: UInt64
         let provider: ProviderKind
-        let dataHandler: (Data) -> Void
+        let dataHandler: @Sendable (Data) -> Void
         var isErrorResponse = false
         var responseStatusCode: Int?
         var geminiEventParser = GeminiSSEEventParser()
@@ -84,7 +100,8 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
          secretStore: SecretStoring = KeychainSecretStore(),
-         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }) {
+         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
+         audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery")) {
         let persistedProvider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         self.selectedMetadataProvider = provider.settingsValue
@@ -107,11 +124,12 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
             self.voice = UserDefaults.standard.string(forKey: SettingsKeys.customVoice) ?? ""
         }
         self.requestBodyEncoder = requestBodyEncoder
+        self.sessionInvalidated = sessionInvalidated
+        self.audioDeliveryQueue = audioDeliveryQueue
 
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
-        self.sessionInvalidated = sessionInvalidated
         if let errorMessage = secretStartupState.errorMessage {
             self.lastError = errorMessage
         }
@@ -187,7 +205,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     private func replaceActiveRequest(with task: URLSessionDataTask,
                                       provider: ProviderKind,
                                       requestGeneration: UInt64,
-                                      dataHandler: @escaping (Data) -> Void) -> Bool {
+                                      dataHandler: @escaping @Sendable (Data) -> Void) -> Bool {
         stateQueue.sync {
             // Swap all task-owned state together so a previous task cannot deliver its data to
             // the new handler in the window between cancellation and context replacement.
@@ -216,7 +234,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     /// Publishes a request failure on the main queue and marks the request as finished.
     func publishFailure(_ message: String, requestGeneration: UInt64? = nil) {
-        let update = { [weak self] in
+        let update: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
@@ -233,7 +251,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     /// Clears a failure message only when it belongs to the latest request attempt.
     func clearLastError(requestGeneration: UInt64? = nil) {
-        let update = { [weak self] in
+        let update: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
@@ -249,7 +267,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
 
     /// Publishes the request lifecycle state on the main queue.
     func setStreaming(_ isStreaming: Bool, requestGeneration: UInt64? = nil) {
-        let update = { [weak self] in
+        let update: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
@@ -270,7 +288,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
     }
 
     /// Defers request starts triggered by synchronous `@Published` observer re-entrancy.
-    private func deferRequestStartIfPublishingState(_ action: @escaping () -> Void) -> Bool {
+    private func deferRequestStartIfPublishingState(_ action: @escaping @Sendable () -> Void) -> Bool {
         let isPublishing = stateQueue.sync { requestStatePublicationDepth > 0 }
         guard isPublishing else { return false }
         DispatchQueue.main.async(execute: action)
@@ -298,7 +316,7 @@ class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegate {
         return url
     }
 
-    func streamTTS(text: String, dataHandler: @escaping (Data) -> Void) {
+    func streamTTS(text: String, dataHandler: @escaping @Sendable (Data) -> Void) {
         if deferRequestStartIfPublishingState({ [weak self] in
             self?.streamTTS(text: text, dataHandler: dataHandler)
         }) {

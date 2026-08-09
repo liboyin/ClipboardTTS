@@ -53,7 +53,8 @@ extension XCTestCase {
 enum TestNetworkFactory {
     static func makeManager(
         secretStore: SecretStoring = InMemorySecretStore(),
-        requestBodyEncoder: @escaping (Data) throws -> Data = { $0 }
+        requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
+        audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.tests.audiodelivery")
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.currentTestIdentifier()
         return TTSNetworkManager(
@@ -61,7 +62,8 @@ enum TestNetworkFactory {
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
             secretStore: secretStore,
-            requestBodyEncoder: requestBodyEncoder
+            requestBodyEncoder: requestBodyEncoder,
+            audioDeliveryQueue: audioDeliveryQueue
         )
     }
 

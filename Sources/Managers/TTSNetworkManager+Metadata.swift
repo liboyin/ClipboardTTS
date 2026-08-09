@@ -167,7 +167,7 @@ extension TTSNetworkManager {
     #endif
 
     func clearMetadataLists(for generation: UInt64) {
-        let clearLists = { [weak self] in
+        let clearLists: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             guard self.stateQueue.sync(execute: { self.metadataGeneration == generation }) else { return }
             self.availableModels = []

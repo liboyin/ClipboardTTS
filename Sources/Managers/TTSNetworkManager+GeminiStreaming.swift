@@ -50,11 +50,6 @@ struct GeminiSSEEventParser {
 }
 
 extension TTSNetworkManager {
-    private enum StreamDataDelivery {
-        case audio(Data, (Data) -> Void)
-        case geminiEvents([Data])
-    }
-
     private enum GeminiEventContent {
         case audio(Data)
         case noAudio
@@ -63,63 +58,66 @@ extension TTSNetworkManager {
 
     /// Validates an incoming task chunk and invokes its handler after releasing `stateQueue`.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let delivery = streamDataDelivery(for: data, task: dataTask) else { return }
-        switch delivery {
-        case let .audio(audioData, dataHandler):
-            dataHandler(audioData)
-        case let .geminiEvents(events):
-            deliverGeminiEvents(events, for: dataTask)
-        }
-    }
-
-    private func streamDataDelivery(for data: Data, task: URLSessionDataTask) -> StreamDataDelivery? {
-        stateQueue.sync {
-            guard var context = activeRequest, task.taskIdentifier == context.taskIdentifier,
+        let geminiFailure: (task: URLSessionDataTask, requestGeneration: UInt64)? = stateQueue.sync {
+            guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier,
                   !context.isErrorResponse else { return nil }
             defer { activeRequest = context }
             if context.provider == .gemini {
                 guard !context.hasGeminiStreamFailure else { return nil }
-                return .geminiEvents(context.geminiEventParser.append(data))
+                let events = context.geminiEventParser.append(data)
+                guard !events.isEmpty else { return nil }
+                // Decode and account for events before completion can clear this request. Only
+                // the user handler is deferred, so it remains outside stateQueue but retains the
+                // order in which this request accepted delegate callbacks.
+                return enqueueGeminiEvents(events, into: &context, for: dataTask)
             }
             guard !data.isEmpty else { return nil }
             context.providerAudioByteCount += data.count
-            return .audio(data, context.dataHandler)
+            let dataHandler = context.dataHandler
+            // Enqueue while stateQueue owns this context, rather than after its lock is released,
+            // so a later concurrent delegate callback cannot overtake this PCM chunk.
+            audioDeliveryQueue.async {
+                dataHandler(data)
+            }
+            return nil
         }
+        guard let geminiFailure else { return }
+        geminiFailure.task.cancel()
+        publishFailure("The TTS service returned no playable audio. Please try again.", requestGeneration: geminiFailure.requestGeneration)
     }
 
-    private func deliverGeminiEvents(_ events: [Data], for task: URLSessionDataTask) {
+    /// Decodes complete SSE events while `stateQueue` owns their request context.
+    private func enqueueGeminiEvents(_ events: [Data],
+                                     into context: inout ActiveRequestContext,
+                                     for task: URLSessionDataTask) -> (task: URLSessionDataTask, requestGeneration: UInt64)? {
         for event in events {
             switch extractGeminiEventContent(from: event) {
             case let .audio(audioData):
-                recordAndDeliverGeminiAudio(audioData, for: task)
+                guard let playableAudio = recordGeminiAudio(audioData, in: &context) else { continue }
+                let dataHandler = context.dataHandler
+                audioDeliveryQueue.async {
+                    dataHandler(playableAudio)
+                }
             case .noAudio:
                 continue
             case .invalid:
-                failGeminiStream(for: task)
-                return
+                context.hasGeminiStreamFailure = true
+                return (task, context.requestGeneration)
             }
         }
+        return nil
     }
 
-    private func recordAndDeliverGeminiAudio(_ audioData: Data, for task: URLSessionDataTask) {
-        let delivery: (Data, (Data) -> Void)? = stateQueue.sync { () -> (Data, (Data) -> Void)? in
-            guard var context = activeRequest, task.taskIdentifier == context.taskIdentifier,
-                  !context.isErrorResponse, !context.hasGeminiStreamFailure else { return nil }
-            context.providerAudioByteCount += audioData.count
-            context.geminiIncompletePCM.append(audioData)
-            let playableByteCount = context.geminiIncompletePCM.count
-                - context.geminiIncompletePCM.count % 2
-            guard playableByteCount > 0 else {
-                activeRequest = context
-                return nil
-            }
-            let playableAudio = Data(context.geminiIncompletePCM.prefix(playableByteCount))
-            context.geminiIncompletePCM.removeFirst(playableByteCount)
-            activeRequest = context
-            return (playableAudio, context.dataHandler)
-        }
-        guard let delivery else { return }
-        delivery.1(delivery.0)
+    /// Records one decoded Gemini payload under `stateQueue` and returns complete PCM for delivery.
+    private func recordGeminiAudio(_ audioData: Data, in context: inout ActiveRequestContext) -> Data? {
+        context.providerAudioByteCount += audioData.count
+        context.geminiIncompletePCM.append(audioData)
+        let playableByteCount = context.geminiIncompletePCM.count
+            - context.geminiIncompletePCM.count % 2
+        guard playableByteCount > 0 else { return nil }
+        let playableAudio = Data(context.geminiIncompletePCM.prefix(playableByteCount))
+        context.geminiIncompletePCM.removeFirst(playableByteCount)
+        return playableAudio
     }
 
     /// Classifies one complete Gemini event without attempting to decode an absent audio payload.
@@ -159,17 +157,4 @@ extension TTSNetworkManager {
         return .noAudio
     }
 
-    /// Marks the matching Gemini request terminal after a complete provider event cannot yield audio.
-    private func failGeminiStream(for dataTask: URLSessionDataTask) {
-        let failure = stateQueue.sync { () -> (URLSessionDataTask, UInt64)? in
-            guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier,
-                  !context.hasGeminiStreamFailure else { return nil }
-            context.hasGeminiStreamFailure = true
-            activeRequest = context
-            return (context.task, context.requestGeneration)
-        }
-        guard let failure else { return }
-        failure.0.cancel()
-        publishFailure("The TTS service returned no playable audio. Please try again.", requestGeneration: failure.1)
-    }
 }

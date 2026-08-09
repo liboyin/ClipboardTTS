@@ -46,9 +46,18 @@ struct StandardAboutPanelPresenter: AboutPanelPresenting {
     }
 
     func showAbout(applicationName: String, applicationVersion: String) {
-        NSApplication.shared.orderFrontStandardAboutPanel(
-            options: aboutPanelOptions(applicationName: applicationName, applicationVersion: applicationVersion)
-        )
+        // NSApplication is main-isolated; callers present from the main queue, so run there
+        // synchronously and keep the same-thread behavior the panel had before this hop existed.
+        let present: @MainActor @Sendable () -> Void = {
+            NSApplication.shared.orderFrontStandardAboutPanel(
+                options: self.aboutPanelOptions(applicationName: applicationName, applicationVersion: applicationVersion)
+            )
+        }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated(present)
+        } else {
+            DispatchQueue.main.async(execute: present)
+        }
     }
 
     /// Returns the standard panel options, including a navigable link to the bundled license.

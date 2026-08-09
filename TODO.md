@@ -10,10 +10,8 @@ Keep those documents current rather than duplicating their content here.
 
 ## Working rules
 
-- Execute tasks in the order shown unless a task explicitly says it is independent.
-- There is exactly 1 remaining numbered task. Each task MUST be one self-contained implementation
-  commit: do not combine tasks in one commit, split a task across commits, or include code
-  belonging to a later task.
+- All numbered remediation tasks are complete. The final acceptance sweep below remains
+  outstanding and must be planned as a new self-contained task if it discovers follow-up work.
 - Every task must leave the repository coherent and independently pass all required tests,
   coverage, lint, and review gates. If that is impossible within the stated boundary, stop
   and ask the user to revise the task instead of borrowing changes from another task.
@@ -69,12 +67,6 @@ Complete this checklist separately for each numbered task:
    Never commit with a failed gate, an unexplained repository change, or a pending review
    disposition.
 
-## Work map
-
-| Issue or requested change | Classification | Remediation task |
-| --- | --- | --- |
-| The Swift 5 project is not clean under complete concurrency checking | Non-blocking | 16 |
-
 ## Decisions already made
 
 - Phase 0 is complete. Tests create network managers and sessions through the hermetic mock
@@ -92,58 +84,8 @@ Complete this checklist separately for each numbered task:
   committed files. Tests may use unmistakably fake tokens.
 - Do not switch the project to Swift 6 as part of this remediation. First make the Swift 5
   build clean with complete concurrency checking; a language-mode migration is separate work.
-
----
-
-## Phase 6 — Concurrency hardening
-
-### 16. Eliminate complete-concurrency warnings in Swift 5 mode
-
-**Classification:** Non-blocking
-
-**Depends on:** All earlier manager and UI state changes
-
-**Problem.** A build with `SWIFT_STRICT_CONCURRENCY=complete` reports mutable state on the
-URL-session delegate, non-Sendable manager captures, and a concurrently captured mutable
-voice-list local. These become errors in Swift 6.
-
-**Required change.**
-
-1. Run a clean strict-concurrency build and inventory every warning before choosing isolation.
-2. Put observable UI state on `@MainActor` where practical.
-3. Keep queue-owned network/audio buffers behind their existing explicit synchronization, and
-   make cross-isolation handoffs visible.
-4. Replace mutable captured locals with immutable values before dispatch.
-5. Treat URL-session and notification callbacks as concurrent entry points. Hop to the correct
-   actor/queue before touching isolated state.
-6. Avoid `@unchecked Sendable` as a warning silencer. If it is genuinely required for an
-   Apple delegate type, document the protected fields and invariant and test concurrent entry.
-7. Add `SWIFT_STRICT_CONCURRENCY: complete` to `project.yml` once the build is clean so future
-   warnings are visible. Do not change `SWIFT_VERSION` in this task.
-
-**Tests and falsification.**
-
-- Run the full test/coverage gate under Thread Sanitizer when feasible for the manager tests;
-  record and resolve any failures rather than treating a clean run as proof of absence.
-- Exercise provider switching, stop/replacement, metadata races, seek during streaming, and
-  Services notifications after the isolation changes.
-- Mutation-test removal of an actor hop or immutable capture where a deterministic test can
-  expose the regression.
-
-**Done when.**
-
-```bash
-xcodebuild \
-  -project ClipboardTTSApp.xcodeproj \
-  -scheme ClipboardTTSApp \
-  -configuration Debug \
-  SWIFT_STRICT_CONCURRENCY=complete \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-completes with no Swift concurrency warnings, while the project remains in Swift 5 mode and
-all normal gates pass.
+- Phase 6 Task 16 is complete. The Swift 5 app target uses complete concurrency checking; see
+  `README.md` for the current ownership and handoff contract.
 
 ---
 

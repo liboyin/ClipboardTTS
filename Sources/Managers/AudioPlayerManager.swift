@@ -1,6 +1,21 @@
+// swiftlint:disable file_length
+// AudioPlayerManager keeps the buffer-queue and main-queue confinement rules and their
+// documentation in one cohesive file; splitting it would separate invariants from the code
+// they describe.
 import Foundation
 import AVFoundation
-class AudioPlayerManager: ObservableObject {
+/// Buffers streamed PCM, drives the playback engine, and publishes playback state to the menu bar.
+///
+/// Marked `@unchecked Sendable` because network callbacks schedule audio from the URLSession
+/// delegate queue while the UI and Services flows drive it from the main queue; concurrent
+/// scheduling entry is covered by `AudioPlayerManagerTests`. The pre-existing confinement rules:
+/// - Buffer state (`pcmData`, `bufferedPCMFrameCount`, `audioFormat`, and the scheduling
+///   generations) is read and written only on `bufferQueue`.
+/// - The `@Published` properties, audio engine, `engineStarter`, `baseProgressOffset`, and the
+///   progress timer are confined to the main queue.
+/// - `playerNode` scheduling and control run on `bufferQueue` or the main queue, matching the
+///   threading pattern this class has always used for `AVAudioPlayerNode`.
+final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     static let defaultSampleRate = 24_000.0
     static let supportedSampleRateRange = 8_000.0...48_000.0
     private static let automaticPlaybackPrebufferDuration: TimeInterval = 0.1
@@ -39,7 +54,8 @@ class AudioPlayerManager: ObservableObject {
     private var automaticPlaybackSuppressedGeneration: Int?
     private let scheduledBufferObserver: (AVAudioPCMBuffer) -> Void
     private let engineStarter: (AVAudioEngine) throws -> Void
-    private let automaticPlaybackScheduler: (TimeInterval, @escaping () -> Void) -> Void
+    /// Defers the automatic-playback start; the action it is given crosses to the main queue.
+    private let automaticPlaybackScheduler: (TimeInterval, @escaping @Sendable () -> Void) -> Void
     private let audioObservers: (processed: () -> Void, statePublished: () -> Void)
     private var progressTimer: Timer?
     /// Creates the audio graph. The buffer observer is notified after each buffer is passed to the node.
@@ -48,7 +64,7 @@ class AudioPlayerManager: ObservableObject {
     init(sampleRate: Double = AudioPlayerManager.defaultSampleRate,
          scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in },
          engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() },
-         automaticPlaybackScheduler: @escaping (TimeInterval, @escaping () -> Void) -> Void = { delay, action in
+         automaticPlaybackScheduler: @escaping (TimeInterval, @escaping @Sendable () -> Void) -> Void = { delay, action in
              DispatchQueue.main.asyncAfter(
                  deadline: .now() + delay,
                  execute: action
@@ -197,8 +213,9 @@ class AudioPlayerManager: ObservableObject {
             if shouldScheduleAutomaticPlayback {
                 self.automaticPlaybackGeneration = streamGeneration
                 self.automaticPlaybackScheduler(Self.automaticPlaybackPrebufferDuration) { [weak self] in
+                    guard let self else { return }
                     DispatchQueue.main.async {
-                        self?.startAutomaticPlayback(streamGeneration: streamGeneration)
+                        self.startAutomaticPlayback(streamGeneration: streamGeneration)
                     }
                 }
             }
@@ -255,7 +272,7 @@ class AudioPlayerManager: ObservableObject {
         playerNode.stop()
         baseProgressOffset = 0.0
 
-        let updatePublishedState = {
+        let updatePublishedState: @Sendable () -> Void = {
             self.isPlaying = false
             self.hasAudio = false
             self.bufferDuration = 0.0

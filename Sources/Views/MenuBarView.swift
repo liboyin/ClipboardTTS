@@ -149,7 +149,7 @@ struct MenuBarView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 if let text = textExtraction.getCopiedText() {
                     let gen = audioPlayer.startNewStream()
-                    networkManager.streamTTS(text: text) { data in
+                    networkManager.streamTTS(text: text) { [audioPlayer] data in
                         audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
                     }
                 }

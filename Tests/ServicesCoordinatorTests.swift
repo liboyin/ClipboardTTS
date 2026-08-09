@@ -56,6 +56,38 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         }
     }
 
+    func testBackgroundServiceNotificationUsesTheMainActionHandoff() {
+        // WHY: AppKit Services normally arrives on main, but NotificationCenter permits another
+        // posting thread. Playback state and AVAudioEngine control are main-confined, so a
+        // background post must use the coordinator's full main-action handoff before speaking.
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        let requestReceived = expectation(description: "Main action starts its speech request")
+        MockURLProtocol.installRequestHandler { request in
+            requestReceived.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let center = NotificationCenter()
+        let speechRanOnMain = expectation(description: "Production main handoff runs speech on main")
+        let coordinator = ServicesCoordinator(
+            audioPlayer: audioPlayer,
+            networkManager: networkManager,
+            notificationCenter: center,
+            speechActionObserver: {
+                XCTAssertTrue(Thread.isMainThread)
+                speechRanOnMain.fulfill()
+            }
+        )
+
+        withExtendedLifetime(coordinator) {
+            DispatchQueue.global().async {
+                center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: "Speak me")
+            }
+            wait(for: [speechRanOnMain, requestReceived], timeout: 1.0)
+        }
+    }
+
     func testServiceNotificationWithoutStringObjectIsIgnored() {
         // WHY: handleServices only posts when the pasteboard holds a string, but the coordinator
         // must still defensively drop a malformed notification (non-String object) rather than

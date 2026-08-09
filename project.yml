@@ -6,6 +6,10 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: "13.0"
+    # Swift 5 language mode with complete concurrency checking, so new isolation warnings stay
+    # visible in every app build.
+    settings:
+      SWIFT_STRICT_CONCURRENCY: complete
     sources:
       - Sources
       - path: LICENSE
