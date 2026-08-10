@@ -1,9 +1,8 @@
 # TODO — Gap Remediation Hand-over
 
-This document is the authoritative execution plan for the eight findings verified by the
-2026-08-10 whole-project gap review. It is written for implementation sessions that share no
-conversation context: each executor must be able to understand one task from the repository and
-this file alone.
+This document is the authoritative execution plan for the verified remediation gaps. It is written
+for implementation sessions that share no conversation context: each executor must be able to
+understand one task from the repository and this file alone.
 
 Read `AGENTS.md`, `USER_STORIES.md`, and `README.md` before starting. `USER_STORIES.md` owns
 product behavior; `README.md` owns the current architecture and operating instructions. Treat
@@ -13,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly six active implementation tasks: Tasks 19–24.
+- There are exactly ten active implementation tasks: Tasks 19–24 and 26–29.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -96,13 +95,206 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
+| The hosted XCTest app reads developer configuration before test isolation begins | Blocking | 26 |
+| Mock-test teardown restores settings before queued audio callbacks are drained | Blocking | 27 |
+| A concurrent stop can race between queued-audio authorization and callback invocation | Blocking | 28 |
+| Failure terminal-state assertions can accept an already-published error from a previous request | Blocking | 29 |
 
 ---
 
 ## Phase 1 — Restore state isolation and cancellation truth
 
-This phase repairs two ownership boundaries used by later tasks: tests must not touch developer
-configuration, and a stopped request must not retain authority to call client code.
+This phase repairs ownership boundaries used by later tasks: tests must not touch developer
+configuration, and a stopped request must not retain authority to call client code. Its mandatory
+review added Tasks 26–29; complete them and rerun the Phase 1 review before Phase 2.
+
+### 26. Isolate hosted-app startup from developer configuration
+
+**Classification:** Blocking — test-host credential and settings exposure
+
+**Depends on:** Nothing
+
+**Purpose.** The app's `@main` initializer runs before XCTest `setUp()`. It currently reads real
+`UserDefaults`, constructs `KeychainSecretStore`, and constructs `TTSNetworkManager`; therefore a
+hosted test can read or migrate developer configuration before `MockURLProtocolTestCase` isolates
+it. A Phase 1 review observed `SecItemCopyMatching` from that startup path block the coverage gate.
+
+**Primary paths.**
+
+- `Sources/ClipboardTTSApp.swift`
+- `Sources/SecretStore.swift`
+- `Sources/Managers/TTSNetworkManager.swift`
+- `Tests/TestNetworkSupport.swift`
+- `Tests/UserDefaultsSnapshot.swift`
+- `README.md`
+
+**Required change.**
+
+1. Make the hosted XCTest app construct only test-owned startup dependencies before any test case
+   can run; this includes secrets, persisted settings, and every manager initializer they reach.
+2. Preserve production startup's current provider, Keychain, migration, Services, and audio
+   behavior outside the test host.
+3. Establish test isolation before any startup read or write, rather than attempting to restore a
+   value after an app-host initializer has already observed it.
+4. Add a hosted regression that seeds conspicuous developer defaults and credentials through safe
+   fakes, then proves app startup neither reads, migrates, nor deletes them.
+5. Document the owned hosted-test startup boundary and any supported dependency-injection seam.
+
+**Non-goals and invariants.**
+
+- Do not bypass Keychain, migration, or provider normalization in production.
+- Do not add a test-only production setting or allow tests to use the developer's Keychain.
+- Do not rely on a Keychain-access prompt, timeout, or process environment cleanup as isolation.
+
+**Validation and falsification.**
+
+- Run the complete hosted suite without a developer credential or Keychain prompt.
+- Mutate the test-host startup path to use `KeychainSecretStore` or real defaults and prove the
+  startup-isolation regression fails.
+- Verify production initialization still reads its persisted provider and key through existing
+  injected tests.
+
+**Done when.** No hosted test can read, migrate, or block on developer configuration before its
+test-owned isolation lifecycle begins.
+
+### 27. Drain mock-owned audio delivery before restoring settings
+
+**Classification:** Blocking — asynchronous test lifecycle escape
+
+**Depends on:** Nothing
+
+**Purpose.** `MockURLProtocolTestCase` waits for registered sessions, protocol loads, and manager
+construction, but `TTSNetworkManager` delivers accepted PCM on a separate queue. The current scope
+can restore settings after session quiescence while a queued handler still exists, contradicting
+README's queued-work claim and allowing late test work to escape teardown.
+
+**Primary paths.**
+
+- `Tests/TestNetworkSupport.swift`
+- `Tests/MockURLProtocol.swift`
+- `Tests/TTSNetworkManagerConcurrencyTests.swift`
+- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
+- `README.md`
+
+**Required change.**
+
+1. Give every factory-created manager and its audio-delivery work explicit ownership by its mock
+   test scope.
+2. Before restoring settings or releasing the next mock test, cancel or invalidate pending owned
+   delivery as appropriate, drain the owned queues, and account for late work locally.
+3. Preserve the existing session/load/construction quiescence checks and timeout-recovery path.
+4. Add deterministic tests that block delivery, end the mock scope, and prove no handler can run
+   after settings restoration or in the next test's scope.
+5. Update README's mock-test lifecycle description to name the delivery-queue boundary accurately.
+
+**Non-goals and invariants.**
+
+- Do not change production delivery order or retain test-only synchronization in production.
+- Do not use sleeps, broad process cancellation, or an unbounded teardown wait.
+- Do not weaken the existing undeclared-request, settings-snapshot, or no-late-work checks.
+
+**Validation and falsification.**
+
+- Force a callback to queue before scope teardown and prove teardown cannot restore settings until
+  that work is revoked or drained.
+- Mutate teardown to omit delivery ownership and prove the regression observes escaped work.
+- Exercise normal final-event delivery to prove the lifecycle does not revoke valid in-test audio.
+
+**Done when.** Factory-created delivery work cannot outlive its mock test scope or run against
+restored developer settings.
+
+### 28. Make queued-audio callback authority atomic with stop
+
+**Classification:** Blocking — stop/callback cancellation race
+
+**Depends on:** Nothing
+
+**Purpose.** `enqueueAudioDelivery` checks a request generation and then calls the client handler
+after releasing the request-state queue. A concurrent `stopStreaming()` can complete in that gap,
+so stale PCM can reach client code after Clear Buffer returns.
+
+**Primary paths.**
+
+- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
+- `Sources/Managers/TTSNetworkManager.swift`
+- `Tests/TTSNetworkManagerConcurrencyTests.swift`
+- `README.md`
+
+**Required change.**
+
+1. Serialize delivery authorization and callback start with stop/replacement completion so a
+   revoked generation cannot enter a handler afterward.
+2. Preserve ordered delivery, normal-completion delivery of already accepted audio, and handlers'
+   ability to synchronously stop or replace their own stream without deadlock.
+3. Add a deterministic barrier test that pauses immediately after authorization, completes a
+   concurrent stop, then proves the old handler cannot run.
+4. Cover both OpenAI-compatible and Gemini delivery paths if they use distinct acceptance logic.
+5. Document the exact callback-start authority boundary in README.
+
+**Non-goals and invariants.**
+
+- Do not move user handlers under `stateQueue` if that prevents their documented re-entrant stop
+  or replacement behavior.
+- Do not discard audio accepted before ordinary completion solely because completion publishes
+  idle state.
+- Do not solve the race by sleeps, a test-only production hook, or broad task serialization.
+
+**Validation and falsification.**
+
+- Mutate authorization back to check-then-call and prove the barrier regression delivers stale
+  PCM after stop.
+- Mutate normal completion to revoke accepted PCM and prove the final-event delivery test fails.
+- Run the existing FIFO and re-entrant handler suites under complete concurrency.
+
+**Done when.** Once stop or replacement returns, no handler belonging to its revoked generation can
+begin execution, while valid accepted final audio and re-entrant handlers remain correct.
+
+### 29. Bind failure terminal-state assertions to the observed action
+
+**Classification:** Blocking — terminal-state test false positive
+
+**Depends on:** Task 25 (`9feb023`)
+
+**Purpose.** Task 25 retained the helper's successful-request activity guard, but an expected
+failure can still equal the manager's initial `lastError` value. Combine publishes that old match
+during subscription before `action()`, allowing a failure assertion to pass without observing the
+new request.
+
+**Primary paths.**
+
+- `Tests/TestNetworkSupport.swift`
+- `Tests/TTSNetworkManagerFailureTests.swift`
+- `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
+- `README.md`
+
+**Required change.**
+
+1. Require every terminal-state assertion to observe a publication causally after its supplied
+   action starts; successful states must still require an observed active request.
+2. Preserve support for synchronous configuration and encoding failures emitted during the action.
+3. Preserve tests that begin an asynchronous request before releasing an explicit completion
+   boundary through the helper action.
+4. Add a regression that starts with a matching old failure, runs a no-op or non-publishing action,
+   and proves the assertion cannot pass from the subscription's initial value.
+5. Keep the helper event-driven and independent of elapsed-time polling or production-only hooks.
+
+**Non-goals and invariants.**
+
+- Do not accept a terminal state from a different request or a pre-action publication.
+- Do not weaken existing sanitized failure-copy assertions, suppress tests, or add retry-to-pass.
+- Do not require every failure to transition through `isStreaming == true`; invalid configuration
+  remains a valid synchronous terminal path.
+
+**Validation and falsification.**
+
+- Mutate the post-action publication gate away and prove the stale-failure regression fails.
+- Mutate the successful active-request gate away and prove the Task 25 idle-manager regression
+  fails.
+- Repeat the successful retry and representative synchronous-failure tests in one hosted
+  invocation.
+
+**Done when.** Neither a success nor a failure terminal assertion can pass from state published
+before the request action it claims to verify.
 
 ### Phase 1 mandatory gap review
 
@@ -122,7 +314,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review
+**Depends on:** Phase 1 mandatory gap review after Tasks 26–29
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -179,7 +371,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review
+**Depends on:** Phase 1 mandatory gap review after Tasks 26–29
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
