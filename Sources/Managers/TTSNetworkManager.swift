@@ -35,7 +35,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Keeping this separate from `stateQueue` lets a handler synchronously stop or replace its
     /// stream without deadlocking the request-state lock.
     let audioDeliveryQueue: DispatchQueue
-    var activeRequest: ActiveRequestContext?; private var requestGeneration: UInt64 = 0
+    var activeRequest: ActiveRequestContext?; var requestGeneration: UInt64 = 0
     private var requestStatePublicationDepth = 0
     private(set) var selectedMetadataProvider: String
     var metadataGeneration: UInt64 = 0
@@ -282,7 +282,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Returns whether a completion still belongs to the latest stream generation.
-    private func isCurrentRequestGeneration(_ generation: UInt64?) -> Bool {
+    func isCurrentRequestGeneration(_ generation: UInt64?) -> Bool {
         guard let generation else { return true }
         return stateQueue.sync { requestGeneration == generation }
     }

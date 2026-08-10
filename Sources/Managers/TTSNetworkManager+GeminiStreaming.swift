@@ -56,29 +56,51 @@ extension TTSNetworkManager {
         case invalid
     }
 
+    /// Queues PCM for a request generation and invokes its handler only while that generation
+    /// still owns delivery. Completion deliberately leaves the generation intact so audio accepted
+    /// before a normal URL-session completion remains playable.
+    func enqueueAudioDelivery(_ data: Data,
+                              dataHandler: @escaping @Sendable (Data) -> Void,
+                              requestGeneration: UInt64) {
+        audioDeliveryQueue.async { [weak self] in
+            guard let self, self.isCurrentRequestGeneration(requestGeneration) else { return }
+            dataHandler(data)
+        }
+    }
+
     /// Validates an incoming task chunk and invokes its handler after releasing `stateQueue`.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let geminiFailure: (task: URLSessionDataTask, requestGeneration: UInt64)? = stateQueue.sync {
+        let geminiFailure = stateQueue.sync { () -> (task: URLSessionDataTask, requestGeneration: UInt64)? in
             guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier,
                   !context.isErrorResponse else { return nil }
-            defer { activeRequest = context }
             if context.provider == .gemini {
                 guard !context.hasGeminiStreamFailure else { return nil }
                 let events = context.geminiEventParser.append(data)
-                guard !events.isEmpty else { return nil }
+                guard !events.isEmpty else {
+                    activeRequest = context
+                    return nil
+                }
                 // Decode and account for events before completion can clear this request. Only
                 // the user handler is deferred, so it remains outside stateQueue but retains the
                 // order in which this request accepted delegate callbacks.
-                return enqueueGeminiEvents(events, into: &context, for: dataTask)
+                if let failedRequest = enqueueGeminiEvents(events, into: &context, for: dataTask) {
+                    // A fatal event cancels this logical stream. Advance delivery authority while
+                    // still holding stateQueue so any queued PCM is revoked before it can run.
+                    self.requestGeneration &+= 1
+                    activeRequest = nil
+                    return (task: failedRequest.task, requestGeneration: self.requestGeneration)
+                }
+                activeRequest = context
+                return nil
             }
             guard !data.isEmpty else { return nil }
             context.providerAudioByteCount += data.count
             let dataHandler = context.dataHandler
+            let deliveryGeneration = context.requestGeneration
             // Enqueue while stateQueue owns this context, rather than after its lock is released,
             // so a later concurrent delegate callback cannot overtake this PCM chunk.
-            audioDeliveryQueue.async {
-                dataHandler(data)
-            }
+            enqueueAudioDelivery(data, dataHandler: dataHandler, requestGeneration: deliveryGeneration)
+            activeRequest = context
             return nil
         }
         guard let geminiFailure else { return }
@@ -95,9 +117,11 @@ extension TTSNetworkManager {
             case let .audio(audioData):
                 guard let playableAudio = recordGeminiAudio(audioData, in: &context) else { continue }
                 let dataHandler = context.dataHandler
-                audioDeliveryQueue.async {
-                    dataHandler(playableAudio)
-                }
+                enqueueAudioDelivery(
+                    playableAudio,
+                    dataHandler: dataHandler,
+                    requestGeneration: context.requestGeneration
+                )
             case .noAudio:
                 continue
             case .invalid:

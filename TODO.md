@@ -13,7 +13,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly seven active implementation tasks: Tasks 18–24.
+- There are exactly six active implementation tasks: Tasks 19–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -90,7 +90,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Audio accepted before a re-entrant stop can be delivered after the stop | Blocking | 18 |
 | Custom credentials can be attached to an arbitrary plain-HTTP endpoint | Blocking | 19 |
 | The deferred clipboard action can replace a stream started during its delay | Blocking | 20 |
 | Gemini exposes only 5 of the 30 currently documented TTS voices | Blocking | 21 |
@@ -104,63 +103,6 @@ inside a later task.
 
 This phase repairs two ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code.
-
-### 18. Revoke queued audio delivery after stop or replacement
-
-**Classification:** Blocking — Task 4 cancellation contract regression
-
-**Depends on:** Nothing
-
-**Purpose.** Delegate callbacks enqueue captured handlers on `audioDeliveryQueue` without checking
-ownership again at delivery time. If two chunks are accepted while that queue is blocked and the
-first handler calls `stopStreaming()`, the already-queued second handler still runs after the stop.
-The 2026-08-10 scratch counterexample observed two deliveries where only the first was authorized.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
-- `Sources/Managers/TTSNetworkManager+Failures.swift`
-- `Tests/TTSNetworkManagerStreamContextTests.swift`
-- `Tests/TTSNetworkManagerConcurrencyTests.swift`
-- `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Associate every queued audio handoff with the logical request generation that authorized it.
-2. Immediately before invoking client code, revalidate that the generation has not been stopped or
-   replaced. Perform only the ownership check under `stateQueue`; invoke the handler after leaving
-   that queue so re-entrant stop/replacement remains safe.
-3. A normal URL-session completion MUST NOT revoke audio already accepted for that same generation.
-   The existing final-Gemini-event-before-completion guarantee must remain intact.
-4. `stopStreaming()`, a replacement request, and every other cancellation path MUST revoke all
-   waiting deliveries from the prior generation, including Gemini and OpenAI-compatible PCM.
-5. Preserve FIFO order for deliveries that remain authorized.
-
-**Non-goals and invariants.**
-
-- A handler already executing when stop begins cannot be recalled; only later queued handoffs must
-  be suppressed.
-- Do not invoke handlers under `stateQueue` or make completion wait for the delivery queue.
-- Do not change provider parsing, error text, PCM framing, or URL-session callback ownership.
-- Preserve concurrent callback ordering and the ability for a handler to synchronously stop or
-  replace its stream.
-
-**Validation and falsification.**
-
-- Add the controlled counterexample: block delivery, accept two distinct chunks, let the first
-  handler stop the stream, and prove the second never invokes the handler.
-- Repeat the ownership assertion for replacement and for Gemini event delivery.
-- Keep or strengthen the test proving a final accepted Gemini event survives normal completion
-  while delivery is blocked.
-- Verify distinct authorized chunks retain acceptance order.
-- Mutation-test removal of the delivery-time generation check and a check that incorrectly drops
-  accepted audio on normal completion.
-
-**Done when.** No queued client callback runs after its generation is stopped or replaced, while
-normally completed requests still deliver every previously accepted chunk exactly once and in
-order.
 
 ### Phase 1 mandatory gap review
 
@@ -237,7 +179,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Task 18
+**Depends on:** Phase 1 mandatory gap review
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
@@ -357,7 +299,7 @@ freshness-guarded source without weakening provider or idle-state boundaries.
 
 **Classification:** Non-blocking — provider reliability
 
-**Depends on:** Tasks 18 and 21
+**Depends on:** Task 21
 
 **Purpose.** Google documents that Gemini 3.1 TTS can rarely return HTTP 500 when it emits text
 tokens instead of audio and recommends automated retry handling. The app currently turns every 500
@@ -385,7 +327,8 @@ into an immediate terminal error.
    `isStreaming` truthful across the handoff and do not publish a terminal error before the retry
    outcome is known.
 4. A stop, Clear Buffer, replacement request, or invalidated generation must prevent the retry from
-   starting and revoke its queued deliveries under Task 18's contract.
+   starting and revoke its queued deliveries under the [README's queued-delivery ownership
+   contract](README.md#architecture).
 5. If the retry also fails, publish the existing sanitized HTTP failure exactly once and finish the
    request normally.
 6. Do not retry authentication, configuration, transport, cancellation, malformed SSE, empty

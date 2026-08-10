@@ -127,3 +127,251 @@ final class TTSNetworkManagerConcurrencyTests: MockURLProtocolTestCase {
         wait(for: [audioDelivered], timeout: 1.0)
     }
 }
+
+extension TTSNetworkManagerConcurrencyTests {
+    func testQueuedPCMHandoffsAfterAReentrantStopAreRevokedBeforeDelivery() {
+        // WHY: A Clear Buffer action from the first queued callback must also revoke later
+        // callbacks already accepted from URLSession, otherwise speech resumes after stopping.
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.stop-revocation")
+        let deliveryBlocked = expectation(description: "Audio delivery queue is blocked")
+        let releaseDelivery = DispatchSemaphore(value: 0)
+        audioDeliveryQueue.async {
+            deliveryBlocked.fulfill()
+            _ = releaseDelivery.wait(timeout: .now() + 2.0)
+        }
+        wait(for: [deliveryBlocked], timeout: 1.0)
+
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        let requestStarted = expectation(description: "Request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 2.0)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        defer { releaseResponse.signal() }
+
+        let firstDelivery = expectation(description: "First handoff stops the stream")
+        let deliveryQueueDrained = expectation(description: "Queued handoffs have been considered")
+        let deliveryLock = NSLock()
+        var delivered: [Data] = []
+        let firstChunk = Data([0, 1])
+        let secondChunk = Data([2, 3])
+        manager.streamTTS(text: "stop queued handoffs") { data in
+            deliveryLock.lock()
+            delivered.append(data)
+            deliveryLock.unlock()
+            if data == firstChunk {
+                manager.stopStreaming()
+                firstDelivery.fulfill()
+            }
+        }
+        wait(for: [requestStarted], timeout: 1.0)
+        guard let task = manager.activeTaskForTesting else {
+            XCTFail("Expected an active request for queued-delivery cancellation testing.")
+            return
+        }
+
+        manager.urlSession(manager.session, dataTask: task, didReceive: firstChunk)
+        manager.urlSession(manager.session, dataTask: task, didReceive: secondChunk)
+        releaseDelivery.signal()
+        audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
+        wait(for: [firstDelivery, deliveryQueueDrained], timeout: 1.0)
+
+        deliveryLock.lock()
+        XCTAssertEqual(delivered, [firstChunk])
+        deliveryLock.unlock()
+    }
+
+    func testQueuedPCMHandoffsAfterAReentrantReplacementAreRevokedBeforeDelivery() {
+        // WHY: Starting a replacement from a callback gives the old request no authority over
+        // later handoffs it queued before that callback ran.
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.replacement-revocation")
+        let deliveryBlocked = expectation(description: "Audio delivery queue is blocked")
+        let releaseDelivery = DispatchSemaphore(value: 0)
+        audioDeliveryQueue.async {
+            deliveryBlocked.fulfill()
+            _ = releaseDelivery.wait(timeout: .now() + 2.0)
+        }
+        wait(for: [deliveryBlocked], timeout: 1.0)
+
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        let firstRequestStarted = expectation(description: "Initial request started")
+        let replacementRequestStarted = expectation(description: "Replacement request started")
+        let releaseFirstResponse = DispatchSemaphore(value: 0)
+        let requestLock = NSLock()
+        var requestCount = 0
+        MockURLProtocol.installRequestHandler { request in
+            requestLock.lock()
+            requestCount += 1
+            let isInitialRequest = requestCount == 1
+            requestLock.unlock()
+            if isInitialRequest {
+                firstRequestStarted.fulfill()
+                _ = releaseFirstResponse.wait(timeout: .now() + 2.0)
+            } else {
+                replacementRequestStarted.fulfill()
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        defer { releaseFirstResponse.signal() }
+
+        let firstDelivery = expectation(description: "First handoff starts replacement")
+        let deliveryQueueDrained = expectation(description: "Queued handoffs have been considered")
+        let deliveryLock = NSLock()
+        var delivered: [Data] = []
+        let firstChunk = Data([4, 5])
+        let secondChunk = Data([6, 7])
+        manager.streamTTS(text: "initial stream") { data in
+            deliveryLock.lock()
+            delivered.append(data)
+            deliveryLock.unlock()
+            if data == firstChunk {
+                manager.streamTTS(text: "replacement stream") { _ in
+                    XCTFail("The replacement response supplies no PCM and must not invoke its handler.")
+                }
+                firstDelivery.fulfill()
+            }
+        }
+        wait(for: [firstRequestStarted], timeout: 1.0)
+        guard let task = manager.activeTaskForTesting else {
+            XCTFail("Expected the initial request to own queued handoffs.")
+            return
+        }
+
+        manager.urlSession(manager.session, dataTask: task, didReceive: firstChunk)
+        manager.urlSession(manager.session, dataTask: task, didReceive: secondChunk)
+        releaseDelivery.signal()
+        audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
+        wait(for: [firstDelivery, deliveryQueueDrained], timeout: 1.0)
+        releaseFirstResponse.signal()
+        wait(for: [replacementRequestStarted], timeout: 1.0)
+
+        deliveryLock.lock()
+        XCTAssertEqual(delivered, [firstChunk])
+        deliveryLock.unlock()
+    }
+
+    func testQueuedGeminiEventsAfterAReentrantStopAreRevokedBeforeDelivery() {
+        // WHY: Gemini events use a separate parser path, but a stopped stream must revoke their
+        // already queued PCM just like OpenAI-compatible PCM.
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.gemini-stop-revocation")
+        let deliveryBlocked = expectation(description: "Audio delivery queue is blocked")
+        let releaseDelivery = DispatchSemaphore(value: 0)
+        audioDeliveryQueue.async {
+            deliveryBlocked.fulfill()
+            _ = releaseDelivery.wait(timeout: .now() + 2.0)
+        }
+        wait(for: [deliveryBlocked], timeout: 1.0)
+
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
+        manager.updateSettings(
+            baseURL: "https://generativelanguage.googleapis.com/v1beta",
+            apiKey: "test",
+            model: "test",
+            voice: "test",
+            selectedProvider: "Gemini"
+        )
+        let requestStarted = expectation(description: "Gemini request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 2.0)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        defer { releaseResponse.signal() }
+
+        let firstDelivery = expectation(description: "First Gemini event stops the stream")
+        let deliveryQueueDrained = expectation(description: "Queued Gemini events have been considered")
+        let deliveryLock = NSLock()
+        var delivered: [Data] = []
+        let firstChunk = Data([8, 9])
+        let secondChunk = Data([10, 11])
+        manager.streamTTS(text: "stop queued Gemini events") { data in
+            deliveryLock.lock()
+            delivered.append(data)
+            deliveryLock.unlock()
+            if data == firstChunk {
+                manager.stopStreaming()
+                firstDelivery.fulfill()
+            }
+        }
+        wait(for: [requestStarted], timeout: 1.0)
+        guard let task = manager.activeTaskForTesting else {
+            XCTFail("Expected an active Gemini request for queued-delivery testing.")
+            return
+        }
+
+        let firstEvent = geminiEvent(containing: firstChunk)
+        let secondEvent = geminiEvent(containing: secondChunk)
+        manager.urlSession(manager.session, dataTask: task, didReceive: firstEvent + secondEvent)
+        releaseDelivery.signal()
+        audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
+        wait(for: [firstDelivery, deliveryQueueDrained], timeout: 1.0)
+
+        deliveryLock.lock()
+        XCTAssertEqual(delivered, [firstChunk])
+        deliveryLock.unlock()
+    }
+
+    func testFatalGeminiCancellationRevokesQueuedAudioBeforeDelivery() {
+        // WHY: A malformed Gemini event explicitly cancels the stream. PCM queued before that
+        // failure cannot start playback after the application has reported it as unusable.
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.gemini-failure-revocation")
+        let deliveryBlocked = expectation(description: "Audio delivery queue is blocked")
+        let releaseDelivery = DispatchSemaphore(value: 0)
+        audioDeliveryQueue.async {
+            deliveryBlocked.fulfill()
+            _ = releaseDelivery.wait(timeout: .now() + 2.0)
+        }
+        wait(for: [deliveryBlocked], timeout: 1.0)
+
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
+        manager.updateSettings(
+            baseURL: "https://generativelanguage.googleapis.com/v1beta",
+            apiKey: "test",
+            model: "test",
+            voice: "test",
+            selectedProvider: "Gemini"
+        )
+        let requestStarted = expectation(description: "Gemini request started")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 2.0)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        defer { releaseResponse.signal() }
+
+        let deliveryQueueDrained = expectation(description: "Queued Gemini audio has been considered")
+        let audioDelivered = expectation(description: "Queued audio is not delivered")
+        audioDelivered.isInverted = true
+        let chunk = Data([12, 13])
+        manager.streamTTS(text: "cancel queued Gemini audio") { _ in
+            audioDelivered.fulfill()
+        }
+        wait(for: [requestStarted], timeout: 1.0)
+        guard let task = manager.activeTaskForTesting else {
+            XCTFail("Expected an active Gemini request for fatal-cancellation testing.")
+            return
+        }
+
+        manager.urlSession(manager.session, dataTask: task, didReceive: geminiEvent(containing: chunk))
+        assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
+            manager.urlSession(manager.session, dataTask: task, didReceive: Data("data: not-json\n\n".utf8))
+        }
+        releaseDelivery.signal()
+        audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
+        wait(for: [audioDelivered, deliveryQueueDrained], timeout: 1.0)
+    }
+
+    private func geminiEvent(containing audio: Data) -> Data {
+        Data("""
+        data: {"candidates":[{"content":{"parts":[{"inlineData":{"data":"\(audio.base64EncodedString())"}}]}}]}
+
+
+        """.utf8)
+    }
+}
