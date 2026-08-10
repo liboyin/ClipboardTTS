@@ -4,6 +4,14 @@ import AppKit
 import Combine
 @testable import ClipboardTTSApp
 
+/// Returns whether a published state is the expected terminal state for an observed request.
+func matchesExpectedTerminalState(error: String?,
+                                  isStreaming: Bool,
+                                  expectedError: String?,
+                                  observedActiveRequest: Bool) -> Bool {
+    error == expectedError && !isStreaming && (expectedError != nil || observedActiveRequest)
+}
+
 /// Returns a request body whether URLSession retained it as data or exposed it as a stream.
 func requestBodyData(from request: URLRequest) -> Data? {
     if let httpBody = request.httpBody {
@@ -35,10 +43,14 @@ extension XCTestCase {
         var didSettle = false
         let observation = Publishers.CombineLatest(manager.$lastError, manager.$isStreaming).sink { error, isStreaming in
             observedActiveRequest = observedActiveRequest || isStreaming
-            guard error == expectedError,
-                  !isStreaming,
-                  !didSettle,
-                  expectedError != nil || observedActiveRequest else { return }
+            guard matchesExpectedTerminalState(
+                error: error,
+                isStreaming: isStreaming,
+                expectedError: expectedError,
+                observedActiveRequest: observedActiveRequest
+            ),
+                  !didSettle
+            else { return }
             didSettle = true
             stateSettled.fulfill()
         }

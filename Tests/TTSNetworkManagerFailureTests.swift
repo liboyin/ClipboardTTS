@@ -223,19 +223,17 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
             return (response, Data([0, 1]))
         }
 
-        manager.streamTTS(text: "Retry successfully") { data in
-            XCTAssertEqual(data, Data([0, 1]))
-            audioDelivered.fulfill()
-        }
-        XCTAssertNil(manager.lastError)
-
-        wait(for: [audioDelivered], timeout: 2.0)
         assertTerminalState(of: manager, expectedError: nil) {
-            // The URL protocol has delivered audio; its completion publishes the terminal state.
-        }
-
+            manager.streamTTS(text: "Retry successfully") { data in
+                XCTAssertEqual(data, Data([0, 1]))
+                audioDelivered.fulfill()
+            }
             XCTAssertNil(manager.lastError)
-            XCTAssertFalse(manager.isStreaming)
+        }
+        wait(for: [audioDelivered], timeout: 2.0)
+
+        XCTAssertNil(manager.lastError)
+        XCTAssertFalse(manager.isStreaming)
     }
 
     func testStaleFailureClearCannotEraseTheLatestRequestError() {

@@ -1,6 +1,27 @@
 import XCTest
 
 final class MockURLProtocolTests: MockURLProtocolTestCase {
+    func testSuccessfulTerminalStateRequiresAnObservedActiveRequest() {
+        // WHY: A manager is initially idle with no error, which has the same fields as a successful
+        // terminal state. Accepting it would let a test pass even when its request never began.
+        XCTAssertFalse(
+            matchesExpectedTerminalState(
+                error: nil,
+                isStreaming: false,
+                expectedError: nil,
+                observedActiveRequest: false
+            )
+        )
+        XCTAssertTrue(
+            matchesExpectedTerminalState(
+                error: nil,
+                isStreaming: false,
+                expectedError: nil,
+                observedActiveRequest: true
+            )
+        )
+    }
+
     func testMockSessionCarriesItsCreationIdentifier() {
         let expectedIdentifier = MockURLProtocol.currentTestIdentifier()
         let completion = expectation(description: "Mock-routed request completed")

@@ -13,7 +13,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly seven active implementation tasks: Tasks 19–25.
+- There are exactly six active implementation tasks: Tasks 19–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -96,7 +96,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| Terminal-state test observation can miss an already-published successful completion | Blocking | 25 |
 
 ---
 
@@ -104,53 +103,6 @@ inside a later task.
 
 This phase repairs two ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code.
-
-### 25. Make successful terminal-state assertions race-free
-
-**Classification:** Blocking — Phase 1 mandatory-gate test synchronization failure
-
-**Depends on:** Nothing
-
-**Purpose.** The Phase 1 review observed `./check-coverage.sh` fail 1 of 118 tests, and repeated
-`TTSNetworkManagerFailureTests.testNextRequestClearsPreviousFailureAndSuccessfulAudioLeavesItCleared`
-failed 4 of 10 times. Its terminal-state observation begins after an audio-delivery expectation;
-the manager can already have published successful completion, causing the helper to reject the
-already-terminal state because it never observed the request as active.
-
-**Primary paths.**
-
-- `Tests/TTSNetworkManagerFailureTests.swift`
-- `Tests/TestNetworkSupport.swift`
-- `Tests/MockURLProtocol.swift`
-- `README.md` only if the test synchronization guidance changes
-
-**Required change.**
-
-1. Establish a deterministic completion observation before the successful request can publish its
-   terminal state, or provide an explicit completion boundary that remains valid when delivery and
-   completion race.
-2. Keep terminal-state assertions event-driven; do not add elapsed-time polling or production
-   synchronization hooks solely for tests.
-3. Preserve the current helper's ability to distinguish a successful terminal state from an idle
-   manager that never started a request.
-4. Preserve mock-session quiescence, settings restoration, and no-late-work teardown guarantees.
-
-**Non-goals and invariants.**
-
-- Do not change speech request, audio delivery, generation, or UI behavior.
-- Do not weaken failure-state assertions or accept a terminal state from a different request.
-- Do not suppress the test, raise its timeout, or add a retry-to-pass loop.
-
-**Validation and falsification.**
-
-- Run the affected test repeatedly in one hosted test invocation and prove every run passes.
-- Run `./check-coverage.sh` repeatedly enough to exercise ordering without a failure.
-- Mutation-test delaying terminal observation until after successful completion and prove the test
-  fails; mutation-test accepting an idle manager as success and prove an assertion rejects it.
-
-**Done when.** Successful terminal-state assertions cannot miss a completion that follows valid
-audio delivery, and the full mandatory gate is deterministic without loosening its ownership or
-lifecycle checks.
 
 ### Phase 1 mandatory gap review
 
