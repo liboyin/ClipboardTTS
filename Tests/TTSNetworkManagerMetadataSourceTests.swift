@@ -3,11 +3,6 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
-    override func setUp() {
-        super.setUp()
-        isolateAppSettingsDefaults()
-    }
-
     func testMismatchedMetadataSourceCannotStartRequest() {
         // WHY: An old endpoint or provider identity must not mint a current token after a switch,
         // otherwise it can publish metadata that belongs to no selected source.

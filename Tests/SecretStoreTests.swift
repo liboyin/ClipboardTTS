@@ -21,7 +21,6 @@ final class SecretStoreTests: MockURLProtocolTestCase {
     func testMigrationPreservesLegacyPreferenceAndMapsAStoreFailureToActionableGuidance() throws {
         // WHY: Migration is allowed to delete a plaintext key only after Keychain confirms its
         // write. Retaining it on failure lets the user recover instead of losing their only key.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         let legacySecret = "test-legacy-openai-key"
         UserDefaults.standard.set(legacySecret, forKey: SettingsKeys.legacyOpenAIAPIKey)
@@ -41,7 +40,6 @@ final class SecretStoreTests: MockURLProtocolTestCase {
     func testStartupPublishesMigrationFailureWhilePreservingLegacySecret() {
         // WHY: A retained legacy key is only recoverable if startup exposes a safe, actionable
         // warning. Otherwise migration can fail silently and leave plaintext credentials behind.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         let legacySecret = "test-legacy-custom-key"
         UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
@@ -61,7 +59,6 @@ final class SecretStoreTests: MockURLProtocolTestCase {
     func testMigrationMovesLegacySecretOnceAndDoesNotRewriteOnTheNextLaunch() throws {
         // WHY: A completed migration must remove the plaintext source, so a later launch neither
         // exposes it through UserDefaults nor overwrites the Keychain value again.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         let legacySecret = "test-legacy-gemini-key"
         UserDefaults.standard.set(legacySecret, forKey: SettingsKeys.legacyGeminiAPIKey)
@@ -79,7 +76,6 @@ final class SecretStoreTests: MockURLProtocolTestCase {
     func testMigrationPreservesAnExistingKeychainSecretOverStalePlaintext() throws {
         // WHY: A user can save a replacement after a failed migration. A later launch must remove
         // the stale plaintext value without overwriting the newer Keychain credential.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         try store.saveSecret("test-new-keychain-key", for: .openAI)
         UserDefaults.standard.set("test-stale-legacy-key", forKey: SettingsKeys.legacyOpenAIAPIKey)

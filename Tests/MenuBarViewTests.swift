@@ -4,11 +4,6 @@ import SwiftUI
 @testable import ClipboardTTSApp
 
 final class MenuBarViewTests: MockURLProtocolTestCase {
-    override func setUp() {
-        super.setUp()
-        isolateAppSettingsDefaults()
-    }
-
     func testMenuLoadsProviderVoiceMetadataBeforeSettingsAppears() {
         // WHY: The menu is the primary interaction surface, so its voice picker cannot depend on
         // the Settings window having been opened to populate the provider-authoritative choices.

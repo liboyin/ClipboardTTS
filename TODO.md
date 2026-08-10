@@ -13,7 +13,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly eight active implementation tasks: Tasks 17–24.
+- There are exactly seven active implementation tasks: Tasks 18–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -90,7 +90,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Network tests can migrate the developer's legacy keys into an ephemeral store | Blocking | 17 |
 | Audio accepted before a re-entrant stop can be delivered after the stop | Blocking | 18 |
 | Custom credentials can be attached to an arbitrary plain-HTTP endpoint | Blocking | 19 |
 | The deferred clipboard action can replace a stream started during its delay | Blocking | 20 |
@@ -105,61 +104,6 @@ inside a later task.
 
 This phase repairs two ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code.
-
-### 17. Make network-test settings isolation automatic
-
-**Classification:** Blocking — test safety and an `AGENTS.md` MUST violation
-
-**Depends on:** Nothing
-
-**Purpose.** Every test-created `TTSNetworkManager` runs `APIKeyStartupState.load`, which invokes
-legacy migration against `UserDefaults.standard`. `TestNetworkFactory` injects an in-memory secret
-store but `MockURLProtocolTestCase.setUp()` does not isolate app defaults. A test that omits an
-individual `isolateAppSettingsDefaults()` call can therefore read developer configuration and
-remove a legacy plaintext key after copying it only into the test's ephemeral store.
-
-**Primary paths.**
-
-- `Tests/TestNetworkSupport.swift`
-- `Tests/UserDefaultsSnapshot.swift`
-- every `MockURLProtocolTestCase` subclass that constructs a manager
-- `Sources/SecretStore.swift`
-- `Sources/Managers/TTSNetworkManager.swift`
-- `README.md`
-
-**Required change.**
-
-1. Establish settings isolation centrally before any `MockURLProtocolTestCase` test method can
-   construct a manager. Prefer the base test lifecycle unless repository evidence shows a safer,
-   equally comprehensive boundary.
-2. Preserve exact developer values for every key in `SettingsKeys.allUserDefaultsKeys`, including
-   values that were absent before the test.
-3. Restore the snapshot only after all mock sessions, protocol loads, queued callbacks, and other
-   test-owned asynchronous work are quiescent. No late manager construction may occur after restore.
-4. Keep local accounting for unexpected post-teardown requests and settings work.
-5. Remove redundant per-test isolation only when doing so is mechanical and does not weaken a
-   non-network test's explicit boundary.
-6. Update README so it describes the automatic network-test guarantee accurately.
-
-**Non-goals and invariants.**
-
-- Do not change production migration behavior or weaken its lossless-write requirement.
-- Do not replace the in-memory secret store with the real Keychain.
-- Do not make tests depend on the developer having, or not having, a legacy key.
-- Preserve `MockURLProtocol` serialization, invalidation, quiescence, and late-work accounting.
-
-**Validation and falsification.**
-
-- Prove that a manager initialized during a mock-network test cannot permanently change a planted
-  legacy key or any other declared setting.
-- Cover originally present and originally absent values and verify restoration after mock-session
-  teardown, not merely at the end of the test body.
-- Prove that every test factory path uses the centralized lifecycle.
-- Mutation-test removal or reordering of the isolation step so the focused test fails.
-- Search all tests for manager construction paths and explain any path outside the protected base.
-
-**Done when.** A network test cannot read, migrate, overwrite, or delete the developer's app
-settings, even when the test itself never calls `isolateAppSettingsDefaults()`.
 
 ### 18. Revoke queued audio delivery after stop or replacement
 
@@ -236,7 +180,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Task 17
+**Depends on:** Phase 1 mandatory gap review
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -359,7 +303,7 @@ adds the bounded recovery Google recommends for the model's documented transient
 
 **Classification:** Blocking — incomplete provider-authoritative menu metadata
 
-**Depends on:** Task 17
+**Depends on:** Phase 2 mandatory gap review
 
 **Purpose.** The app currently publishes only `Aoede`, `Charon`, `Fenrir`, `Kore`, and `Puck` for
 Gemini. At review time Google's official Gemini TTS guide documented 30 supported voices. Task 13
@@ -489,7 +433,7 @@ user action promised by its error message.
 
 **Classification:** Non-blocking — test validity and maintainability
 
-**Depends on:** Tasks 17 and 21
+**Depends on:** Task 21
 
 **Purpose.** Several Settings tests construct `SettingsView` as a value and call methods that read
 its `@StateObject`. SwiftUI reports that the object is not installed on a view and creates a new
@@ -543,7 +487,7 @@ hosted production view.
 
 **Classification:** Non-blocking — recovery UX
 
-**Depends on:** Tasks 17 and 23
+**Depends on:** Task 23
 
 **Purpose.** Failed migration preserves the plaintext value and tells the user to check Keychain
 access and try again, but migration currently reruns only when a new `TTSNetworkManager` is created.

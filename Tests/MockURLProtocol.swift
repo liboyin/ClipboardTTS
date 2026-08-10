@@ -16,6 +16,7 @@ class MockURLProtocol: URLProtocol {
         var expectedUnhandledRequestCount = 0
         var unhandledRequestCount = 0
         var activeLoadCount = 0
+        var activeManagerConstructionCount = 0
         var isClosing = false
         var sessionRegistrations: [SessionRegistration] = []
     }
@@ -112,6 +113,32 @@ class MockURLProtocol: URLProtocol {
         stateCondition.broadcast()
     }
 
+    /// Atomically claims the active scope for a manager initializer before it can read settings.
+    static func beginManagerConstructionForCurrentTest() -> String {
+        stateCondition.lock()
+        defer { stateCondition.unlock() }
+
+        guard let testIdentifier = activeTestIdentifier,
+              var state = testStates[testIdentifier],
+              !state.isClosing else {
+            preconditionFailure("MockURLProtocol test scope has not been started.")
+        }
+        state.activeManagerConstructionCount += 1
+        testStates[testIdentifier] = state
+        return testIdentifier
+    }
+
+    /// Marks a factory-created manager initializer as complete after it has registered its session.
+    static func managerConstructionDidFinish(forTestIdentifier testIdentifier: String) {
+        stateCondition.lock()
+        defer { stateCondition.unlock() }
+
+        guard var state = testStates[testIdentifier] else { return }
+        state.activeManagerConstructionCount -= 1
+        testStates[testIdentifier] = state
+        stateCondition.broadcast()
+    }
+
     /// Invalidates a test's sessions, waits for its protocol loads to finish, and closes the scope.
     static func endTest(identifier: String, timeout: TimeInterval = 2.0) -> TestEndResult {
         stateCondition.lock()
@@ -130,7 +157,9 @@ class MockURLProtocol: URLProtocol {
         stateCondition.lock()
         let deadline = Date().addingTimeInterval(timeout)
         while let currentState = testStates[identifier],
-              currentState.activeLoadCount > 0 || !currentState.sessionRegistrations.isEmpty,
+              currentState.activeLoadCount > 0 ||
+              currentState.activeManagerConstructionCount > 0 ||
+              !currentState.sessionRegistrations.isEmpty,
               stateCondition.wait(until: deadline) {
         }
 
@@ -138,7 +167,9 @@ class MockURLProtocol: URLProtocol {
             stateCondition.unlock()
             return TestEndResult(expectedUnhandledRequestCount: 0, observedUnhandledRequestCount: 0, didQuiesce: true)
         }
-        let didQuiesce = completedState.activeLoadCount == 0 && completedState.sessionRegistrations.isEmpty
+        let didQuiesce = completedState.activeLoadCount == 0 &&
+            completedState.activeManagerConstructionCount == 0 &&
+            completedState.sessionRegistrations.isEmpty
         if didQuiesce {
             testStates.removeValue(forKey: identifier)
         }
@@ -151,6 +182,22 @@ class MockURLProtocol: URLProtocol {
             observedUnhandledRequestCount: completedState.unhandledRequestCount,
             didQuiesce: didQuiesce
         )
+    }
+
+    /// Waits for a closing test scope to drain before removing its shared mock state.
+    static func finishClosingTestWhenQuiescent(identifier: String) {
+        stateCondition.lock()
+        while let state = testStates[identifier],
+              state.activeLoadCount > 0 ||
+              state.activeManagerConstructionCount > 0 ||
+              !state.sessionRegistrations.isEmpty {
+            stateCondition.wait()
+        }
+        testStates.removeValue(forKey: identifier)
+        if activeTestIdentifier == identifier {
+            activeTestIdentifier = nil
+        }
+        stateCondition.unlock()
     }
 
     override class func canInit(with request: URLRequest) -> Bool {

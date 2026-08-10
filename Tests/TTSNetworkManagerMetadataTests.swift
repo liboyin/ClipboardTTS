@@ -2,11 +2,6 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
-    override func setUp() {
-        super.setUp()
-        isolateAppSettingsDefaults()
-    }
-
     func testDelayedOpenAIModelsCannotReplaceGeminiModels() {
         // WHY: Cancellation races with URLSession completion, so a delayed OpenAI response must not
         // overwrite the Gemini models that the user selected after starting the original request.

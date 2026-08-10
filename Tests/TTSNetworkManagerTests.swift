@@ -59,7 +59,6 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // WHY: Custom servers follow the OpenAI-compatible payload contract, so accepting blank
         // model or voice values would send a request the server cannot interpret. The validation
         // must fail through the menu's normal error state before a request reaches the endpoint.
-        isolateAppSettingsDefaults()
         let manager = TestNetworkFactory.makeManager()
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("Invalid Custom configuration must not contact the endpoint")
@@ -94,7 +93,6 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // WHY: Custom model and voice are required request fields, so a cold launch must restore
         // them before Settings is opened. Falling back to empty values would make clipboard and
         // Services speech fail despite the user having already configured the provider.
-        isolateAppSettingsDefaults()
         UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
         UserDefaults.standard.set("https://custom.api/v1/audio/speech", forKey: SettingsKeys.apiBaseURL)
         UserDefaults.standard.set("persisted-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
@@ -293,8 +291,6 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // same keys so user-chosen settings survive an app restart even before the settings
         // window is opened. A regression here would silently fall back to hardcoded defaults
         // (tts-1/alloy) on every cold start until the user re-opens settings.
-        isolateAppSettingsDefaults()
-
         // OpenAI: persisted model/voice/key should drive the outgoing request
         UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
         UserDefaults.standard.set("persisted-openai-model", forKey: SettingsKeys.openAIModel)

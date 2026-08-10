@@ -179,7 +179,6 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
     func testOpenAICompatibleResponsesWithoutACompletePCMFramePublishProviderAudioError() {
         // WHY: OpenAI and Custom both request 16-bit PCM, so an empty response or one byte must
         // report the same failure instead of silently completing without playback or guidance.
-        isolateAppSettingsDefaults()
         let providers = [
             (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI"),
             (baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom")

@@ -2,11 +2,6 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
-    override func setUp() {
-        super.setUp()
-        isolateAppSettingsDefaults()
-    }
-
     func testFetchAvailableModels() {
         let manager = TestNetworkFactory.makeManager()
 

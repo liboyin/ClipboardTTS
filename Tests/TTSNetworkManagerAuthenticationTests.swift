@@ -5,7 +5,6 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
     func testUnknownPersistedProviderUsesOpenAIConfigurationBeforeSettingsOpen() throws {
         // WHY: Services can start speech before Settings is constructed. A corrupted provider value
         // must not combine one provider's Keychain key with another provider's persisted endpoint.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         try store.saveSecret("test-openai-api-key", for: .openAI)
         try store.saveSecret("test-custom-api-key", for: .custom)
@@ -30,7 +29,6 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
     func testSettingsNormalizesUnknownProviderBeforeTestingVoice() throws {
         // WHY: Opening Settings must preserve the same safe provider normalization as startup;
         // otherwise Test Voice could disclose a provider key to a corrupted Custom endpoint.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         try store.saveSecret("test-openai-api-key", for: .openAI)
         try store.saveSecret("test-custom-api-key", for: .custom)
@@ -57,7 +55,6 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
     func testFailedSettingsSecretEditRetainsItsActionableError() throws {
         // WHY: A failed Keychain write must remain visible. Retrying an automatic restoration used
         // to erase the warning even though the user's new key was never saved.
-        isolateAppSettingsDefaults()
         let store = InMemorySecretStore()
         try store.saveSecret("test-original-custom-key", for: .custom)
         let secretState = SettingsSecretState(secretStore: store)
@@ -75,7 +72,6 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
     func testProviderCredentialsUseOnlyTheirDocumentedHeaders() {
         // WHY: Keys in a URL can escape through proxies and diagnostics. Each provider must send
         // its token only in its authentication header, while app-owned state remains secret-free.
-        isolateAppSettingsDefaults()
         let providers = [
             (name: "OpenAI", baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI", header: "Authorization", value: "Bearer test-openai-api-key"),
             (name: "Gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta", selectedProvider: "Gemini", header: "x-goog-api-key", value: "test-gemini-api-key"),

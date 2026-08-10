@@ -7,7 +7,6 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // WHY: Services can arrive before Settings has ever appeared. A corrupt persisted Custom
         // rate must therefore block this normal speech path instead of decoding streamed PCM using
         // a silent 24-kHz fallback.
-        isolateAppSettingsDefaults()
         let audioPlayer = AudioPlayerManager(sampleRate: 48_001)
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
