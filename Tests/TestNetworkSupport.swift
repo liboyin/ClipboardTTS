@@ -75,6 +75,7 @@ enum TestNetworkFactory {
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
             secretStore: secretStore,
+            defaults: .standard,
             requestBodyEncoder: requestBodyEncoder,
             audioDeliveryQueue: audioDeliveryQueue
         )

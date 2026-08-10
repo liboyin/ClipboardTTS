@@ -198,8 +198,10 @@ struct APIKeyStartupState {
     let errorMessage: String?
 
     /// Migrates a legacy key before reading the selected provider's current saved key.
-    static func load(selectedProvider: String, secretStore: SecretStoring) -> APIKeyStartupState {
-        let migrationFailures = APIKeyMigrationService(secretStore: secretStore).migrateLegacyAPIKeys()
+    static func load(selectedProvider: String,
+                     secretStore: SecretStoring,
+                     defaults: UserDefaults = .standard) -> APIKeyStartupState {
+        let migrationFailures = APIKeyMigrationService(secretStore: secretStore).migrateLegacyAPIKeys(defaults: defaults)
         let provider = APIKeyProvider(selectedProvider: selectedProvider)
         do {
             return APIKeyStartupState(

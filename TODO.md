@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly ten active implementation tasks: Tasks 19–24 and 26–29.
+- There are exactly nine active implementation tasks: Tasks 19–24 and 27–29.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,7 +95,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| The hosted XCTest app reads developer configuration before test isolation begins | Blocking | 26 |
 | Mock-test teardown restores settings before queued audio callbacks are drained | Blocking | 27 |
 | A concurrent stop can race between queued-audio authorization and callback invocation | Blocking | 28 |
 | Failure terminal-state assertions can accept an already-published error from a previous request | Blocking | 29 |
@@ -105,57 +104,8 @@ inside a later task.
 ## Phase 1 — Restore state isolation and cancellation truth
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
-configuration, and a stopped request must not retain authority to call client code. Its mandatory
-review added Tasks 26–29; complete them and rerun the Phase 1 review before Phase 2.
-
-### 26. Isolate hosted-app startup from developer configuration
-
-**Classification:** Blocking — test-host credential and settings exposure
-
-**Depends on:** Nothing
-
-**Purpose.** The app's `@main` initializer runs before XCTest `setUp()`. It currently reads real
-`UserDefaults`, constructs `KeychainSecretStore`, and constructs `TTSNetworkManager`; therefore a
-hosted test can read or migrate developer configuration before `MockURLProtocolTestCase` isolates
-it. A Phase 1 review observed `SecItemCopyMatching` from that startup path block the coverage gate.
-
-**Primary paths.**
-
-- `Sources/ClipboardTTSApp.swift`
-- `Sources/SecretStore.swift`
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Tests/TestNetworkSupport.swift`
-- `Tests/UserDefaultsSnapshot.swift`
-- `README.md`
-
-**Required change.**
-
-1. Make the hosted XCTest app construct only test-owned startup dependencies before any test case
-   can run; this includes secrets, persisted settings, and every manager initializer they reach.
-2. Preserve production startup's current provider, Keychain, migration, Services, and audio
-   behavior outside the test host.
-3. Establish test isolation before any startup read or write, rather than attempting to restore a
-   value after an app-host initializer has already observed it.
-4. Add a hosted regression that seeds conspicuous developer defaults and credentials through safe
-   fakes, then proves app startup neither reads, migrates, nor deletes them.
-5. Document the owned hosted-test startup boundary and any supported dependency-injection seam.
-
-**Non-goals and invariants.**
-
-- Do not bypass Keychain, migration, or provider normalization in production.
-- Do not add a test-only production setting or allow tests to use the developer's Keychain.
-- Do not rely on a Keychain-access prompt, timeout, or process environment cleanup as isolation.
-
-**Validation and falsification.**
-
-- Run the complete hosted suite without a developer credential or Keychain prompt.
-- Mutate the test-host startup path to use `KeychainSecretStore` or real defaults and prove the
-  startup-isolation regression fails.
-- Verify production initialization still reads its persisted provider and key through existing
-  injected tests.
-
-**Done when.** No hosted test can read, migrate, or block on developer configuration before its
-test-owned isolation lifecycle begins.
+configuration, and a stopped request must not retain authority to call client code. Complete Tasks
+27–29 and rerun the Phase 1 review before Phase 2.
 
 ### 27. Drain mock-owned audio delivery before restoring settings
 
@@ -314,7 +264,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 26–29
+**Depends on:** Phase 1 mandatory gap review after Tasks 27–29
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -371,7 +321,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 26–29
+**Depends on:** Phase 1 mandatory gap review after Tasks 27–29
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another

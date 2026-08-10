@@ -73,7 +73,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// The selected source and credentials needed to refresh provider metadata.
-    struct MetadataSettingsSnapshot {
+    struct MetadataSettingsSnapshot: Equatable {
         let baseURL: String
         let apiKey: String
         let model: String
@@ -100,28 +100,31 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
          secretStore: SecretStoring = KeychainSecretStore(),
+         defaults: UserDefaults = .standard,
          requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
          audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery")) {
-        let persistedProvider = UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+        let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         self.selectedMetadataProvider = provider.settingsValue
-        let secretStartupState = APIKeyStartupState.load(selectedProvider: provider.settingsValue, secretStore: secretStore)
+        let secretStartupState = APIKeyStartupState.load(
+            selectedProvider: provider.settingsValue, secretStore: secretStore, defaults: defaults
+        )
         switch provider {
         case .openAI:
             self.baseURL = "https://api.openai.com/v1/audio/speech"
             self.apiKey = secretStartupState.apiKey
-            self.model = UserDefaults.standard.string(forKey: SettingsKeys.openAIModel) ?? "tts-1"
-            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice) ?? "alloy"
+            self.model = defaults.string(forKey: SettingsKeys.openAIModel) ?? "tts-1"
+            self.voice = defaults.string(forKey: SettingsKeys.openAIVoice) ?? "alloy"
         case .gemini:
             self.baseURL = "https://generativelanguage.googleapis.com/v1beta"
             self.apiKey = secretStartupState.apiKey
-            self.model = UserDefaults.standard.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview"
-            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede"
+            self.model = defaults.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview"
+            self.voice = defaults.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede"
         case .custom:
-            self.baseURL = UserDefaults.standard.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
+            self.baseURL = defaults.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
             self.apiKey = secretStartupState.apiKey
-            self.model = UserDefaults.standard.string(forKey: SettingsKeys.customModel) ?? ""
-            self.voice = UserDefaults.standard.string(forKey: SettingsKeys.customVoice) ?? ""
+            self.model = defaults.string(forKey: SettingsKeys.customModel) ?? ""
+            self.voice = defaults.string(forKey: SettingsKeys.customVoice) ?? ""
         }
         self.requestBodyEncoder = requestBodyEncoder
         self.sessionInvalidated = sessionInvalidated
@@ -130,9 +133,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         super.init()
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
-        if let errorMessage = secretStartupState.errorMessage {
-            self.lastError = errorMessage
-        }
+        if let errorMessage = secretStartupState.errorMessage { self.lastError = errorMessage }
     }
 
     /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.

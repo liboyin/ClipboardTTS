@@ -1,6 +1,72 @@
 import SwiftUI
 import AppKit
 
+/// Identifies XCTest's hosted app process without importing XCTest into the production target.
+enum HostedTestProcess {
+    static var isActive: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+            || NSClassFromString("XCTest.XCTestCase") != nil
+    }
+}
+
+/// The dependencies that must be created before the app scene owns its manager instances.
+///
+/// The hosted XCTest app is initialized before individual test setup. It therefore receives a
+/// fresh defaults suite and in-memory secrets so no startup initializer can access, migrate, or
+/// delete a developer's configuration before the test's own isolation lifecycle starts.
+struct AppStartupDependencies {
+    let defaults: UserDefaults
+    let secretStore: SecretStoring
+    let audioPlayer: AudioPlayerManager
+    let textExtraction: TextExtractionManager
+    let networkManager: TTSNetworkManager
+    let servicesCoordinator: ServicesCoordinator
+
+    /// Builds production dependencies or an entirely test-owned hosted-test dependency graph.
+    static func make(
+        isHostedTest: Bool = HostedTestProcess.isActive,
+        productionDefaults: () -> UserDefaults = { .standard },
+        productionSecretStore: () -> SecretStoring = { KeychainSecretStore() },
+        testDefaults: () -> UserDefaults = { UserDefaults(suiteName: "com.clipboardtts.hosted-tests.\(UUID().uuidString)")! },
+        testSecretStore: () -> SecretStoring = { InMemorySecretStore() }
+    ) -> AppStartupDependencies {
+        let defaults: UserDefaults
+        let secretStore: SecretStoring
+        if isHostedTest {
+            defaults = testDefaults()
+            secretStore = testSecretStore()
+        } else {
+            defaults = productionDefaults()
+            secretStore = productionSecretStore()
+        }
+
+        let persistedProvider = APIKeyProvider(
+            selectedProvider: defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+        )
+        let persistedCustomSampleRate: Double
+        if let storedSampleRate = defaults.object(forKey: SettingsKeys.customSampleRate) {
+            persistedCustomSampleRate = storedSampleRate as? Double ?? .nan
+        } else {
+            persistedCustomSampleRate = AudioPlayerManager.defaultSampleRate
+        }
+        let initialSampleRate = persistedProvider == .custom
+            ? persistedCustomSampleRate
+            : AudioPlayerManager.defaultSampleRate
+        let audioPlayer = AudioPlayerManager(sampleRate: initialSampleRate)
+        let networkManager = TTSNetworkManager(secretStore: secretStore, defaults: defaults)
+
+        return AppStartupDependencies(
+            defaults: defaults,
+            secretStore: secretStore,
+            audioPlayer: audioPlayer,
+            textExtraction: TextExtractionManager(),
+            networkManager: networkManager,
+            servicesCoordinator: ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager)
+        )
+    }
+}
+
 @main
 struct ClipboardTTSApp: App {
     @StateObject private var audioPlayer: AudioPlayerManager
@@ -17,25 +83,12 @@ struct ClipboardTTSApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        let secretStore = KeychainSecretStore()
-        let persistedProvider = APIKeyProvider(selectedProvider: UserDefaults.standard.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI")
-        let persistedCustomSampleRate: Double
-        if let storedSampleRate = UserDefaults.standard.object(forKey: SettingsKeys.customSampleRate) {
-            persistedCustomSampleRate = storedSampleRate as? Double ?? .nan
-        } else {
-            persistedCustomSampleRate = AudioPlayerManager.defaultSampleRate
-        }
-        let initialSampleRate = persistedProvider == .custom
-            ? persistedCustomSampleRate
-            : AudioPlayerManager.defaultSampleRate
-        let audioPlayer = AudioPlayerManager(sampleRate: initialSampleRate)
-        let textExtraction = TextExtractionManager()
-        let networkManager = TTSNetworkManager(secretStore: secretStore)
-        self.secretStore = secretStore
-        _audioPlayer = StateObject(wrappedValue: audioPlayer)
-        _textExtraction = StateObject(wrappedValue: textExtraction)
-        _networkManager = StateObject(wrappedValue: networkManager)
-        _servicesCoordinator = StateObject(wrappedValue: ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager))
+        let dependencies = AppStartupDependencies.make()
+        self.secretStore = dependencies.secretStore
+        _audioPlayer = StateObject(wrappedValue: dependencies.audioPlayer)
+        _textExtraction = StateObject(wrappedValue: dependencies.textExtraction)
+        _networkManager = StateObject(wrappedValue: dependencies.networkManager)
+        _servicesCoordinator = StateObject(wrappedValue: dependencies.servicesCoordinator)
     }
 
     var body: some Scene {
