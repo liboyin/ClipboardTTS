@@ -70,7 +70,7 @@ enum TestNetworkFactory {
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
-        return TTSNetworkManager(
+        let manager = TTSNetworkManager(
             configuration: makeConfiguration(testIdentifier: testIdentifier),
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
@@ -79,6 +79,32 @@ enum TestNetworkFactory {
             requestBodyEncoder: requestBodyEncoder,
             audioDeliveryQueue: audioDeliveryQueue
         )
+        MockURLProtocol.register(
+            audioDeliveryQueue: audioDeliveryQueue,
+            cancelPendingDelivery: {
+                revokePendingDelivery(for: manager)
+            },
+            forTestIdentifier: testIdentifier
+        )
+        return manager
+    }
+
+    /// Revokes queued callbacks while preserving a terminal error during main-thread teardown.
+    static func revokePendingDelivery(for manager: TTSNetworkManager) {
+        guard Thread.isMainThread else {
+            // `stopStreaming()` advances the state-queue generation synchronously. Timeout
+            // recovery must not wait for a main thread that is waiting for that recovery.
+            manager.stopStreaming()
+            return
+        }
+        let cancel: @Sendable () -> Void = {
+            let terminalError = manager.lastError
+            manager.stopStreaming()
+            if let terminalError {
+                manager.publishFailure(terminalError)
+            }
+        }
+        cancel()
     }
 
     static func makeSession() -> URLSession {
@@ -120,14 +146,14 @@ private final class TestSessionDelegate: NSObject, URLSessionDelegate {
 class MockURLProtocolTestCase: XCTestCase {
     private static let testExecutionGate = DispatchSemaphore(value: 1)
     private static let testExecutionGateDepthKey = "com.clipboardtts.tests.mockurlprotocol.gatedepth"
-    fileprivate static let testExecutionLock = NSRecursiveLock()
+    static let testExecutionLock = NSRecursiveLock()
     private var testIdentifier: String?
     private var settingsSnapshot: UserDefaultsSnapshot?
     private var acquiredTestExecutionGate = false
     private var teardownRecovery: DispatchSemaphore?
     private var postQuiescenceAssertions: [() -> Void] = []
 
-    /// Queues an assertion that runs after the mock scope has invalidated sessions and drained loads.
+    /// Queues an assertion that runs after the mock scope has revoked and drained owned delivery work.
     func assertAfterMockQuiescence(_ assertion: @escaping () -> Void) {
         postQuiescenceAssertions.append(assertion)
     }
@@ -163,7 +189,7 @@ class MockURLProtocolTestCase: XCTestCase {
         let unhandledRequests = MockURLProtocol.endTest(identifier: testIdentifier)
         XCTAssertTrue(
             unhandledRequests.didQuiesce,
-            "Mock-routed sessions or protocol loads did not finish before the test scope ended."
+            "Mock-routed sessions, protocol loads, manager construction, or audio delivery did not finish before the test scope ended."
         )
         XCTAssertEqual(
             unhandledRequests.observedUnhandledRequestCount,
@@ -201,7 +227,7 @@ class MockURLProtocolTestCase: XCTestCase {
     }
 
     /// Enters the process-wide mock-test gate, supporting the nested lifecycle test scope.
-    fileprivate static func enterTestExecutionGate() -> Bool {
+    static func enterTestExecutionGate() -> Bool {
         let threadDictionary = Thread.current.threadDictionary
         let depth = threadDictionary[testExecutionGateDepthKey] as? Int ?? 0
         if depth == 0 {
@@ -212,7 +238,7 @@ class MockURLProtocolTestCase: XCTestCase {
     }
 
     /// Leaves one nested mock-test gate scope, releasing the next test at the outermost boundary.
-    fileprivate static func leaveTestExecutionGate() {
+    static func leaveTestExecutionGate() {
         let threadDictionary = Thread.current.threadDictionary
         let depth = threadDictionary[testExecutionGateDepthKey] as? Int ?? 0
         precondition(depth > 0, "MockURLProtocol test gate was released without a matching acquisition.")
@@ -225,7 +251,7 @@ class MockURLProtocolTestCase: XCTestCase {
     }
 
     /// Removes the current thread's gate ownership while an asynchronous timeout recovery retains it.
-    fileprivate static func abandonTestExecutionGateUntilRecovery() {
+    static func abandonTestExecutionGateUntilRecovery() {
         let threadDictionary = Thread.current.threadDictionary
         let depth = threadDictionary[testExecutionGateDepthKey] as? Int ?? 0
         precondition(depth == 1, "Only an outermost mock-test scope can defer its gate release.")
@@ -314,6 +340,34 @@ final class MockURLProtocolConstructionTests: XCTestCase {
         XCTAssertFalse(endResult.didQuiesce, "An initializing manager must keep settings restoration blocked.")
         MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
         MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+    }
+
+    func testClosingScopeRevokesAudioOwnerRegisteredDuringManagerConstruction() {
+        // WHY: A manager claims construction before it registers its queue. Closing in that
+        // interval must still revoke the newly registered owner before releasing the scope.
+        MockURLProtocolTestCase.testExecutionLock.lock()
+        let acquiredTestExecutionGate = MockURLProtocolTestCase.enterTestExecutionGate()
+        defer {
+            if acquiredTestExecutionGate {
+                MockURLProtocolTestCase.leaveTestExecutionGate()
+            }
+            MockURLProtocolTestCase.testExecutionLock.unlock()
+        }
+
+        let testIdentifier = MockURLProtocol.beginTest()
+        _ = MockURLProtocol.beginManagerConstructionForCurrentTest()
+        let endResult = MockURLProtocol.endTest(identifier: testIdentifier, timeout: 0)
+        XCTAssertFalse(endResult.didQuiesce)
+
+        let cancellation = expectation(description: "Late-registered delivery owner is revoked")
+        MockURLProtocol.register(
+            audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.late-delivery-owner"),
+            cancelPendingDelivery: { cancellation.fulfill() },
+            forTestIdentifier: testIdentifier
+        )
+        MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
+        MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+        wait(for: [cancellation], timeout: 1.0)
     }
 }
 

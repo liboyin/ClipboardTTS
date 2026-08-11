@@ -17,6 +17,10 @@ class MockURLProtocol: URLProtocol {
         var unhandledRequestCount = 0
         var activeLoadCount = 0
         var activeManagerConstructionCount = 0
+        var audioDeliveryScopes: [AudioDeliveryScope] = []
+        var hasRevokedAudioDelivery = false
+        var pendingAudioDeliveryDrainCount = 0
+        var hasScheduledAudioDeliveryDrains = false
         var isClosing = false
         var sessionRegistrations: [SessionRegistration] = []
     }
@@ -24,6 +28,11 @@ class MockURLProtocol: URLProtocol {
     private struct SessionRegistration {
         let session: URLSession
         let delegate: AnyObject?
+    }
+
+    private struct AudioDeliveryScope {
+        let queue: DispatchQueue
+        let cancelPendingDelivery: () -> Void
     }
 
     private static let stateCondition = NSCondition()
@@ -139,7 +148,21 @@ class MockURLProtocol: URLProtocol {
         stateCondition.broadcast()
     }
 
-    /// Invalidates a test's sessions, waits for its protocol loads to finish, and closes the scope.
+    /// Registers a factory-created manager's delivery queue and cancellation boundary with its test scope.
+    static func register(audioDeliveryQueue: DispatchQueue,
+                         cancelPendingDelivery: @escaping () -> Void,
+                         forTestIdentifier testIdentifier: String) {
+        stateCondition.lock()
+        defer { stateCondition.unlock() }
+
+        guard var state = testStates[testIdentifier] else { return }
+        state.audioDeliveryScopes.append(
+            AudioDeliveryScope(queue: audioDeliveryQueue, cancelPendingDelivery: cancelPendingDelivery)
+        )
+        testStates[testIdentifier] = state
+    }
+
+    /// Invalidates a test's sessions, revokes pending delivery, drains owned queues, and closes the scope.
     static func endTest(identifier: String, timeout: TimeInterval = 2.0) -> TestEndResult {
         stateCondition.lock()
         guard var state = testStates[identifier] else {
@@ -156,20 +179,28 @@ class MockURLProtocol: URLProtocol {
 
         stateCondition.lock()
         let deadline = Date().addingTimeInterval(timeout)
-        while let currentState = testStates[identifier],
-              currentState.activeLoadCount > 0 ||
-              currentState.activeManagerConstructionCount > 0 ||
-              !currentState.sessionRegistrations.isEmpty,
-              stateCondition.wait(until: deadline) {
+        while Date() < deadline, let currentState = testStates[identifier] {
+            if hasUndrainedSessionWork(currentState) {
+                stateCondition.wait(until: deadline)
+            } else if !currentState.hasRevokedAudioDelivery {
+                revokeAudioDelivery(for: identifier, state: currentState)
+            } else if !currentState.hasScheduledAudioDeliveryDrains {
+                scheduleAudioDeliveryDrains(for: identifier, state: currentState)
+            } else if currentState.pendingAudioDeliveryDrainCount > 0 {
+                stateCondition.wait(until: deadline)
+            } else {
+                break
+            }
         }
 
         guard let completedState = testStates[identifier] else {
             stateCondition.unlock()
             return TestEndResult(expectedUnhandledRequestCount: 0, observedUnhandledRequestCount: 0, didQuiesce: true)
         }
-        let didQuiesce = completedState.activeLoadCount == 0 &&
-            completedState.activeManagerConstructionCount == 0 &&
-            completedState.sessionRegistrations.isEmpty
+        let didQuiesce = !hasUndrainedSessionWork(completedState) &&
+            completedState.hasRevokedAudioDelivery &&
+            completedState.hasScheduledAudioDeliveryDrains &&
+            completedState.pendingAudioDeliveryDrainCount == 0
         if didQuiesce {
             testStates.removeValue(forKey: identifier)
         }
@@ -187,10 +218,20 @@ class MockURLProtocol: URLProtocol {
     /// Waits for a closing test scope to drain before removing its shared mock state.
     static func finishClosingTestWhenQuiescent(identifier: String) {
         stateCondition.lock()
-        while let state = testStates[identifier],
-              state.activeLoadCount > 0 ||
-              state.activeManagerConstructionCount > 0 ||
-              !state.sessionRegistrations.isEmpty {
+        while let state = testStates[identifier] {
+            if hasUndrainedSessionWork(state) {
+                stateCondition.wait()
+                continue
+            }
+            if !state.hasRevokedAudioDelivery {
+                revokeAudioDelivery(for: identifier, state: state)
+                continue
+            }
+            if !state.hasScheduledAudioDeliveryDrains {
+                scheduleAudioDeliveryDrains(for: identifier, state: state)
+                continue
+            }
+            guard state.pendingAudioDeliveryDrainCount > 0 else { break }
             stateCondition.wait()
         }
         testStates.removeValue(forKey: identifier)
@@ -198,6 +239,53 @@ class MockURLProtocol: URLProtocol {
             activeTestIdentifier = nil
         }
         stateCondition.unlock()
+    }
+
+    /// Returns whether session, protocol-load, or manager-initialization work can still enqueue delivery.
+    private static func hasUndrainedSessionWork(_ state: TestState) -> Bool {
+        state.activeLoadCount > 0 ||
+            state.activeManagerConstructionCount > 0 ||
+            !state.sessionRegistrations.isEmpty
+    }
+
+    /// Revokes all manager-owned delivery generations after construction can no longer add an owner.
+    private static func revokeAudioDelivery(for testIdentifier: String, state: TestState) {
+        precondition(!state.hasRevokedAudioDelivery)
+        var updatedState = state
+        updatedState.hasRevokedAudioDelivery = true
+        let audioDeliveryScopes = state.audioDeliveryScopes
+        testStates[testIdentifier] = updatedState
+        stateCondition.unlock()
+        audioDeliveryScopes.forEach { $0.cancelPendingDelivery() }
+        stateCondition.lock()
+    }
+
+    /// Adds one ordered drain marker per owned delivery queue after cancellation has revoked its callbacks.
+    private static func scheduleAudioDeliveryDrains(for testIdentifier: String, state: TestState) {
+        precondition(!state.hasScheduledAudioDeliveryDrains)
+        var updatedState = state
+        updatedState.hasScheduledAudioDeliveryDrains = true
+        updatedState.pendingAudioDeliveryDrainCount = state.audioDeliveryScopes.count
+        let queues = state.audioDeliveryScopes.map(\.queue)
+        testStates[testIdentifier] = updatedState
+        stateCondition.unlock()
+        queues.forEach { queue in
+            queue.async {
+                audioDeliveryQueueDidDrain(forTestIdentifier: testIdentifier)
+            }
+        }
+        stateCondition.lock()
+    }
+
+    /// Accounts for one scope-owned delivery queue reaching its teardown drain marker.
+    private static func audioDeliveryQueueDidDrain(forTestIdentifier testIdentifier: String) {
+        stateCondition.lock()
+        defer { stateCondition.unlock() }
+
+        guard var state = testStates[testIdentifier] else { return }
+        state.pendingAudioDeliveryDrainCount -= 1
+        testStates[testIdentifier] = state
+        stateCondition.broadcast()
     }
 
     override class func canInit(with request: URLRequest) -> Bool {

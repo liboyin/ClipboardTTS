@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly nine active implementation tasks: Tasks 19–24 and 27–29.
+- There are exactly eight active implementation tasks: Tasks 19–24 and 28–29.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,7 +95,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| Mock-test teardown restores settings before queued audio callbacks are drained | Blocking | 27 |
 | A concurrent stop can race between queued-audio authorization and callback invocation | Blocking | 28 |
 | Failure terminal-state assertions can accept an already-published error from a previous request | Blocking | 29 |
 
@@ -105,53 +104,7 @@ inside a later task.
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code. Complete Tasks
-27–29 and rerun the Phase 1 review before Phase 2.
-
-### 27. Drain mock-owned audio delivery before restoring settings
-
-**Classification:** Blocking — asynchronous test lifecycle escape
-
-**Depends on:** Nothing
-
-**Purpose.** `MockURLProtocolTestCase` waits for registered sessions, protocol loads, and manager
-construction, but `TTSNetworkManager` delivers accepted PCM on a separate queue. The current scope
-can restore settings after session quiescence while a queued handler still exists, contradicting
-README's queued-work claim and allowing late test work to escape teardown.
-
-**Primary paths.**
-
-- `Tests/TestNetworkSupport.swift`
-- `Tests/MockURLProtocol.swift`
-- `Tests/TTSNetworkManagerConcurrencyTests.swift`
-- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
-- `README.md`
-
-**Required change.**
-
-1. Give every factory-created manager and its audio-delivery work explicit ownership by its mock
-   test scope.
-2. Before restoring settings or releasing the next mock test, cancel or invalidate pending owned
-   delivery as appropriate, drain the owned queues, and account for late work locally.
-3. Preserve the existing session/load/construction quiescence checks and timeout-recovery path.
-4. Add deterministic tests that block delivery, end the mock scope, and prove no handler can run
-   after settings restoration or in the next test's scope.
-5. Update README's mock-test lifecycle description to name the delivery-queue boundary accurately.
-
-**Non-goals and invariants.**
-
-- Do not change production delivery order or retain test-only synchronization in production.
-- Do not use sleeps, broad process cancellation, or an unbounded teardown wait.
-- Do not weaken the existing undeclared-request, settings-snapshot, or no-late-work checks.
-
-**Validation and falsification.**
-
-- Force a callback to queue before scope teardown and prove teardown cannot restore settings until
-  that work is revoked or drained.
-- Mutate teardown to omit delivery ownership and prove the regression observes escaped work.
-- Exercise normal final-event delivery to prove the lifecycle does not revoke valid in-test audio.
-
-**Done when.** Factory-created delivery work cannot outlive its mock test scope or run against
-restored developer settings.
+28–29 and rerun the Phase 1 review before Phase 2.
 
 ### 28. Make queued-audio callback authority atomic with stop
 
@@ -264,7 +217,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 27–29
+**Depends on:** Phase 1 mandatory gap review after Tasks 28–29
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -321,7 +274,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 27–29
+**Depends on:** Phase 1 mandatory gap review after Tasks 28–29
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
