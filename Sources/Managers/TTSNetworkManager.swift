@@ -308,20 +308,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         update()
     }
 
-    /// Builds a valid provider endpoint from a settings snapshot.
-    private func requestURL(for settings: RequestSettings) -> URL? {
-        let urlString = settings.provider == .gemini
-            ? "\(settings.baseURL)/models/\(settings.model):streamGenerateContent?alt=sse"
-            : settings.baseURL
-        guard let url = URL(string: urlString),
-              let scheme = url.scheme,
-              ["http", "https"].contains(scheme.lowercased()),
-              url.host != nil else {
-            return nil
-        }
-        return url
-    }
-
     func streamTTS(text: String, dataHandler: @escaping @Sendable (Data) -> Void) {
         if deferRequestStartIfPublishingState({ [weak self] in
             self?.streamTTS(text: text, dataHandler: dataHandler)

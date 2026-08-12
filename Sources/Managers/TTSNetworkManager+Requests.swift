@@ -16,6 +16,20 @@ extension TTSNetworkManager {
         }
     }
 
+    /// Builds a valid provider endpoint from a settings snapshot.
+    func requestURL(for settings: RequestSettings) -> URL? {
+        let urlString = settings.provider == .gemini
+            ? "\(settings.baseURL)/models/\(settings.model):streamGenerateContent?alt=sse"
+            : settings.baseURL
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme,
+              ["http", "https"].contains(scheme.lowercased()),
+              url.host != nil else {
+            return nil
+        }
+        return url
+    }
+
     /// Returns whether Custom's two required request values contain meaningful text.
     func hasNonWhitespaceModelAndVoice(_ settings: RequestSettings) -> Bool {
         !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
