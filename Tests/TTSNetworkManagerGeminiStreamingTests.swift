@@ -169,9 +169,10 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         receive(manager, response: successResponse(for: task), for: task)
         manager.urlSession(manager.session, dataTask: task, didReceive: sseEvent(audio: Data([0, 1]), lineEnding: "\n"))
         wait(for: [audioDelivered], timeout: 1.0)
-        manager.urlSession(manager.session, dataTask: task, didReceive: Data("data: {\"candidates\":{}}\n\n".utf8))
 
-        assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {}
+        assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
+            manager.urlSession(manager.session, dataTask: task, didReceive: Data("data: {\"candidates\":{}}\n\n".utf8))
+        }
         assertAfterMockQuiescence {
             XCTAssertEqual(manager.lastError, "The TTS service returned no playable audio. Please try again.")
             XCTAssertFalse(manager.isStreaming)

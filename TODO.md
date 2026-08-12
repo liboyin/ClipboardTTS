@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly seven active implementation tasks: Tasks 19–24 and 29.
+- There are exactly six active implementation tasks: Tasks 19–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,62 +95,18 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| Failure terminal-state assertions can accept an already-published error from a previous request | Blocking | 29 |
 
 ---
 
 ## Phase 1 — Restore state isolation and cancellation truth
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
-configuration, and a stopped request must not retain authority to call client code. Complete Task
-29 and rerun the Phase 1 review before Phase 2.
+configuration, and a stopped request must not retain authority to call client code. Every Phase 1
+implementation task is complete; run the Phase 1 mandatory gap review before starting Phase 2.
 
-### 29. Bind failure terminal-state assertions to the observed action
-
-**Classification:** Blocking — terminal-state test false positive
-
-**Depends on:** Task 25 (`9feb023`)
-
-**Purpose.** Task 25 retained the helper's successful-request activity guard, but an expected
-failure can still equal the manager's initial `lastError` value. Combine publishes that old match
-during subscription before `action()`, allowing a failure assertion to pass without observing the
-new request.
-
-**Primary paths.**
-
-- `Tests/TestNetworkSupport.swift`
-- `Tests/TTSNetworkManagerFailureTests.swift`
-- `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Require every terminal-state assertion to observe a publication causally after its supplied
-   action starts; successful states must still require an observed active request.
-2. Preserve support for synchronous configuration and encoding failures emitted during the action.
-3. Preserve tests that begin an asynchronous request before releasing an explicit completion
-   boundary through the helper action.
-4. Add a regression that starts with a matching old failure, runs a no-op or non-publishing action,
-   and proves the assertion cannot pass from the subscription's initial value.
-5. Keep the helper event-driven and independent of elapsed-time polling or production-only hooks.
-
-**Non-goals and invariants.**
-
-- Do not accept a terminal state from a different request or a pre-action publication.
-- Do not weaken existing sanitized failure-copy assertions, suppress tests, or add retry-to-pass.
-- Do not require every failure to transition through `isStreaming == true`; invalid configuration
-  remains a valid synchronous terminal path.
-
-**Validation and falsification.**
-
-- Mutate the post-action publication gate away and prove the stale-failure regression fails.
-- Mutate the successful active-request gate away and prove the Task 25 idle-manager regression
-  fails.
-- Repeat the successful retry and representative synchronous-failure tests in one hosted
-  invocation.
-
-**Done when.** Neither a success nor a failure terminal assertion can pass from state published
-before the request action it claims to verify.
+Terminal-state test assertions now require a publication caused after the assertion's own action,
+so no later task may reintroduce an assertion that reads state published before its action. See
+[README.md](README.md#build--test) for the observation contract.
 
 ### Phase 1 mandatory gap review
 
@@ -170,7 +126,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review after Task 29
+**Depends on:** Phase 1 mandatory gap review
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -227,7 +183,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review after Task 29
+**Depends on:** Phase 1 mandatory gap review
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
