@@ -66,7 +66,8 @@ enum TestNetworkFactory {
     static func makeManager(
         secretStore: SecretStoring = InMemorySecretStore(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
-        audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.tests.audiodelivery")
+        audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.tests.audiodelivery"),
+        callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority()
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
@@ -77,7 +78,8 @@ enum TestNetworkFactory {
             secretStore: secretStore,
             defaults: .standard,
             requestBodyEncoder: requestBodyEncoder,
-            audioDeliveryQueue: audioDeliveryQueue
+            audioDeliveryQueue: audioDeliveryQueue,
+            callbackAuthority: callbackAuthority
         )
         MockURLProtocol.register(
             audioDeliveryQueue: audioDeliveryQueue,

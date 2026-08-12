@@ -63,14 +63,32 @@ extension TTSNetworkManager {
                               dataHandler: @escaping @Sendable (Data) -> Void,
                               requestGeneration: UInt64) {
         audioDeliveryQueue.async { [weak self] in
-            guard let self, self.isCurrentRequestGeneration(requestGeneration) else { return }
+            guard let self else { return }
+            self.callbackAuthority.lock()
+            defer { self.callbackAuthority.unlock() }
+            guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             dataHandler(data)
+        }
+    }
+
+    /// Finishes revoking a malformed Gemini stream while holding the callback authority boundary.
+    func revokeFailedGeminiRequest(for task: URLSessionDataTask) -> (task: URLSessionDataTask, requestGeneration: UInt64)? {
+        callbackAuthority.lock()
+        defer { callbackAuthority.unlock() }
+        return stateQueue.sync {
+            guard let context = activeRequest,
+                  context.taskIdentifier == task.taskIdentifier,
+                  context.hasGeminiStreamFailure else {
+                return nil
+            }
+            activeRequest = nil
+            return (context.task, requestGeneration)
         }
     }
 
     /// Validates an incoming task chunk and invokes its handler after releasing `stateQueue`.
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let geminiFailure = stateQueue.sync { () -> (task: URLSessionDataTask, requestGeneration: UInt64)? in
+        let failedGeminiTask = stateQueue.sync { () -> URLSessionDataTask? in
             guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier,
                   !context.isErrorResponse else { return nil }
             if context.provider == .gemini {
@@ -84,11 +102,14 @@ extension TTSNetworkManager {
                 // the user handler is deferred, so it remains outside stateQueue but retains the
                 // order in which this request accepted delegate callbacks.
                 if let failedRequest = enqueueGeminiEvents(events, into: &context, for: dataTask) {
-                    // A fatal event cancels this logical stream. Advance delivery authority while
-                    // still holding stateQueue so any queued PCM is revoked before it can run.
-                    self.requestGeneration &+= 1
-                    activeRequest = nil
-                    return (task: failedRequest.task, requestGeneration: self.requestGeneration)
+                    // Invalidate queued delivery before it can acquire callback authority. A
+                    // delivery already waiting on stateQueue will therefore observe the failed
+                    // generation when it continues, while a running handler is awaited below.
+                    requestGeneration &+= 1
+                    // Leave the failed context in place until its revocation takes the callback
+                    // authority lock. That preserves the lock order used by delivery.
+                    activeRequest = context
+                    return failedRequest.task
                 }
                 activeRequest = context
                 return nil
@@ -103,9 +124,12 @@ extension TTSNetworkManager {
             activeRequest = context
             return nil
         }
-        guard let geminiFailure else { return }
-        geminiFailure.task.cancel()
-        publishFailure("The TTS service returned no playable audio. Please try again.", requestGeneration: geminiFailure.requestGeneration)
+        guard let failedGeminiTask,
+              let revocation = revokeFailedGeminiRequest(for: failedGeminiTask) else {
+            return
+        }
+        revocation.task.cancel()
+        publishFailure("The TTS service returned no playable audio. Please try again.", requestGeneration: revocation.requestGeneration)
     }
 
     /// Decodes complete SSE events while `stateQueue` owns their request context.

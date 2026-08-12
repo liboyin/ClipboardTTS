@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly eight active implementation tasks: Tasks 19–24 and 28–29.
+- There are exactly seven active implementation tasks: Tasks 19–24 and 29.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,7 +95,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| A concurrent stop can race between queued-audio authorization and callback invocation | Blocking | 28 |
 | Failure terminal-state assertions can accept an already-published error from a previous request | Blocking | 29 |
 
 ---
@@ -103,54 +102,8 @@ inside a later task.
 ## Phase 1 — Restore state isolation and cancellation truth
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
-configuration, and a stopped request must not retain authority to call client code. Complete Tasks
-28–29 and rerun the Phase 1 review before Phase 2.
-
-### 28. Make queued-audio callback authority atomic with stop
-
-**Classification:** Blocking — stop/callback cancellation race
-
-**Depends on:** Nothing
-
-**Purpose.** `enqueueAudioDelivery` checks a request generation and then calls the client handler
-after releasing the request-state queue. A concurrent `stopStreaming()` can complete in that gap,
-so stale PCM can reach client code after Clear Buffer returns.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Tests/TTSNetworkManagerConcurrencyTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Serialize delivery authorization and callback start with stop/replacement completion so a
-   revoked generation cannot enter a handler afterward.
-2. Preserve ordered delivery, normal-completion delivery of already accepted audio, and handlers'
-   ability to synchronously stop or replace their own stream without deadlock.
-3. Add a deterministic barrier test that pauses immediately after authorization, completes a
-   concurrent stop, then proves the old handler cannot run.
-4. Cover both OpenAI-compatible and Gemini delivery paths if they use distinct acceptance logic.
-5. Document the exact callback-start authority boundary in README.
-
-**Non-goals and invariants.**
-
-- Do not move user handlers under `stateQueue` if that prevents their documented re-entrant stop
-  or replacement behavior.
-- Do not discard audio accepted before ordinary completion solely because completion publishes
-  idle state.
-- Do not solve the race by sleeps, a test-only production hook, or broad task serialization.
-
-**Validation and falsification.**
-
-- Mutate authorization back to check-then-call and prove the barrier regression delivers stale
-  PCM after stop.
-- Mutate normal completion to revoke accepted PCM and prove the final-event delivery test fails.
-- Run the existing FIFO and re-entrant handler suites under complete concurrency.
-
-**Done when.** Once stop or replacement returns, no handler belonging to its revoked generation can
-begin execution, while valid accepted final audio and re-entrant handlers remain correct.
+configuration, and a stopped request must not retain authority to call client code. Complete Task
+29 and rerun the Phase 1 review before Phase 2.
 
 ### 29. Bind failure terminal-state assertions to the observed action
 
@@ -217,7 +170,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 28–29
+**Depends on:** Phase 1 mandatory gap review after Task 29
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -274,7 +227,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review after Tasks 28–29
+**Depends on:** Phase 1 mandatory gap review after Task 29
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another

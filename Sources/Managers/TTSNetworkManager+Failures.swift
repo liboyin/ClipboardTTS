@@ -34,7 +34,9 @@ extension TTSNetworkManager {
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
                 isStale: false
             )
-            activeRequest = nil
+            if !context.hasGeminiStreamFailure {
+                activeRequest = nil
+            }
             return result
         }
     }
@@ -42,6 +44,16 @@ extension TTSNetworkManager {
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let result = processCompletedTask(task)
         if result.isStale { return }
+        let requestGeneration: UInt64?
+        if result.hasGeminiStreamFailure {
+            guard let dataTask = task as? URLSessionDataTask,
+                  let revocation = revokeFailedGeminiRequest(for: dataTask) else {
+                return
+            }
+            requestGeneration = revocation.requestGeneration
+        } else {
+            requestGeneration = result.requestGeneration
+        }
 
         let failureMessage: String?
         if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
@@ -62,9 +74,9 @@ extension TTSNetworkManager {
         }
 
         if let failureMessage {
-            publishFailure(failureMessage, requestGeneration: result.requestGeneration)
+            publishFailure(failureMessage, requestGeneration: requestGeneration)
         } else {
-            setStreaming(false, requestGeneration: result.requestGeneration)
+            setStreaming(false, requestGeneration: requestGeneration)
         }
     }
 
