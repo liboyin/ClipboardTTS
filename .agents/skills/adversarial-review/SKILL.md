@@ -11,10 +11,10 @@ Return a verified report without changing the repository. The reviewer MAY propo
 
 1. **Freeze and snapshot.** The main agent records `git status`, hashes of dirty tracked files, path metadata for untracked files, and relevant PIDs/listeners, then freezes repository edits.
 
-2. **Dispatch one reviewer.** Tell it to read this skill but execute only step 3 and return the defined report; the main agent owns steps 1, 2, and 4. Launch without inherited conversation history and select the model by the main agent's harness:
+2. **Dispatch one reviewer.** Tell it to read this skill but execute only step 3 and return the defined report; the main agent owns steps 1, 2, and 4. Launch the reviewer agent without inherited conversation history using the applicable supported harness:
 
-   - **Codex:** `gpt-5.6-sol` high reasoning via tool use.
-   - **Claude Code:** `claude-fable-5` high reasoning via tool use.
+   - **Codex:** spawn the reviewer as a native subagent with `spawn_agent`, using `fork_turns: "none"` and explicit `model: "gpt-5.6-sol"` and `reasoning_effort: "high"` overrides, and instruct it to keep the repository read-only.
+   - **Claude Code with the Codex plugin:** dispatch the reviewer with `/codex:rescue --fresh --model gpt-5.6-sol --effort high <review prompt>` or a fresh underlying companion `task` command with the same model and effort. Omit `--write`; never use `--resume` or `--resume-last`. The resulting Codex task MUST use its read-only sandbox.
 
    Pass only:
 
@@ -26,7 +26,7 @@ Return a verified report without changing the repository. The reviewer MAY propo
 
    The reviewer MAY ask for further information when missing context could affect a finding or verdict. Reply with the minimum factual context and record the exchange under **Assumptions**.
 
-   If the selected model is unavailable, stop and ask the user. Do not substitute or issue a verdict.
+   If `gpt-5.6-sol` or the applicable dispatch mechanism is unavailable, stop and ask the user. Do not substitute or issue a verdict.
 
 3. **Review.** The reviewer:
 
