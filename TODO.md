@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly six active implementation tasks: Tasks 19–24.
+- There are exactly ten active implementation tasks: Tasks 19–24 and Tasks 30–33.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -67,9 +67,11 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Phase review gate
 
-At the end of each phase, start a fresh read-only gap-review session with no reliance on prior chat
-context. Give it the phase's complete commit range, this plan, and the phase purpose. The review
-must evaluate the integrated result, not merely repeat individual commit reviews, and must include:
+At the end of each phase, run a read-only gap review over the phase's complete commit range against
+this plan and the phase purpose. Start it in a fresh session so it does not inherit an implementation
+session's conclusions. The reviewing agent performs the review itself and reports its own findings;
+per `AGENTS.md`, a read-only assessment does not dispatch the adversarial reviewer. The review must
+evaluate the integrated result, not merely repeat individual commit reviews, and must include:
 
 - the complete phase diff plus relevant current source, tests, documentation, and configuration;
 - counterexamples for ordering, cancellation, failure, security, and lifecycle boundaries affected
@@ -95,25 +97,219 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
+| The terminal-state helper asserts a tautology and documents guarantees it does not provide | Blocking | 30 |
+| Startup regressions leave one `UserDefaults` plist per run in the developer's home directory | Non-blocking | 31 |
+| Mock-scope delivery revocation can block teardown's main thread without a bound | Non-blocking | 32 |
+| `TTSNetworkManager.swift` has 12 lines of file-length headroom for Tasks 19 and 22 | Non-blocking | 33 |
 
 ---
 
 ## Phase 1 — Restore state isolation and cancellation truth
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
-configuration, and a stopped request must not retain authority to call client code. Every Phase 1
-implementation task is complete; run the Phase 1 mandatory gap review before starting Phase 2.
+configuration, and a stopped request must not retain authority to call client code. Tasks 26–29 are
+implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33;
+complete those before starting Phase 2.
 
 Terminal-state test assertions now require a publication caused after the assertion's own action,
 so no later task may reintroduce an assertion that reads state published before its action. See
 [README.md](README.md#build--test) for the observation contract.
 
-### Phase 1 mandatory gap review
+Callback authority is now a lock ordered *before* `stateQueue`, and a client handler runs while
+holding it. Every later task that revokes, replaces, or retries a request MUST preserve that order
+and MUST NOT acquire callback authority while holding `stateQueue`. See
+[README.md](README.md#architecture) for the boundary.
 
-Run the **Phase review gate** on the Phase 1 commit range. Scrutinize test teardown ordering,
-settings restoration after asynchronous work, stop/replacement races, accepted-final-event
-delivery, callback ordering, and re-entrant handlers. Do not begin Phase 2 until the review is
-closed with no blocking findings.
+The gap review confirmed at `4d8a842` that all three gates pass: `./check-coverage.sh` (132 tests,
+0 failures, `Sources/Managers/` at 96.99%), `swiftlint --strict` (0 violations across 43 files), and
+the complete-concurrency build (no source warnings).
+
+### 30. Remove the terminal-state helper's tautological assertion and unverified claims
+
+**Classification:** Blocking — misleading claim and an assertion that cannot fail
+
+**Depends on:** Nothing
+
+**Purpose.** `drainPublicationsQueuedBeforeThisAssertion` asserts `Thread.isMainThread` inside a
+block it submitted with `DispatchQueue.main.async`. That block always runs on the main thread, so
+the assertion can never fail, while its comment claims it rules out "a sentinel on any other queue"
+— a guarantee `DispatchQueue.main.async` already provides unconditionally. The helper's own
+documentation also states that "every call site runs on the main thread" without checking it, even
+though `actionDidStart`, `didSettle`, and `observedActiveRequest` are written on the caller's thread
+and read inside a main-queue sink. Both are `AGENTS.md` MUST violations: a code comment carries an
+unverified empirical claim, and an assertion cannot fail when the behavior it names changes.
+
+**Primary paths.**
+
+- `Tests/TerminalStateAssertion.swift`
+- `Tests/TerminalStateAssertionTests.swift`
+
+**Required change.**
+
+1. Remove the assertion that cannot fail, or replace it with one that constrains something the
+   helper does not already guarantee structurally.
+2. Correct every comment in the file so each remaining empirical claim is one the code establishes.
+3. Enforce the main-thread call-site assumption where the shared mutable state is actually written,
+   or remove the assumption by making that state safe for any caller thread.
+4. Keep the existing FIFO reasoning that justifies the drain; the drain itself is correct and must
+   not be weakened.
+
+**Non-goals and invariants.**
+
+- Do not relax the post-action publication boundary or the successful-request activity guard.
+- Do not reintroduce elapsed-time polling, retry-to-pass, or a production-only hook.
+- Preserve `awaitTerminalState`'s non-failing return value, which the negative regressions depend on.
+
+**Validation and falsification.**
+
+- Prove the replacement assertion fails for at least one reachable input; an assertion no mutant can
+  break is the defect being fixed.
+- Re-run the four `TerminalStateAssertionTests` cases and confirm each still distinguishes its mutant.
+- Mutation-test removing the drain entirely and confirm the stale-queued-publication regression fails.
+
+**Done when.** Every claim the helper makes in prose is one its code establishes, and no assertion
+in it is unfalsifiable.
+
+### 31. Stop leaving a per-run defaults suite in the developer's home directory
+
+**Classification:** Non-blocking — test hygiene
+
+**Depends on:** Nothing
+
+**Purpose.** `AppStartupDependenciesTests.makeDefaults` creates a disk-backed `UserDefaults` suite
+per test. Its teardown block calls `removePersistentDomain`, which empties the domain but leaves the
+file: 84 `com.clipboardtts.tests.startup.*.plist` files were present in `~/Library/Preferences/`
+when the Phase 1 gap review ran, and each `./check-coverage.sh` run adds two more. The files are
+empty, so no seeded credential is exposed, but Task 26's own regression suite is the only thing in
+the repository that writes unbounded state outside the build directory.
+
+**Primary paths.**
+
+- `Tests/AppStartupDependenciesTests.swift`
+- `Sources/ClipboardTTSApp.swift` for the injection seam only
+- `README.md`
+
+**Required change.**
+
+1. Give the startup regressions a defaults instance that leaves nothing on disk, or remove the
+   backing file deterministically at teardown.
+2. Keep both branches under test: the injected branch and the automatic hosted branch that
+   `AppStartupDependencies.make()` selects with no arguments.
+3. Preserve the existing proof that hosted startup selects an `InMemorySecretStore` and leaves
+   seeded standard-domain values unchanged.
+4. Record the chosen ownership rule in README's hosted-startup paragraph.
+
+**Non-goals and invariants.**
+
+- Do not weaken isolation by pointing a startup regression at `UserDefaults.standard`.
+- Do not delete files by wildcard, and never remove a path the suite did not create.
+- Do not add a production code path whose only purpose is deleting test state.
+
+**Validation and falsification.**
+
+- Count the matching files in `~/Library/Preferences/` before and after a full `./check-coverage.sh`
+  run and prove the count is unchanged.
+- Mutation-test reverting to a disk-backed suite and prove the count assertion fails.
+- Confirm the pre-existing 84 leaked files are cleaned up once, outside the test suite.
+
+**Done when.** A full test run adds no file to the developer's home directory, and the startup
+isolation regressions still cover both dependency branches.
+
+### 32. Bound mock-scope delivery revocation
+
+**Classification:** Non-blocking — teardown hang risk
+
+**Depends on:** Nothing
+
+**Purpose.** `MockURLProtocol.endTest` calls `revokeAudioDelivery`, which invokes
+`TestNetworkFactory.revokePendingDelivery` on the tearing-down thread. On main that reaches
+`stopStreaming()`, which now blocks on callback authority until any in-flight client handler
+returns. That call sits outside `endTest`'s `deadline`, so unlike the wait loop it replaced it has
+no bound: a handler that does not return converts a single failing test into a hung suite. The
+current suite is safe only because every handler barrier uses a bounded semaphore timeout — the same
+class of failure Task 26 was created to eliminate after a Keychain read hung the coverage gate.
+
+**Primary paths.**
+
+- `Tests/MockURLProtocol.swift`
+- `Tests/TestNetworkSupport.swift`
+- `README.md`
+
+**Required change.**
+
+1. Bound the revocation step by the same deadline that bounds the rest of scope shutdown, and
+   report a non-quiescent scope instead of blocking indefinitely.
+2. Preserve the existing guarantee that a revoked handler cannot run after settings restoration or
+   in the next test's scope.
+3. Keep the off-main recovery path free of any synchronous wait on the main queue.
+4. Document the bound in README's mock-test lifecycle paragraph.
+
+**Non-goals and invariants.**
+
+- Do not weaken the production callback-authority boundary to make teardown easier.
+- Do not use a sleep, and do not silently swallow a scope that fails to quiesce.
+- Preserve the undeclared-request, settings-snapshot, and no-late-work checks.
+
+**Validation and falsification.**
+
+- Hold a handler inside callback authority past the scope deadline and prove teardown reports a
+  non-quiescent scope in bounded time rather than blocking.
+- Prove a normal scope with in-flight delivery still drains and restores settings unchanged.
+- Mutation-test removing the bound and confirm the new regression hangs or fails.
+
+**Done when.** No client handler can make mock-scope teardown block the tearing-down thread without
+a bound.
+
+### 33. Restore one declaration per line in `TTSNetworkManager.swift`
+
+**Classification:** Non-blocking — readability, and headroom for Phase 2 and Phase 3
+
+**Depends on:** Nothing
+
+**Purpose.** Unrelated declarations in this file are joined with semicolons to fit under SwiftLint's
+400-line `file_length` limit. `465f0d9` started the practice at line 43; `1b9a65e` extended it to
+lines 32, 44, 46, and 47, and to the initializer statement at line 132. `0c877ce` then had to
+relocate `requestURL(for:)` out of the file for the same reason, after the limit failed the build
+and, through it, `./check-coverage.sh`. The file is 388 lines, 12 short of the limit. Tasks 19 and
+22 both add code to it, so the next executor meets the same pressure and the same temptation to
+compress declarations instead of structuring the change.
+
+**This task requires a user decision before implementation.** The executor MUST ask which of these
+the user wants and MUST NOT choose unilaterally, because they differ in architecture: extract a
+cohesive responsibility into a new extension file; raise the `file_length` limit in `.swiftlint.yml`
+with a recorded rationale; or keep the limit and accept the current density.
+
+**Primary paths.**
+
+- `Sources/Managers/TTSNetworkManager.swift`
+- `.swiftlint.yml` only if the user selects the limit change
+- `README.md` if the file layout changes
+
+**Required change.**
+
+1. Restore one declaration per line for every semicolon-joined stored property.
+2. Apply the user's chosen approach to create headroom.
+3. Leave every declaration's type, access level, and initialization byte-identical.
+
+**Non-goals and invariants.**
+
+- Do not change behavior, isolation annotations, or the documented confinement rules.
+- Do not disable `file_length`, and do not move a declaration into a file that does not own it.
+- Do not bundle this with Task 19 or Task 22.
+
+**Validation and falsification.**
+
+- Confirm `swiftlint --strict` and the complete-concurrency build stay clean, and the full suite
+  passes unchanged.
+- Confirm `git diff` shows only formatting or relocation, with no semantic edit.
+
+**Done when.** The manager file declares one property per line and has documented headroom for the
+Phase 2 and Phase 3 changes that target it.
+
+### Phase 1 gap review — closed
+
+The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33. Do
+not begin Phase 2 until those four tasks are complete.
 
 ---
 
@@ -126,16 +322,20 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Phase 1 mandatory gap review
+**Depends on:** Tasks 30–33
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
 but the app contract itself does not prevent future configuration or policy changes from sending
-credentials and clipboard text to an arbitrary cleartext remote endpoint.
+credentials and clipboard text to an arbitrary cleartext remote endpoint. `requestURL(for:)` moved
+to `TTSNetworkManager+Requests.swift` in `0c877ce`. The metadata paths are weaker still: the model
+and voice requests build their URL with a bare `URL(string:)`, attach `Authorization: Bearer`, and
+apply no scheme check at all.
 
 **Primary paths.**
 
 - `Sources/Managers/TTSNetworkManager.swift`
+- `Sources/Managers/TTSNetworkManager+Requests.swift`
 - `Sources/Managers/TTSNetworkManager+Metadata.swift`
 - `Sources/Views/SettingsView.swift`
 - `Tests/TTSNetworkManagerAuthenticationTests.swift`
@@ -183,7 +383,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Phase 1 mandatory gap review
+**Depends on:** Tasks 30–33
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
@@ -332,7 +532,9 @@ into an immediate terminal error.
    outcome is known.
 4. A stop, Clear Buffer, replacement request, or invalidated generation must prevent the retry from
    starting and revoke its queued deliveries under the [README's queued-delivery ownership
-   contract](README.md#architecture).
+   contract](README.md#architecture). That contract now includes the callback-authority lock added
+   by Task 28: acquire callback authority before `stateQueue`, never the reverse, and do not start
+   a retry from inside a client handler that already holds callback authority.
 5. If the retry also fails, publish the existing sanitized HTTP failure exactly once and finish the
    request normally.
 6. Do not retry authentication, configuration, transport, cancellation, malformed SSE, empty
@@ -393,6 +595,7 @@ hosted production view.
 - `Tests/SettingsViewTests.swift`
 - `Tests/TTSNetworkManagerAuthenticationTests.swift`
 - `Tests/TestNetworkSupport.swift`
+- `Tests/TerminalStateAssertion.swift`, which owns the terminal-state helper since `dc08bc2`
 - `README.md`
 
 **Required change.**
@@ -459,7 +662,10 @@ undocumented relaunch.
 2. When migration has failed, show an explicit user-initiated Settings action such as
    **Retry Securing Saved Keys** alongside actionable, secret-free guidance.
 3. The action must rerun migration for every still-pending provider using the same injected secret
-   store. Remove each legacy value only after its Keychain write is confirmed.
+   store *and* the same injected `UserDefaults`. Task 26 threaded `defaults` explicitly through
+   `APIKeyStartupState.load` and `APIKeyMigrationService.migrateLegacyAPIKeys`; a retry that relies
+   on either default parameter would read the developer's domain from the hosted test app. Remove
+   each legacy value only after its Keychain write is confirmed.
 4. On success, refresh Settings' retained secret state and the network manager's future-request
    credentials, clear the migration-specific warning, and leave unrelated request/audio state
    unchanged.
@@ -501,8 +707,8 @@ until this review is closed with no blocking findings.
 ## Final acceptance sweep
 
 Run this only after all four phase reviews are closed. It supplements, and does not replace, the
-eight per-task reviews or four phase reviews. If it discovers new work, add self-contained tasks to
-this file and complete them before declaring the remediation finished.
+per-task adversarial reviews or the four phase reviews. If it discovers new work, add self-contained
+tasks to this file and complete them before declaring the remediation finished.
 
 1. Run `./check-coverage.sh`, inspect every manager's per-file coverage, and confirm aggregate
    manager line coverage remains at least 85%.
@@ -517,9 +723,9 @@ this file and complete them before declaring the remediation finished.
      analyze
    ```
 
-3. After Task 17 makes the suite safe, run the manager tests with Thread Sanitizer when the host
-   toolchain supports it. Record and investigate every sanitizer report; a clean run is supporting
-   evidence, not proof that no race exists.
+3. Run the manager tests with Thread Sanitizer when the host toolchain supports it. Record and
+   investigate every sanitizer report; a clean run is supporting evidence, not proof that no race
+   exists. Task 17 (`2476718`) and Task 28 (`1b9a65e`) are the isolation work this exercises.
 4. Confirm with repository searches that:
    - network tests automatically isolate app settings before manager construction and restore only
      after asynchronous quiescence;
@@ -539,9 +745,9 @@ this file and complete them before declaring the remediation finished.
    non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, migration retry, and About.
    Obtain user permission and credentials before live-provider tests; never record keys or provider
    response audio.
-6. Run a final adversarial review on the complete Task 17–24 remediation range plus any phase-review
-   follow-up tasks. Resolve every blocking finding and obtain explicit disposition for every
-   non-blocking finding.
+6. Run a final adversarial review on the complete remediation range — Tasks 17–33, currently
+   `2476718..HEAD` — plus any phase-review follow-up tasks added later. Resolve every blocking
+   finding and obtain explicit disposition for every non-blocking finding.
 7. Reconcile `README.md`, `USER_STORIES.md`, and verified behavior. Remove completed active tasks
    from this file so it contains only genuinely outstanding work and concise decisions that still
    constrain future work.
