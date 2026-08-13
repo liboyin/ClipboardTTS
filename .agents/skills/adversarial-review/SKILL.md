@@ -14,7 +14,9 @@ Return a verified report without changing the repository. The reviewer MAY propo
 2. **Dispatch one reviewer.** Tell it to read this skill but execute only step 3 and return the defined report; the main agent owns steps 1, 2, and 4. Launch the reviewer agent without inherited conversation history using the applicable supported harness:
 
    - **Codex:** spawn the reviewer as a native subagent with `spawn_agent`, using `fork_turns: "none"` and explicit `model: "gpt-5.6-sol"` and `reasoning_effort: "high"` overrides, and instruct it to keep the repository read-only.
-   - **Claude Code with the Codex plugin:** dispatch the reviewer with `/codex:rescue --fresh --model gpt-5.6-sol --effort high <review prompt>` or a fresh underlying companion `task` command with the same model and effort. Omit `--write`; never use `--resume` or `--resume-last`. The resulting Codex task MUST use its read-only sandbox.
+   - **Claude Code with the Codex plugin:** dispatch the reviewer with `/codex:rescue --fresh --write --model gpt-5.6-sol --effort high <review prompt>` or a fresh underlying companion `task` command with the same model and effort. Never use `--resume` or `--resume-last`.
+
+   (The reviewer needs write access to complete step 3: a read-only sandbox cannot create the scratch copy that step requires, and omitting `--write` produces a `Review blocked` verdict rather than a review. Write access is scoped by instruction, not by sandbox, so the dispatch MUST tell the reviewer to treat the repository as strictly read-only, to build and test only in a scratch copy outside it, and to remove that copy at exit. Step 1's snapshot and step 4's hash comparison are what make this safe; they, not the sandbox, are the guard against a reviewer that edits the tree.)
 
    Pass only:
 
@@ -43,7 +45,7 @@ Return a verified report without changing the repository. The reviewer MAY propo
    - Verifies claims with safe, bounded commands. For changed assertions, uses a scratch copy to pass the baseline suite, prove the scratch with a loud mutant, and test applicable revert and future-regression mutants.
    - Keeps the repository read-only, cleans up only its recorded scratch artifacts and processes, compares repository status and hashes at exit, and returns the report below.
 
-4. **Verify and triage.** The main agent confirms repository integrity and treats every reviewer claim and remedy as a hypothesis to validate. Classify each verified finding once: **Blocking** for bugs, broken tests, requirements, security, misleading claims, or `AGENTS.md` MUST violations; **Non-blocking** for deferrable improvements; **Nit** for cheap style only. Record rejected hypotheses under **Dismissed**. Any unexplained repository change blocks the review.
+4. **Verify and triage.** The main agent confirms repository integrity and treats every reviewer claim and remedy as a hypothesis to validate. Reproduce a claimed defect before fixing it, and reproduce a claimed remedy's effect before accepting it. Classify each verified finding once: **Blocking** for bugs, broken tests, requirements, security, misleading claims, or `AGENTS.md` MUST violations; **Non-blocking** for deferrable improvements; **Nit** for cheap style only. Record rejected hypotheses under **Dismissed**. Any unexplained repository change blocks the review.
 
 ## Report
 

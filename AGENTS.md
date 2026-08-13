@@ -15,6 +15,7 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 
 - The planner defines a task's intended boundary, dependencies, non-goals, validation strategy, and done criteria in `TODO.md`. Each task MUST remain a self-contained commit.
 - The executor MUST re-read the task and affected code before implementation. `TODO.md` is a contract to validate against the repository, not permission to apply it mechanically.
+- The executor MUST confirm the gates pass at `HEAD` before editing. A gate already failing at `HEAD` SHOULD be fixed in a self-contained commit that lands first.
 - When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the task boundary unilaterally.
 - The executor MAY make a non-material assumption only when it is supported by repository evidence and does not alter the requested outcome. Its final hand-over MUST name the assumption, supporting evidence, and effect on the change.
 - If user direction changes a task's material boundary, update `TODO.md` before committing so the remaining execution plan stays authoritative.
@@ -64,7 +65,7 @@ swiftlint --strict
 
 # Review Guidelines
 
-Every non-trivial code, test, or configuration change MUST pass the adversarial review (`.agents/skills/adversarial-review/SKILL.md`) procedure before commit. Documentation-only changes are exempt.
+Every non-trivial code, test, or configuration change MUST pass the adversarial review (`.agents/skills/adversarial-review/SKILL.md`) procedure before commit. Documentation-only changes and review tasks themselves (code review, `TODO.md` gap review, etc.) are exempt.
 
 The adversarial review skill owns the operational procedure: the caller context it requires, the questions it scrutinizes with, and its report format. Call it as a function on the current dirty tree and expect a verified, triaged findings report without code change.
 
