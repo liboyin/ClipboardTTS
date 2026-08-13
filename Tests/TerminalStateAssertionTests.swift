@@ -95,6 +95,43 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         XCTAssertFalse(manager.isStreaming)
     }
 
+    func testTerminalStateAssertionRejectsAnOffMainCallSite() {
+        // WHY: The helper writes its observation flags on the caller's thread and reads them in a
+        // sink Combine delivers on the main queue. Only a main-thread caller orders those accesses,
+        // so an off-main call site must fail loudly. Racing instead would let the helper settle on
+        // whichever value it happened to read and report that as a verified terminal state.
+        // Match only the guard's own failure. An unfiltered expectation accepts any later issue
+        // from any thread, so an unrelated flake would satisfy it and this test would pass without
+        // the guard ever firing. The closure-scoped form cannot replace this: the failure is
+        // recorded on a background queue, which that form does not match.
+        let guardFailureOnly = XCTExpectedFailure.Options()
+        guardFailureOnly.issueMatcher = { issue in
+            issue.compactDescription.contains("awaitTerminalState must be called from the main thread")
+        }
+        XCTExpectFailure("An off-main call site must be reported as a failure, not raced.", options: guardFailureOnly)
+        let manager = TestNetworkFactory.makeManager()
+        var didSettle = true
+
+        // The call needs its own queue: a `sync` hop can keep running on this thread and would
+        // satisfy the guard it is meant to trip. `wait(for:)` keeps pumping the main queue, so
+        // removing the guard lets the helper reach its drain and return a quiet, failure-free
+        // `false` instead of stalling. That is what makes the expected failure detect the mutant.
+        let offMainCallSite = DispatchQueue(label: "com.clipboardtts.tests.off-main-call-site")
+        let finished = expectation(description: "The off-main call returned")
+        offMainCallSite.async { [self] in
+            didSettle = awaitTerminalState(of: manager, expectedError: nil, timeout: 0.2) {}
+            finished.fulfill()
+        }
+        wait(for: [finished], timeout: 1.0)
+        // Quiescence, not merely fulfilment. The queue is serial, so this returns only after the
+        // block above has exited, and it runs even when the wait expires. Without it an expired
+        // wait would leave the call free to record its failure after this test's expected-failure
+        // window closed, and to write `didSettle` while the assertion below reads it.
+        offMainCallSite.sync {}
+
+        XCTAssertFalse(didSettle, "A rejected call site must not report a terminal state.")
+    }
+
     func testTerminalFailureAssertionAcceptsASynchronousFailurePublishedByItsAction() {
         // WHY: Request-body encoding fails before the manager ever sets `isStreaming`. The
         // post-action boundary must not force such tests off the shared helper, or synchronous

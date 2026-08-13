@@ -31,23 +31,40 @@ extension XCTestCase {
         )
     }
 
-    /// Reports whether the action publishes the expected terminal state, without failing the test.
+    /// Reports whether the action publishes the expected terminal state.
+    ///
+    /// A state that simply does not match returns `false` without failing the test, which is what
+    /// lets a negative regression inspect the result. A violated precondition is different: an
+    /// off-main call site, or a drain that cannot be established, fails closed.
     ///
     /// State published before the action — the value Combine replays when this helper subscribes,
     /// and any publication an earlier request had already queued — never settles the wait, so an
     /// assertion cannot inherit another request's outcome. A negative regression inspects the
     /// returned flag; `assertTerminalState` asserts it.
+    ///
+    /// Call this from the main thread. `observedActiveRequest`, `actionDidStart`, and `didSettle`
+    /// are written here and read inside a sink that Combine delivers on the main queue, so only a
+    /// main-thread caller orders those accesses. The guard below fails loudly instead of racing,
+    /// because a racing helper would settle on an arbitrary result and report it as a verdict.
     func awaitTerminalState(of manager: TTSNetworkManager,
                             expectedError: String?,
                             timeout: TimeInterval = 2.0,
                             after action: () -> Void) -> Bool {
+        guard Thread.isMainThread else {
+            XCTFail("""
+            awaitTerminalState must be called from the main thread. It shares mutable observation \
+            state with a sink Combine delivers on the main queue, and an off-main caller races it.
+            """)
+            return false
+        }
         guard drainPublicationsQueuedBeforeThisAssertion(timeout: timeout) else { return false }
         let stateSettled = XCTestExpectation(description: "Request reaches its expected terminal state")
         var observedActiveRequest = manager.isStreaming
         var actionDidStart = false
         var didSettle = false
-        // Every `lastError`/`isStreaming` mutation publishes on the main queue, so this thread's
-        // `actionDidStart` write is ordered before any publication the action can cause.
+        // Every `lastError`/`isStreaming` mutation publishes on the main queue, and the guard above
+        // pins this thread to it, so the `actionDidStart` write below is ordered before any
+        // publication the action can cause.
         let observation = Publishers.CombineLatest(manager.$lastError, manager.$isStreaming).sink { error, isStreaming in
             observedActiveRequest = observedActiveRequest || isStreaming
             guard matchesExpectedTerminalState(
@@ -79,16 +96,13 @@ extension XCTestCase {
     /// every earlier one has too, and their state belongs to the value the subscription replays.
     /// A caller that proceeds anyway would re-admit that stale publication, so this fails instead.
     ///
-    /// That failure path is fail-closed rather than exercised: every call site runs on the main
-    /// thread, where the waiter cannot expire while the main queue is busy and the sentinel runs as
-    /// soon as it is free. Keep the check, because an off-main caller could reach it.
+    /// The barrier holds only because the sentinel is submitted to the queue those publications
+    /// land on, which `DispatchQueue.main.async` establishes on its own. Waiting on the main thread
+    /// pumps the run loop, so the sentinel normally runs well inside the timeout; the failure path
+    /// below stays as a fail-closed guard for a main queue backlogged past it.
     private func drainPublicationsQueuedBeforeThisAssertion(timeout: TimeInterval) -> Bool {
         let drained = XCTestExpectation(description: "Publications queued before the assertion have run")
         DispatchQueue.main.async {
-            // The FIFO barrier only holds while this runs on the queue publications land on. A
-            // sentinel on any other queue can fulfill with a publication still pending, and that
-            // race resolves differently per test runner, so assert the queue instead of the timing.
-            XCTAssertTrue(Thread.isMainThread, "The publication drain must complete on the main queue.")
             drained.fulfill()
         }
         guard XCTWaiter().wait(for: [drained], timeout: timeout) == .completed else {

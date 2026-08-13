@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly ten active implementation tasks: Tasks 19–24 and Tasks 30–33.
+- There are exactly nine active implementation tasks: Tasks 19–24 and Tasks 31–33.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -97,7 +97,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| The terminal-state helper asserts a tautology and documents guarantees it does not provide | Blocking | 30 |
 | Startup regressions leave one `UserDefaults` plist per run in the developer's home directory | Non-blocking | 31 |
 | Mock-scope delivery revocation can block teardown's main thread without a bound | Non-blocking | 32 |
 | `TTSNetworkManager.swift` has 12 lines of file-length headroom for Tasks 19 and 22 | Non-blocking | 33 |
@@ -108,11 +107,13 @@ inside a later task.
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code. Tasks 26–29 are
-implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33;
-complete those before starting Phase 2.
+implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33. Task 30
+is complete; finish Tasks 31–33 before starting Phase 2.
 
 Terminal-state test assertions now require a publication caused after the assertion's own action,
-so no later task may reintroduce an assertion that reads state published before its action. See
+so no later task may reintroduce an assertion that reads state published before its action. They
+must also be invoked from the main thread: `awaitTerminalState` fails and returns `false` for an
+off-main call site, because it shares observation state with a sink Combine delivers on main. See
 [README.md](README.md#build--test) for the observation contract.
 
 Callback authority is now a lock ordered *before* `stateQueue`, and a client handler runs while
@@ -123,52 +124,6 @@ and MUST NOT acquire callback authority while holding `stateQueue`. See
 The gap review confirmed at `4d8a842` that all three gates pass: `./check-coverage.sh` (132 tests,
 0 failures, `Sources/Managers/` at 96.99%), `swiftlint --strict` (0 violations across 43 files), and
 the complete-concurrency build (no source warnings).
-
-### 30. Remove the terminal-state helper's tautological assertion and unverified claims
-
-**Classification:** Blocking — misleading claim and an assertion that cannot fail
-
-**Depends on:** Nothing
-
-**Purpose.** `drainPublicationsQueuedBeforeThisAssertion` asserts `Thread.isMainThread` inside a
-block it submitted with `DispatchQueue.main.async`. That block always runs on the main thread, so
-the assertion can never fail, while its comment claims it rules out "a sentinel on any other queue"
-— a guarantee `DispatchQueue.main.async` already provides unconditionally. The helper's own
-documentation also states that "every call site runs on the main thread" without checking it, even
-though `actionDidStart`, `didSettle`, and `observedActiveRequest` are written on the caller's thread
-and read inside a main-queue sink. Both are `AGENTS.md` MUST violations: a code comment carries an
-unverified empirical claim, and an assertion cannot fail when the behavior it names changes.
-
-**Primary paths.**
-
-- `Tests/TerminalStateAssertion.swift`
-- `Tests/TerminalStateAssertionTests.swift`
-
-**Required change.**
-
-1. Remove the assertion that cannot fail, or replace it with one that constrains something the
-   helper does not already guarantee structurally.
-2. Correct every comment in the file so each remaining empirical claim is one the code establishes.
-3. Enforce the main-thread call-site assumption where the shared mutable state is actually written,
-   or remove the assumption by making that state safe for any caller thread.
-4. Keep the existing FIFO reasoning that justifies the drain; the drain itself is correct and must
-   not be weakened.
-
-**Non-goals and invariants.**
-
-- Do not relax the post-action publication boundary or the successful-request activity guard.
-- Do not reintroduce elapsed-time polling, retry-to-pass, or a production-only hook.
-- Preserve `awaitTerminalState`'s non-failing return value, which the negative regressions depend on.
-
-**Validation and falsification.**
-
-- Prove the replacement assertion fails for at least one reachable input; an assertion no mutant can
-  break is the defect being fixed.
-- Re-run the four `TerminalStateAssertionTests` cases and confirm each still distinguishes its mutant.
-- Mutation-test removing the drain entirely and confirm the stale-queued-publication regression fails.
-
-**Done when.** Every claim the helper makes in prose is one its code establishes, and no assertion
-in it is unfalsifiable.
 
 ### 31. Stop leaving a per-run defaults suite in the developer's home directory
 
@@ -309,7 +264,7 @@ Phase 2 and Phase 3 changes that target it.
 ### Phase 1 gap review — closed
 
 The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33. Do
-not begin Phase 2 until those four tasks are complete.
+not begin Phase 2 until Tasks 31–33 are complete.
 
 ---
 
@@ -322,7 +277,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Tasks 30–33
+**Depends on:** Tasks 31–33
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -383,7 +338,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Tasks 30–33
+**Depends on:** Tasks 31–33
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
