@@ -10,7 +10,7 @@ final class AppStartupDependenciesTests: XCTestCase {
         isolateAppSettingsDefaults()
 
         let developerDefaults = UserDefaults.standard
-        let hostedDefaults = makeDefaults(named: "hosted")
+        let hostedDefaults = makeDefaults()
         let developerSecretStore = RecordingSecretStore(secrets: [.custom: "developer-keychain-credential"])
         let hostedSecretStore = RecordingSecretStore()
         var productionDefaultsRequested = false
@@ -96,9 +96,9 @@ final class AppStartupDependenciesTests: XCTestCase {
         // WHY: The isolation branch is safe only if the non-test branch remains the production
         // behavior: persisted provider settings must set up the manager, audio, and migration
         // before the Services coordinator can accept requests.
-        let productionDefaults = makeDefaults(named: "production")
+        let productionDefaults = makeDefaults()
         let productionSecretStore = RecordingSecretStore()
-        let testDefaults = makeDefaults(named: "unused-hosted")
+        let testDefaults = makeDefaults()
         let testSecretStore = RecordingSecretStore()
         var productionDefaultsRequested = false
         var productionSecretStoreRequested = false
@@ -155,13 +155,78 @@ final class AppStartupDependenciesTests: XCTestCase {
         XCTAssertEqual(dependencies.audioPlayer.sampleRate, 12_000)
     }
 
-    private func makeDefaults(named suffix: String) -> UserDefaults {
-        let suiteName = "com.clipboardtts.tests.startup.\(suffix).\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        addTeardownBlock {
-            defaults.removePersistentDomain(forName: suiteName)
+    func testStartupRegressionDefaultsWriteNeitherToDiskNorToTheAppSettingsDomain() {
+        // WHY: These regressions seed provider settings, so a disk-backed suite made them the only
+        // thing in the repository that writes unbounded state outside the build directory:
+        // `removePersistentDomain` empties a suite but does not delete it, and `cfprefsd` rewrites
+        // the suite's plist into ~/Library/Preferences when the hosted test process exits. The
+        // replacement must also keep its values out of the app's own defaults domain, because the
+        // test bundle is hosted inside the app and a value that falls through to `UserDefaults`'
+        // own storage would reconfigure the developer's installation.
+        isolateAppSettingsDefaults()
+        let preferenceFilesBeforeSeeding = appPreferenceFileNames()
+
+        let defaults = makeDefaults()
+        SettingsKeys.allUserDefaultsKeys.forEach { defaults.set("seeded-\($0)", forKey: $0) }
+        defaults.set(44_100.0, forKey: SettingsKeys.customSampleRate)
+        defaults.synchronize()
+
+        XCTAssertEqual(
+            defaults.string(forKey: SettingsKeys.apiBaseURL),
+            "seeded-\(SettingsKeys.apiBaseURL)",
+            "Startup regressions must read back the settings they seed, or they prove nothing about startup."
+        )
+        XCTAssertEqual(
+            defaults.double(forKey: SettingsKeys.customSampleRate),
+            44_100,
+            "Typed accessors must resolve through the test-owned storage, not a fallback domain."
+        )
+        XCTAssertEqual(
+            appPreferenceFileNames(),
+            preferenceFilesBeforeSeeding,
+            "Seeding a startup regression must not create a preferences file in the developer's home directory."
+        )
+        for key in SettingsKeys.allUserDefaultsKeys {
+            XCTAssertNil(
+                UserDefaults.standard.object(forKey: key),
+                "Seeded startup value for \(key) must not reach the app's own defaults domain."
+            )
         }
-        return defaults
+    }
+
+    /// Creates test-owned settings storage that outlives no test and reaches no shared domain.
+    private func makeDefaults() -> UserDefaults {
+        InMemoryDefaults()
+    }
+
+    /// The app-owned preference file names currently present in the developer's home directory.
+    private func appPreferenceFileNames() -> Set<String> {
+        let preferences = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Preferences", isDirectory: true)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: preferences.path)) ?? []
+        return Set(names.filter { $0.hasPrefix("com.clipboardtts.") })
+    }
+}
+
+/// `UserDefaults` storage that lives only for its owning test, backed by memory instead of a suite.
+///
+/// Overrides the three primitive accessors that `UserDefaults` derives its typed accessors from.
+/// A future startup path that needs an accessor built on something else must override it here too;
+/// `testStartupRegressionDefaultsWriteNeitherToDiskNorToTheAppSettingsDomain` fails when a value
+/// falls through to the inherited storage instead.
+private final class InMemoryDefaults: UserDefaults {
+    private var storage: [String: Any] = [:]
+
+    override func object(forKey defaultName: String) -> Any? {
+        storage[defaultName]
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        storage[defaultName] = value
+    }
+
+    override func removeObject(forKey defaultName: String) {
+        storage.removeValue(forKey: defaultName)
     }
 }
 

@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly nine active implementation tasks: Tasks 19–24 and Tasks 31–33.
+- There are exactly eight active implementation tasks: Tasks 19–24 and Tasks 32–33.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -97,7 +97,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| Startup regressions leave one `UserDefaults` plist per run in the developer's home directory | Non-blocking | 31 |
 | Mock-scope delivery revocation can block teardown's main thread without a bound | Non-blocking | 32 |
 | `TTSNetworkManager.swift` has 12 lines of file-length headroom for Tasks 19 and 22 | Non-blocking | 33 |
 
@@ -107,8 +106,11 @@ inside a later task.
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code. Tasks 26–29 are
-implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33. Task 30
-is complete; finish Tasks 31–33 before starting Phase 2.
+implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33. Tasks
+30 and 31 are complete; finish Tasks 32–33 before starting Phase 2.
+
+Startup regressions now own their settings storage in memory, so no later task may seed a
+disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--test) for the rule.
 
 Terminal-state test assertions now require a publication caused after the assertion's own action,
 so no later task may reintroduce an assertion that reads state published before its action. They
@@ -124,51 +126,6 @@ and MUST NOT acquire callback authority while holding `stateQueue`. See
 The gap review confirmed at `4d8a842` that all three gates pass: `./check-coverage.sh` (132 tests,
 0 failures, `Sources/Managers/` at 96.99%), `swiftlint --strict` (0 violations across 43 files), and
 the complete-concurrency build (no source warnings).
-
-### 31. Stop leaving a per-run defaults suite in the developer's home directory
-
-**Classification:** Non-blocking — test hygiene
-
-**Depends on:** Nothing
-
-**Purpose.** `AppStartupDependenciesTests.makeDefaults` creates a disk-backed `UserDefaults` suite
-per test. Its teardown block calls `removePersistentDomain`, which empties the domain but leaves the
-file: 84 `com.clipboardtts.tests.startup.*.plist` files were present in `~/Library/Preferences/`
-when the Phase 1 gap review ran, and each `./check-coverage.sh` run adds two more. The files are
-empty, so no seeded credential is exposed, but Task 26's own regression suite is the only thing in
-the repository that writes unbounded state outside the build directory.
-
-**Primary paths.**
-
-- `Tests/AppStartupDependenciesTests.swift`
-- `Sources/ClipboardTTSApp.swift` for the injection seam only
-- `README.md`
-
-**Required change.**
-
-1. Give the startup regressions a defaults instance that leaves nothing on disk, or remove the
-   backing file deterministically at teardown.
-2. Keep both branches under test: the injected branch and the automatic hosted branch that
-   `AppStartupDependencies.make()` selects with no arguments.
-3. Preserve the existing proof that hosted startup selects an `InMemorySecretStore` and leaves
-   seeded standard-domain values unchanged.
-4. Record the chosen ownership rule in README's hosted-startup paragraph.
-
-**Non-goals and invariants.**
-
-- Do not weaken isolation by pointing a startup regression at `UserDefaults.standard`.
-- Do not delete files by wildcard, and never remove a path the suite did not create.
-- Do not add a production code path whose only purpose is deleting test state.
-
-**Validation and falsification.**
-
-- Count the matching files in `~/Library/Preferences/` before and after a full `./check-coverage.sh`
-  run and prove the count is unchanged.
-- Mutation-test reverting to a disk-backed suite and prove the count assertion fails.
-- Confirm the pre-existing 84 leaked files are cleaned up once, outside the test suite.
-
-**Done when.** A full test run adds no file to the developer's home directory, and the startup
-isolation regressions still cover both dependency branches.
 
 ### 32. Bound mock-scope delivery revocation
 
@@ -264,7 +221,7 @@ Phase 2 and Phase 3 changes that target it.
 ### Phase 1 gap review — closed
 
 The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33. Do
-not begin Phase 2 until Tasks 31–33 are complete.
+not begin Phase 2 until Tasks 32–33 are complete.
 
 ---
 
@@ -277,7 +234,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Tasks 31–33
+**Depends on:** Tasks 32–33
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -338,7 +295,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Tasks 31–33
+**Depends on:** Tasks 32–33
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
