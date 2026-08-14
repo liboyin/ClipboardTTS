@@ -19,7 +19,7 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 - When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the task boundary unilaterally.
 - The executor MAY make a non-material assumption only when it is supported by repository evidence and does not alter the requested outcome. Its final hand-over MUST name the assumption, supporting evidence, and effect on the change.
 - If user direction changes a task's material boundary, update `TODO.md` before committing so the remaining execution plan stays authoritative.
-- The adversarial reviewer independently evaluates the complete dirty tree against the task boundary; review findings re-enter the executor's test and review loop.
+- The adversarial reviewer independently evaluates the complete in-scope change, including staged, unstaged, and in-scope untracked files. Explicitly identify unrelated dirty paths as out of scope; review findings re-enter the executor's test and review loop.
 
 # Documentation Guidelines
 
@@ -49,7 +49,9 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 # Test Guidelines
 
 - Tests MUST encode WHY behavior matters, not just WHAT it does. A test that does not fail when business logic changes is wrong.
-- Mutation-test every new assertion in an isolated scratch copy. Include at least one mutant toward a plausible future regression, not only a revert, and test the trade-off introduced by a constraint.
+- An assertion is worth only what can break it; establish that with mutants in an isolated scratch copy.
+- Adding one MUST be earned by three mutants that each fail a test: a revert, a plausible future regression, and an over-restriction that tests the constraint's trade-off.
+- Removing one MUST meet the same standard: a mutant that breaks the property it protected still fails another test. An assertion no mutant can break is itself a defect; prove the property is covered elsewhere rather than dropping the coverage.
 - `check-coverage.sh` is the source of truth for coverage measurement and thresholds. It uses XCTest coverage from `xccov` and requires at least 85% aggregate line coverage for `Sources/Managers/`.
 - `Sources/Views/` is exempt from the line-coverage gate because declarative SwiftUI bodies are exercised through construction smoke tests. Other exclusions MUST have a documented rationale and an end-to-end smoke test.
 - XCTest test cases MUST import the app with `@testable import ClipboardTTSApp`. Prefer injected dependencies and test doubles over modifying process-wide macOS state.
@@ -65,19 +67,23 @@ swiftlint --strict
 
 # Review Guidelines
 
-Every non-trivial code, test, or configuration change MUST pass the adversarial review (`.agents/skills/adversarial-review/SKILL.md`) procedure before commit. Documentation-only changes and review tasks themselves (code review, `TODO.md` gap review, etc.) are exempt.
+Every non-trivial code, test, or configuration change MUST pass the adversarial review (`.agents/skills/adversarial-review/SKILL.md`) procedure before commit. The main agent determines whether a change is non-trivial. Treat a change as non-trivial when it could affect runtime behavior, test guarantees, build or configuration output, security, concurrency, state or data flow, or user-visible behavior. When uncertain, run the review. Documentation-only changes and review tasks themselves (code review, `TODO.md` gap review, etc.) are exempt.
 
-The adversarial review skill owns the operational procedure: the caller context it requires, the questions it scrutinizes with, and its report format. Call it as a function on the current dirty tree and expect a verified, triaged findings report without code change.
+The adversarial review skill owns the operational procedure: the caller context it requires, the questions it scrutinizes with, and its report format. Call it as a function on the current dirty tree and expect a reviewer-triaged findings report without code change. The reviewer owns the triage and verdict; the main agent owns the required investigation, disposition hand-off, and implementation.
 
 The main agent remains accountable for the execute-review loop:
 
-1. Run the review skill on the dirty tree or the specified revision.
-2. Based on the review report, create execution plans to fix blocking findings and trivial non-blocking findings.
-3. Implement the plan step-by-step.
-4. Repeat step 1 - 3 until no blocking findings remain. Do not shorten the loop.
-5. Ask the user whether to fix, defer, or ignore remaining non-blocking findings.
+1. Confirm that all gates required by this file pass on the exact target state, then run the review skill on the dirty tree or the specified revision.
+2. Independently investigate every Blocking finding. Validate its claim and the premise and expected effect of any proposed remedy before accepting or implementing it.
+3. Create an execution plan that fixes every validated Blocking finding. The main agent SHOULD also independently validate and fix each Nit, but MAY instead leave a Nit unfixed when its remedy is non-trivial and surface it to the user. Before implementing any Nit remedy, validate the claim and the remedy's premise and expected effect.
+4. Implement the plan step-by-step.
+5. Repeat step 1 - 4 until no Blocking findings remain and no further Nits will be fixed automatically. Do not shorten the loop.
+6. Surface every Non-blocking finding directly to the user without requiring independent investigation or validation. Also surface every Nit not fixed automatically. Mark each finding as **Validated**, **Could not validate**, or **Not independently validated**, with supporting evidence when validation was attempted.
+7. Ask the user whether to fix, defer, or accept without change each surfaced finding. Before implementing a user-selected remedy, independently validate the finding and the remedy's premise and expected effect, then re-enter the loop at step 1 after the change.
 
-Undoing a code change re-enters the loop at step 1. Verify clean rollbacks against `HEAD` with `git diff`; do not rely on your recollection of the delta.
+The main agent MUST NOT silently discard or reclassify a reviewer finding. If a materially equivalent Blocking finding appears in two consecutive fresh reviews and the main agent still cannot validate it, stop and ask the user for direction.
+
+Undoing a code change re-enters the loop at step 1. Verify a rollback against the recorded pre-change state using `git status`, the unstaged diff, and the staged diff for affected paths; do not rely on your recollection of the delta.
 
 # Version Control Guidelines
 

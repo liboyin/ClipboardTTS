@@ -84,6 +84,10 @@ an executor that itself performs the hop.
 
 For focused XCTest runs, use the `ClipboardTTSAppTests` scheme (the generated project has no separate app-test scheme). A test that verifies a SwiftUI `.onAppear` action or an `NSViewRepresentable` control must host the view in `NSHostingView` and lay it out; constructing the view value alone does not run its lifecycle action. Do not wrap that test host in an `NSWindow`: AppKit window teardown can outlive the test and crash the hosted process. Release the hosting view and drain one main-queue turn before `MockURLProtocolTestCase` invalidates its session, so deferred Settings observers cannot create work after their test scope closes.
 
+A test that proves a helper fails must scope its `XCTExpectFailure` with an `XCTExpectedFailure.Options` `issueMatcher`; the unfiltered form accepts any later issue from any thread. Matching the expected diagnostic couples the test to that wording; that is the intended trade-off, since rewording then fails the test instead of silently accepting something else.
+
+A test that calls into the code under test from another queue must own that queue and establish quiescence unconditionally after its bounded wait — a serial queue plus a trailing `sync {}` barrier. Fulfilment is not quiescence: an expired wait leaves the dispatched work runnable, free to record failures after the expectation window closed and to write results the assertions are already reading.
+
 Audio-manager tests that exercise the 0.1-second automatic-playback prebuffer inject a controllable scheduler and wait for the manager's explicit audio-queue processing or state-publication hook. They must assert the queued callback before running it; do not use a sleep or a real deadline as a synchronization boundary. This keeps packet ordering, cancellation, and delayed-start tests deterministic.
 
 To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`.
