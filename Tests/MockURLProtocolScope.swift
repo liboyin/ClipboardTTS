@@ -34,8 +34,8 @@ private enum ScopeStorage {
     static let condition = NSCondition()
     /// Runs the half of revocation that can block, so the tearing-down thread only waits on a deadline.
     ///
-    /// Concurrent because one scope whose handler never returns must not delay another scope's
-    /// recovery, which can run while the next test is already executing.
+    /// Concurrent because a release half that never returns would otherwise occupy a serial queue
+    /// for every later scope, so only its own scope should ever reach the recovery bound.
     static let revocationQueue = DispatchQueue(
         label: "com.clipboardtts.tests.mockurlprotocol.revocation",
         attributes: .concurrent
@@ -245,10 +245,7 @@ extension MockURLProtocol {
             ScopeStorage.condition.unlock()
             return TestEndResult(expectedUnhandledRequestCount: 0, observedUnhandledRequestCount: 0, didQuiesce: true)
         }
-        let didQuiesce = !hasUndrainedSessionWork(completedState) &&
-            completedState.hasRevokedAudioDelivery &&
-            completedState.hasScheduledAudioDeliveryDrains &&
-            completedState.pendingAudioDeliveryDrainCount == 0
+        let didQuiesce = isQuiescent(completedState)
         if didQuiesce {
             ScopeStorage.testStates.removeValue(forKey: identifier)
         }
@@ -264,24 +261,35 @@ extension MockURLProtocol {
     }
 
     /// Waits for a closing test scope to drain before removing its shared mock state.
-    static func finishClosingTestWhenQuiescent(identifier: String) {
+    ///
+    /// Bounded by `timeout` because this runs after the tearing-down thread already gave up: the
+    /// release it waits for calls into a client handler, and a handler that never returns would
+    /// otherwise hold the mock-test gate closed and hang every following mock-network test.
+    /// Returns whether the scope quiesced. A scope that did not is left registered, because an
+    /// owner this call could not revoke can still deliver into whatever runs next; the caller must
+    /// fail the run rather than restore settings or release the gate.
+    static func finishClosingTestWhenQuiescent(identifier: String, timeout: TimeInterval = 5.0) -> Bool {
         ScopeStorage.condition.lock()
-        advanceClosingScope(identifier: identifier, deadline: nil)
+        defer { ScopeStorage.condition.unlock() }
+
+        advanceClosingScope(identifier: identifier, deadline: Date().addingTimeInterval(timeout))
+        if let state = ScopeStorage.testStates[identifier], !isQuiescent(state) { return false }
         ScopeStorage.testStates.removeValue(forKey: identifier)
         if ScopeStorage.activeTestIdentifier == identifier {
             ScopeStorage.activeTestIdentifier = nil
         }
-        ScopeStorage.condition.unlock()
+        return true
     }
 }
 
 /// Runs the shutdown steps a closing scope still owes, in the order that keeps each one safe.
 ///
-/// The caller must hold the scope condition. A `nil` deadline waits indefinitely, which only the
-/// off-main recovery path may do; the tearing-down thread always supplies its scope deadline so no
-/// step can hold it past that bound. Steps that call into an owner unlock around the call.
-private func advanceClosingScope(identifier: String, deadline: Date?) {
-    while deadline.map({ Date() < $0 }) ?? true, let state = ScopeStorage.testStates[identifier] {
+/// The caller must hold the scope condition. Every caller supplies a deadline — the tearing-down
+/// thread its scope deadline and the recovery path its own longer bound — so no step can hold a
+/// caller indefinitely on an owner that never releases. Steps that call into an owner unlock
+/// around the call.
+private func advanceClosingScope(identifier: String, deadline: Date) {
+    while Date() < deadline, let state = ScopeStorage.testStates[identifier] {
         if hasUndrainedSessionWork(state) {
             waitForScopeChange(until: deadline)
         } else if !state.hasStartedAudioDeliveryRelease {
@@ -300,13 +308,17 @@ private func advanceClosingScope(identifier: String, deadline: Date?) {
     }
 }
 
-/// Waits for the next scope-state change, bounded by the caller's deadline when it has one.
-private func waitForScopeChange(until deadline: Date?) {
-    guard let deadline else {
-        ScopeStorage.condition.wait()
-        return
-    }
+/// Waits for the next scope-state change, never past the caller's deadline.
+private func waitForScopeChange(until deadline: Date) {
     ScopeStorage.condition.wait(until: deadline)
+}
+
+/// Returns whether a closing scope has finished every shutdown step it owes.
+private func isQuiescent(_ state: TestState) -> Bool {
+    !hasUndrainedSessionWork(state) &&
+        state.hasRevokedAudioDelivery &&
+        state.hasScheduledAudioDeliveryDrains &&
+        state.pendingAudioDeliveryDrainCount == 0
 }
 
 /// Returns whether session, protocol-load, or manager-initialization work can still enqueue delivery.

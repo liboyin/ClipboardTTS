@@ -57,9 +57,11 @@ enum TestNetworkFactory {
     /// Revokes queued callbacks while preserving a terminal error during main-thread teardown.
     static func revokePendingDelivery(for manager: TTSNetworkManager) {
         guard Thread.isMainThread else {
-            // `stopStreaming()` advances the state-queue generation synchronously. Timeout
-            // recovery must not wait for a main thread that is waiting for that recovery.
-            manager.stopStreaming()
+            // Timeout recovery must neither wait for a main thread that is waiting for it nor
+            // leave a publication behind on it. `revokeActiveRequest()` advances the generation
+            // synchronously and queues nothing, so the manager keeps whatever terminal state its
+            // test observed and can no longer authorize a callback.
+            manager.revokeActiveRequest()
             return
         }
         let cancel: @Sendable () -> Void = {
@@ -177,7 +179,7 @@ class MockURLProtocolTestCase: XCTestCase {
             }
             let shouldReleaseGateAfterRecovery = acquiredTestExecutionGate
             DispatchQueue.global(qos: .userInitiated).async {
-                MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+                MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
                 capturedSettingsSnapshot?.restore()
                 recovery.signal()
                 if shouldReleaseGateAfterRecovery {
@@ -189,6 +191,25 @@ class MockURLProtocolTestCase: XCTestCase {
         self.testIdentifier = nil
         MockURLProtocolTestCase.testExecutionLock.unlock()
         super.tearDown()
+    }
+
+    /// Finishes a closing scope, ending the run when the recovery bound expires instead.
+    ///
+    /// Every caller is about to restore the developer's settings or release the mock-test gate, and
+    /// a scope that did not quiesce still owns work that can deliver into whatever runs next: there
+    /// is nothing safe to hand the following test, so the run ends where the cause is still visible.
+    /// Use `MockURLProtocol.finishClosingTestWhenQuiescent` directly only to observe that bound.
+    static func finishClosingScopeOrEndRun(identifier: String) {
+        guard MockURLProtocol.finishClosingTestWhenQuiescent(identifier: identifier) else {
+            fatalError(
+                """
+                Mock test scope \(identifier) did not quiesce within the recovery bound: session, \
+                protocol-load, manager-construction, delivery-revocation, or delivery-queue work is \
+                still outstanding. Settings stay unrestored and the mock-test gate stays closed \
+                rather than hand a live callback owner to the next test.
+                """
+            )
+        }
     }
 
     /// Enters the process-wide mock-test gate, supporting the nested lifecycle test scope.
@@ -304,7 +325,7 @@ final class MockURLProtocolConstructionTests: XCTestCase {
 
         XCTAssertFalse(endResult.didQuiesce, "An initializing manager must keep settings restoration blocked.")
         MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
-        MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+        MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
     }
 
     func testClosingScopeRevokesAudioOwnerRegisteredDuringManagerConstruction() {
@@ -341,7 +362,7 @@ final class MockURLProtocolConstructionTests: XCTestCase {
             forTestIdentifier: testIdentifier
         )
         MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
-        MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+        MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
 
         stepLock.lock()
         XCTAssertEqual(

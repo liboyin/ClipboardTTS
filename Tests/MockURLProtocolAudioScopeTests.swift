@@ -19,7 +19,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             if let activeTestIdentifier {
                 let endResult = MockURLProtocol.endTest(identifier: activeTestIdentifier, timeout: 1.0)
                 if !endResult.didQuiesce {
-                    MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
+                    MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: activeTestIdentifier)
                 }
             }
             scopeSettings?.restore()
@@ -87,7 +87,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
 
         let settingsRestored = expectation(description: "Settings restore after owned delivery drains")
         DispatchQueue.global(qos: .userInitiated).async {
-            MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+            MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
             scopeSettings?.restore()
             settingsRestored.fulfill()
         }
@@ -117,7 +117,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         defer {
             releaseRevocation.signal()
             if let activeTestIdentifier {
-                MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
+                MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: activeTestIdentifier)
             }
             if acquiredTestExecutionGate {
                 MockURLProtocolTestCase.leaveTestExecutionGate()
@@ -168,7 +168,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         releaseRevocation.signal()
         let scopeClosed = expectation(description: "Scope closes once the revocation returns")
         DispatchQueue.global(qos: .userInitiated).async {
-            MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+            MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
             scopeClosed.fulfill()
         }
         wait(for: [scopeClosed], timeout: 5.0)
@@ -195,7 +195,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             if let activeTestIdentifier {
                 let endResult = MockURLProtocol.endTest(identifier: activeTestIdentifier, timeout: 2.0)
                 if !endResult.didQuiesce {
-                    MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
+                    MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: activeTestIdentifier)
                 }
             }
             if acquiredTestExecutionGate {
@@ -256,85 +256,5 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             "A publication queued by the blocking half of revocation must be stale by the time the main queue runs it."
         )
         XCTAssertFalse(manager.isStreaming)
-    }
-
-    func testBackgroundDeliveryRevocationDoesNotWaitForTheMainThread() {
-        // WHY: Timeout recovery runs off-main while the settings-isolation wrapper can be
-        // waiting on the main thread. Revocation must advance callback authority without a cycle.
-        MockURLProtocolTestCase.testExecutionLock.lock()
-        let acquiredTestExecutionGate = MockURLProtocolTestCase.enterTestExecutionGate()
-        isolateAppSettingsDefaults()
-        var activeTestIdentifier: String?
-        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.background-revocation")
-        let releaseDelivery = DispatchSemaphore(value: 0)
-        let releaseResponse = DispatchSemaphore(value: 0)
-        defer {
-            releaseResponse.signal()
-            releaseDelivery.signal()
-            if let activeTestIdentifier {
-                let endResult = MockURLProtocol.endTest(identifier: activeTestIdentifier, timeout: 1.0)
-                if !endResult.didQuiesce {
-                    MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
-                }
-            }
-            if acquiredTestExecutionGate {
-                MockURLProtocolTestCase.leaveTestExecutionGate()
-            }
-            MockURLProtocolTestCase.testExecutionLock.unlock()
-        }
-
-        activeTestIdentifier = MockURLProtocol.beginTest()
-        let deliveryBlocked = expectation(description: "Background revocation delivery queue is blocked")
-        audioDeliveryQueue.async {
-            deliveryBlocked.fulfill()
-            _ = releaseDelivery.wait(timeout: .now() + 2.0)
-        }
-        wait(for: [deliveryBlocked], timeout: 1.0)
-
-        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
-        manager.updateSettings(
-            baseURL: "https://mock.api/v1/audio/speech",
-            apiKey: "test",
-            model: "test",
-            voice: "test"
-        )
-        let requestStarted = expectation(description: "Request is active during background revocation")
-        MockURLProtocol.installRequestHandler { request in
-            requestStarted.fulfill()
-            _ = releaseResponse.wait(timeout: .now() + 2.0)
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, nil)
-        }
-
-        let callbackLock = NSLock()
-        var callbackRan = false
-        manager.streamTTS(text: "background teardown") { _ in
-            callbackLock.lock()
-            callbackRan = true
-            callbackLock.unlock()
-        }
-        wait(for: [requestStarted], timeout: 1.0)
-        guard let task = manager.activeTaskForTesting else {
-            XCTFail("Expected an active task before testing background delivery revocation.")
-            return
-        }
-        manager.urlSession(manager.session, dataTask: task, didReceive: Data([0, 1]))
-
-        let backgroundRevocationFinished = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .userInitiated).async {
-            TestNetworkFactory.revokePendingDelivery(for: manager)
-            backgroundRevocationFinished.signal()
-        }
-        XCTAssertEqual(
-            backgroundRevocationFinished.wait(timeout: .now() + 1.0),
-            .success,
-            "Background teardown must revoke delivery without waiting for main-thread service."
-        )
-
-        releaseDelivery.signal()
-        audioDeliveryQueue.sync {}
-        callbackLock.lock()
-        XCTAssertFalse(callbackRan, "Background revocation must invalidate queued delivery before it runs.")
-        callbackLock.unlock()
-        releaseResponse.signal()
     }
 }

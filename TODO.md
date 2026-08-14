@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly seven active implementation tasks: Tasks 19–24 and Task 34.
+- There are exactly six active implementation tasks: Tasks 19–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -97,7 +97,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| Mock-scope timeout recovery is unbounded and publishes into a later test | Non-blocking | 34 |
 
 ---
 
@@ -105,8 +104,8 @@ inside a later task.
 
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code. Tasks 26–29 are
-implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33. Tasks
-30–33 are complete; finish Task 34 before starting Phase 2.
+implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–34, all of
+which are complete. This phase is closed; Phase 2 may begin.
 
 Startup regressions now own their settings storage in memory, so no later task may seed a
 disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--test) for the rule.
@@ -121,8 +120,11 @@ state-publication group in the declaring file.
 
 Mock-scope revocation now runs in two halves, and the half that can block runs off the tearing-down
 thread under the scope deadline. Every later task that revokes or retries a request through the mock
-lifecycle MUST keep the blocking half off that thread and MUST NOT move owner state reads that
-require the main queue into it. See [README.md](README.md#build--test) for the contract.
+lifecycle MUST keep the blocking half off that thread, MUST NOT move owner state reads that require
+the main queue into it, and MUST NOT make the off-main recovery path publish request state: it
+revokes through the manager's non-publishing `revokeActiveRequest()`, and recovery is bounded, so a
+scope it cannot revoke ends the run instead of releasing the gate. See
+[README.md](README.md#build--test) for the contract.
 
 Terminal-state test assertions now require a publication caused after the assertion's own action,
 so no later task may reintroduce an assertion that reads state published before its action. They
@@ -139,78 +141,10 @@ The gap review confirmed at `4d8a842` that all three gates pass: `./check-covera
 0 failures, `Sources/Managers/` at 96.99%), `swiftlint --strict` (0 violations across 43 files), and
 the complete-concurrency build (no source warnings).
 
-### 34. Make mock-scope timeout recovery bounded and publication-free
-
-**Classification:** Non-blocking — test-lifecycle hang risk and late work
-
-**Depends on:** Nothing
-
-**Purpose.** Task 32 bounded the tearing-down thread, and its adversarial review found two defects
-that survive in the off-main recovery path. Both pre-date Task 32 and are unchanged in kind by it;
-the user chose to track them here rather than broaden that task.
-
-First, a client handler that never returns still hangs the suite, one test later.
-`MockURLProtocolTestCase.tearDown` hands a non-quiescent scope to
-`MockURLProtocol.finishClosingTestWhenQuiescent` on a background queue and signals
-`testExecutionGate` only after that call returns. The recovery state machine waits without a
-deadline for `hasReleasedAudioDelivery`, whose release runs the same unbounded `stopStreaming`, so
-the next mock-network test blocks forever in `enterTestExecutionGate`.
-
-Second, recovery revokes off-main, where `TestNetworkFactory.revokePendingDelivery` calls
-`stopStreaming` without capturing terminal state. Its `clearLastError` and `setStreaming` updates are
-queued to the main queue at the *current* generation, so unlike the release half's publications
-nothing makes them stale. Recovery then drains only the registered audio queues, removes the scope,
-restores settings, and releases the gate, leaving those blocks free to mutate a retained manager
-after a later scope has begun.
-
-**Primary paths.**
-
-- `Tests/MockURLProtocolScope.swift`
-- `Tests/TestNetworkSupport.swift`
-- `Sources/Managers/TTSNetworkManager.swift` only if the chosen remedy needs a revocation entry point
-- `README.md`
-
-**This task requires a user decision before implementation,** because the remedies differ in
-architecture and in what they do to a stuck run: escalate a recovery that cannot finish into an
-explicit, loud run failure rather than a silent hang; and either give the manager a revocation
-operation that advances the generation without publishing, or account for recovery's asynchronous
-main-queue completion by some means other than waiting on main.
-
-**Required change.**
-
-1. Give recovery a bound, and fail the run explicitly when it expires. A scope that cannot quiesce
-   MUST NOT release the test gate for a following test that would then run against unrestored
-   settings or a live callback owner.
-2. Remove the live-generation publications recovery queues to the main queue, or account for them
-   before recovery declares the scope closed.
-3. Preserve the existing guarantee that a revoked handler cannot run after settings restoration or
-   in the next test's scope.
-4. Document the resulting recovery contract in README's mock-test lifecycle paragraph, replacing
-   the accepted-limit sentence Task 32 recorded there.
-
-**Non-goals and invariants.**
-
-- Do not make the recovery path synchronously wait on the main queue: the settings-isolation
-  wrapper's main thread can be waiting on that recovery.
-- Do not weaken the production callback-authority boundary to make teardown easier.
-- Do not use a sleep, and do not silently swallow a scope that fails to quiesce.
-- Do not reintroduce an unbounded wait on the tearing-down thread.
-
-**Validation and falsification.**
-
-- Hold a handler past both the scope deadline and the recovery bound, and prove the run fails
-  explicitly in bounded time instead of blocking the next test's gate acquisition.
-- Prove a scope that recovers normally still restores settings, releases the gate, and leaves no
-  main-queue publication that can mutate its manager afterwards.
-- Mutation-test removing the recovery bound and reintroducing a live-generation publication.
-
-**Done when.** No mock scope can hang the suite or publish into a later test, whichever thread tore
-it down.
-
 ### Phase 1 gap review — closed
 
-The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33. Do
-not begin Phase 2 until Task 34 is complete.
+The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33; Task
+33's execution split off Task 34. Every one of them has landed, so Phase 2 may begin.
 
 ---
 
@@ -223,7 +157,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Task 34
+**Depends on:** Phase 1 gap review
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -284,7 +218,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Task 34
+**Depends on:** Phase 1 gap review
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another

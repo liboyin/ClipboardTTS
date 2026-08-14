@@ -28,8 +28,13 @@ extension TTSNetworkManager {
         }
     }
 
-    /// Cancels the active stream and advances the generation for a new request attempt.
-    private func beginRequestAttempt() -> UInt64 {
+    /// Cancels the active stream and advances the generation, revoking every queued delivery.
+    ///
+    /// Each request attempt begins here, and the returned generation is the one that attempt owns.
+    /// It publishes no request state, so a caller that must not queue work to the main queue — a
+    /// test tearing a manager down off-main — can revoke delivery through it directly.
+    @discardableResult
+    func revokeActiveRequest() -> UInt64 {
         callbackAuthority.lock()
         defer { callbackAuthority.unlock() }
         return stateQueue.sync {
@@ -46,7 +51,7 @@ extension TTSNetworkManager {
         }) {
             return
         }
-        let requestGeneration = beginRequestAttempt()
+        let requestGeneration = revokeActiveRequest()
         clearLastError(requestGeneration: requestGeneration)
         let settings = requestSettingsSnapshot()
         guard settings.provider != .custom || hasNonWhitespaceModelAndVoice(settings) else {
@@ -91,7 +96,7 @@ extension TTSNetworkManager {
     }
 
     func stopStreaming() {
-        let requestGeneration = beginRequestAttempt()
+        let requestGeneration = revokeActiveRequest()
         clearLastError(requestGeneration: requestGeneration)
         setStreaming(false, requestGeneration: requestGeneration)
     }
