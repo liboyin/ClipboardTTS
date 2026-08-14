@@ -105,6 +105,159 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         activeTestIdentifier = nil
     }
 
+    func testClosingScopeStopsWaitingForARevocationAnInFlightHandlerHoldsUp() {
+        // WHY: Revocation runs `stopStreaming`, which waits for an in-flight client handler to
+        // return — see TTSNetworkManagerCallbackAuthorityTests. Running that on the tearing-down
+        // thread left it outside the scope deadline, so a handler that never returned turned one
+        // failing test into a hung suite: the failure class this bounded lifecycle exists to end.
+        MockURLProtocolTestCase.testExecutionLock.lock()
+        let acquiredTestExecutionGate = MockURLProtocolTestCase.enterTestExecutionGate()
+        let releaseRevocation = DispatchSemaphore(value: 0)
+        var activeTestIdentifier: String?
+        defer {
+            releaseRevocation.signal()
+            if let activeTestIdentifier {
+                MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
+            }
+            if acquiredTestExecutionGate {
+                MockURLProtocolTestCase.leaveTestExecutionGate()
+            }
+            MockURLProtocolTestCase.testExecutionLock.unlock()
+        }
+
+        let testIdentifier = MockURLProtocol.beginTest()
+        activeTestIdentifier = testIdentifier
+        let revocationStarted = expectation(description: "Blocked revocation started")
+        let stepLock = NSLock()
+        var revocationSteps: [String] = []
+        MockURLProtocol.register(
+            audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.blocked-revocation"),
+            releasePendingDelivery: {
+                stepLock.lock()
+                revocationSteps.append("release")
+                stepLock.unlock()
+                revocationStarted.fulfill()
+                _ = releaseRevocation.wait(timeout: .now() + 5.0)
+            },
+            finishRevocation: {
+                stepLock.lock()
+                revocationSteps.append("finish")
+                stepLock.unlock()
+            },
+            forTestIdentifier: testIdentifier
+        )
+        let startedAt = Date()
+        let endResult = MockURLProtocol.endTest(identifier: testIdentifier, timeout: 0.2)
+        let elapsed = Date().timeIntervalSince(startedAt)
+        wait(for: [revocationStarted], timeout: 1.0)
+
+        XCTAssertFalse(endResult.didQuiesce, "A revocation still holding an owner must leave the scope non-quiescent.")
+        XCTAssertLessThan(
+            elapsed,
+            2.0,
+            "Teardown must stop waiting for a blocked revocation at the scope deadline, not for the handler."
+        )
+        stepLock.lock()
+        XCTAssertEqual(
+            revocationSteps,
+            ["release"],
+            "Teardown must not run the tearing-down-thread half while the blocking half still owns the manager."
+        )
+        stepLock.unlock()
+
+        releaseRevocation.signal()
+        let scopeClosed = expectation(description: "Scope closes once the revocation returns")
+        DispatchQueue.global(qos: .userInitiated).async {
+            MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
+            scopeClosed.fulfill()
+        }
+        wait(for: [scopeClosed], timeout: 5.0)
+        activeTestIdentifier = nil
+        stepLock.lock()
+        XCTAssertEqual(revocationSteps, ["release", "finish"], "Recovery must finish the revocation it could not bound.")
+        stepLock.unlock()
+    }
+
+    func testQuiescedScopeKeepsTheOwnerTerminalStateAheadOfItsOwnRevocationPublications() {
+        // WHY: The blocking half of revocation runs off the tearing-down thread, so its
+        // `stopStreaming` publishes `lastError` and `isStreaming` through the main queue instead of
+        // inline. Those publications clear the terminal error. Teardown must advance the generation
+        // past them on the tearing-down thread, or they land in a later test and erase state that
+        // this test's post-quiescence assertions just read.
+        MockURLProtocolTestCase.testExecutionLock.lock()
+        let acquiredTestExecutionGate = MockURLProtocolTestCase.enterTestExecutionGate()
+        isolateAppSettingsDefaults()
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.quiesced-scope-delivery")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        var activeTestIdentifier: String?
+        defer {
+            releaseResponse.signal()
+            if let activeTestIdentifier {
+                let endResult = MockURLProtocol.endTest(identifier: activeTestIdentifier, timeout: 2.0)
+                if !endResult.didQuiesce {
+                    MockURLProtocol.finishClosingTestWhenQuiescent(identifier: activeTestIdentifier)
+                }
+            }
+            if acquiredTestExecutionGate {
+                MockURLProtocolTestCase.leaveTestExecutionGate()
+            }
+            MockURLProtocolTestCase.testExecutionLock.unlock()
+        }
+
+        UserDefaults.standard.set("developer-voice", forKey: SettingsKeys.openAIVoice)
+        let scopeSettings = UserDefaultsSnapshot(keys: [SettingsKeys.openAIVoice])
+        UserDefaults.standard.removeObject(forKey: SettingsKeys.openAIVoice)
+        activeTestIdentifier = MockURLProtocol.beginTest()
+
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
+        manager.updateSettings(
+            baseURL: "https://mock.api/v1/audio/speech",
+            apiKey: "test",
+            model: "test",
+            voice: "test"
+        )
+        let requestStarted = expectation(description: "Request started before queuing audio")
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 2.0)
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, nil)
+        }
+
+        manager.streamTTS(text: "quiesced scope delivery") { _ in }
+        wait(for: [requestStarted], timeout: 1.0)
+        guard let task = manager.activeTaskForTesting else {
+            XCTFail("Expected the manager to own a task before queuing test audio.")
+            return
+        }
+        let terminalError = "The TTS service returned no playable audio. Please try again."
+        manager.urlSession(manager.session, dataTask: task, didReceive: Data([0]))
+        assertTerminalState(of: manager, expectedError: terminalError) {
+            manager.urlSession(manager.session, task: task, didCompleteWithError: nil)
+        }
+        releaseResponse.signal()
+
+        guard let testIdentifier = activeTestIdentifier else {
+            XCTFail("Expected the manual mock scope to remain active.")
+            return
+        }
+        let endResult = MockURLProtocol.endTest(identifier: testIdentifier, timeout: 2.0)
+        activeTestIdentifier = nil
+        XCTAssertTrue(endResult.didQuiesce, "A scope whose delivery is not blocked must drain inside its deadline.")
+        XCTAssertEqual(manager.lastError, terminalError, "Teardown must preserve the terminal error it revoked around.")
+        scopeSettings.restore()
+        XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), "developer-voice")
+
+        let mainQueueDrained = expectation(description: "Main queue drained after the scope closed")
+        DispatchQueue.main.async { mainQueueDrained.fulfill() }
+        wait(for: [mainQueueDrained], timeout: 1.0)
+        XCTAssertEqual(
+            manager.lastError,
+            terminalError,
+            "A publication queued by the blocking half of revocation must be stale by the time the main queue runs it."
+        )
+        XCTAssertFalse(manager.isStreaming)
+    }
+
     func testBackgroundDeliveryRevocationDoesNotWaitForTheMainThread() {
         // WHY: Timeout recovery runs off-main while the settings-isolation wrapper can be
         // waiting on the main thread. Revocation must advance callback authority without a cycle.

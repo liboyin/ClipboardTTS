@@ -47,9 +47,8 @@ enum TestNetworkFactory {
         )
         MockURLProtocol.register(
             audioDeliveryQueue: audioDeliveryQueue,
-            cancelPendingDelivery: {
-                revokePendingDelivery(for: manager)
-            },
+            releasePendingDelivery: { manager.stopStreaming() },
+            finishRevocation: { revokePendingDelivery(for: manager) },
             forTestIdentifier: testIdentifier
         )
         return manager
@@ -325,15 +324,32 @@ final class MockURLProtocolConstructionTests: XCTestCase {
         let endResult = MockURLProtocol.endTest(identifier: testIdentifier, timeout: 0)
         XCTAssertFalse(endResult.didQuiesce)
 
-        let cancellation = expectation(description: "Late-registered delivery owner is revoked")
+        let stepLock = NSLock()
+        var revocationSteps: [String] = []
         MockURLProtocol.register(
             audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.late-delivery-owner"),
-            cancelPendingDelivery: { cancellation.fulfill() },
+            releasePendingDelivery: {
+                stepLock.lock()
+                revocationSteps.append("release")
+                stepLock.unlock()
+            },
+            finishRevocation: {
+                stepLock.lock()
+                revocationSteps.append("finish")
+                stepLock.unlock()
+            },
             forTestIdentifier: testIdentifier
         )
         MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
         MockURLProtocol.finishClosingTestWhenQuiescent(identifier: testIdentifier)
-        wait(for: [cancellation], timeout: 1.0)
+
+        stepLock.lock()
+        XCTAssertEqual(
+            revocationSteps,
+            ["release", "finish"],
+            "A late-registered owner must be released before teardown finishes its revocation."
+        )
+        stepLock.unlock()
     }
 }
 
