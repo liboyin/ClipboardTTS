@@ -8,8 +8,13 @@ Sources/
   Managers/
     AudioPlayerManager.swift
     TextExtractionManager.swift
-    TTSNetworkManager.swift
-    TTSNetworkManager+Metadata.swift # guarded model/voice metadata requests
+    CallbackAuthority.swift     # the lock spanning delivery authorization and revocation
+    TTSNetworkManager.swift     # request settings, state publication, response delegate entry
+    TTSNetworkManager+RequestLifecycle.swift # starting, replacing, and stopping a request
+    TTSNetworkManager+Requests.swift        # endpoint and request-body construction
+    TTSNetworkManager+GeminiStreaming.swift # Gemini SSE parsing and audio delivery
+    TTSNetworkManager+Failures.swift        # task completion and sanitized failure text
+    TTSNetworkManager+Metadata.swift        # guarded model/voice metadata requests
     ServicesCoordinator.swift   # bridges the macOS Services flow into the audio pipeline
   Views/
     MenuBarView.swift

@@ -29,7 +29,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     var session: URLSession!
     /// Session-lifecycle and request-body seams used by production setup and focused tests.
-    private let sessionInvalidated: ((URLSession) -> Void)?; let requestBodyEncoder: (Data) throws -> Data
+    private let sessionInvalidated: ((URLSession) -> Void)?
+    let requestBodyEncoder: (Data) throws -> Data
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     /// Delivers request-owned PCM in the same order that `stateQueue` accepts delegate callbacks.
@@ -40,11 +41,15 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Serializes generation revocation with delivery authorization and the complete client
     /// callback. It is recursive so a handler can synchronously stop or replace its own stream.
     let callbackAuthority: CallbackAuthorityLocking
-    var activeRequest: ActiveRequestContext?; var requestGeneration: UInt64 = 0
-    private var requestStatePublicationDepth = 0; private(set) var selectedMetadataProvider: String
+    var activeRequest: ActiveRequestContext?
+    var requestGeneration: UInt64 = 0
+    private var requestStatePublicationDepth = 0
+    private(set) var selectedMetadataProvider: String
     var metadataGeneration: UInt64 = 0
-    var nextMetadataRequestIdentifier: UInt64 = 0; var modelMetadataRequest: MetadataRequest?
-    var voiceMetadataRequest: MetadataRequest?; var isPublishingMetadata = false
+    var nextMetadataRequestIdentifier: UInt64 = 0
+    var modelMetadataRequest: MetadataRequest?
+    var voiceMetadataRequest: MetadataRequest?
+    var isPublishingMetadata = false
 
     /// Returns the active task for debug-only delegate-ordering tests.
     #if DEBUG
@@ -129,7 +134,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             self.model = defaults.string(forKey: SettingsKeys.customModel) ?? ""
             self.voice = defaults.string(forKey: SettingsKeys.customVoice) ?? ""
         }
-        self.requestBodyEncoder = requestBodyEncoder; self.sessionInvalidated = sessionInvalidated
+        self.requestBodyEncoder = requestBodyEncoder
+        self.sessionInvalidated = sessionInvalidated
         self.audioDeliveryQueue = audioDeliveryQueue
         self.callbackAuthority = callbackAuthority
 
@@ -194,7 +200,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
-    private func requestSettingsSnapshot() -> RequestSettings {
+    /// Captures the immutable settings one request attempt owns from start to finish.
+    func requestSettingsSnapshot() -> RequestSettings {
         stateQueue.sync {
             RequestSettings(
                 baseURL: baseURL,
@@ -203,38 +210,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                 voice: voice,
                 provider: ProviderKind(baseURL: baseURL, selectedProvider: selectedMetadataProvider)
             )
-        }
-    }
-
-    private func replaceActiveRequest(with task: URLSessionDataTask,
-                                      provider: ProviderKind,
-                                      requestGeneration: UInt64,
-                                      dataHandler: @escaping @Sendable (Data) -> Void) -> Bool {
-        stateQueue.sync {
-            // Swap all task-owned state together so a previous task cannot deliver its data to
-            // the new handler in the window between cancellation and context replacement.
-            guard self.requestGeneration == requestGeneration else { return false }
-            activeRequest?.task.cancel()
-            activeRequest = ActiveRequestContext(
-                task: task,
-                taskIdentifier: task.taskIdentifier,
-                requestGeneration: requestGeneration,
-                provider: provider,
-                dataHandler: dataHandler
-            )
-            return true
-        }
-    }
-
-    /// Cancels the active stream and advances the generation for a new request attempt.
-    private func beginRequestAttempt() -> UInt64 {
-        callbackAuthority.lock()
-        defer { callbackAuthority.unlock() }
-        return stateQueue.sync {
-            activeRequest?.task.cancel()
-            activeRequest = nil
-            requestGeneration &+= 1
-            return requestGeneration
         }
     }
 
@@ -294,7 +269,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Defers request starts triggered by synchronous `@Published` observer re-entrancy.
-    private func deferRequestStartIfPublishingState(_ action: @escaping @Sendable () -> Void) -> Bool {
+    func deferRequestStartIfPublishingState(_ action: @escaping @Sendable () -> Void) -> Bool {
         let isPublishing = stateQueue.sync { requestStatePublicationDepth > 0 }
         guard isPublishing else { return false }
         DispatchQueue.main.async(execute: action)
@@ -306,60 +281,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         stateQueue.sync { requestStatePublicationDepth += 1 }
         defer { stateQueue.sync { requestStatePublicationDepth -= 1 } }
         update()
-    }
-
-    func streamTTS(text: String, dataHandler: @escaping @Sendable (Data) -> Void) {
-        if deferRequestStartIfPublishingState({ [weak self] in
-            self?.streamTTS(text: text, dataHandler: dataHandler)
-        }) {
-            return
-        }
-        let requestGeneration = beginRequestAttempt(); clearLastError(requestGeneration: requestGeneration)
-        let settings = requestSettingsSnapshot()
-        guard settings.provider != .custom || hasNonWhitespaceModelAndVoice(settings) else {
-            publishFailure("Custom TTS requires a model and voice. Update Settings and try again.", requestGeneration: requestGeneration)
-            return
-        }
-        guard let url = requestURL(for: settings) else {
-            publishFailure("TTS configuration is invalid. Check the API endpoint and try again.", requestGeneration: requestGeneration)
-            return
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        if settings.provider == .gemini {
-            request.setValue(settings.apiKey, forHTTPHeaderField: "x-goog-api-key")
-        } else {
-            request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
-        }
-
-        do {
-            request.httpBody = try encodedRequestBody(text: text, settings: settings)
-        } catch {
-            publishFailure("Couldn't prepare the speech request. Check the settings and try again.", requestGeneration: requestGeneration)
-            return
-        }
-
-        let task = session.dataTask(with: request)
-        guard replaceActiveRequest(
-            with: task,
-            provider: settings.provider,
-            requestGeneration: requestGeneration,
-            dataHandler: dataHandler
-        ) else {
-            task.cancel()
-            return
-        }
-
-        setStreaming(true, requestGeneration: requestGeneration); task.resume()
-    }
-
-    func stopStreaming() {
-        let requestGeneration = beginRequestAttempt()
-        clearLastError(requestGeneration: requestGeneration)
-        setStreaming(false, requestGeneration: requestGeneration)
     }
 
     func urlSession(_ session: URLSession,

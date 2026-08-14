@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly eight active implementation tasks: Tasks 19–24 and Tasks 33–34.
+- There are exactly seven active implementation tasks: Tasks 19–24 and Task 34.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -97,7 +97,6 @@ inside a later task.
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
-| `TTSNetworkManager.swift` has 12 lines of file-length headroom for Tasks 19 and 22 | Non-blocking | 33 |
 | Mock-scope timeout recovery is unbounded and publishes into a later test | Non-blocking | 34 |
 
 ---
@@ -107,10 +106,18 @@ inside a later task.
 This phase repairs ownership boundaries used by later tasks: tests must not touch developer
 configuration, and a stopped request must not retain authority to call client code. Tasks 26–29 are
 implemented. Its gap review ran on 2026-08-13 over `8a81b50..4d8a842` and added Tasks 30–33. Tasks
-30–32 are complete; finish Tasks 33 and 34 before starting Phase 2.
+30–33 are complete; finish Task 34 before starting Phase 2.
 
 Startup regressions now own their settings storage in memory, so no later task may seed a
 disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--test) for the rule.
+
+A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
+semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
+different purpose moves to its own file, and may widen from `private` to internal only where that
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 309 lines under a 400-line
+limit, so Tasks 19 and 22 have room; `TTSNetworkManager+RequestLifecycle.swift` now owns starting,
+replacing, and stopping a request. Note that `lastError` has a file-private setter, which keeps the
+state-publication group in the declaring file.
 
 Mock-scope revocation now runs in two halves, and the half that can block runs off the tearing-down
 thread under the scope deadline. Every later task that revokes or retries a request through the mock
@@ -131,54 +138,6 @@ and MUST NOT acquire callback authority while holding `stateQueue`. See
 The gap review confirmed at `4d8a842` that all three gates pass: `./check-coverage.sh` (132 tests,
 0 failures, `Sources/Managers/` at 96.99%), `swiftlint --strict` (0 violations across 43 files), and
 the complete-concurrency build (no source warnings).
-
-### 33. Restore one declaration per line in `TTSNetworkManager.swift`
-
-**Classification:** Non-blocking — readability, and headroom for Phase 2 and Phase 3
-
-**Depends on:** Nothing
-
-**Purpose.** Unrelated declarations in this file are joined with semicolons to fit under SwiftLint's
-400-line `file_length` limit. `465f0d9` started the practice at line 43; `1b9a65e` extended it to
-lines 32, 44, 46, and 47, and to the initializer statement at line 132. `0c877ce` then had to
-relocate `requestURL(for:)` out of the file for the same reason, after the limit failed the build
-and, through it, `./check-coverage.sh`. The file is 388 lines, 12 short of the limit. Tasks 19 and
-22 both add code to it, so the next executor meets the same pressure and the same temptation to
-compress declarations instead of structuring the change.
-
-**The user has decided the approach.** Create headroom by splitting the file along cohesion:
-declarations that belong to the same purpose stay together, and a group that clearly serves a
-different purpose moves to its own file. Do not raise the `file_length` limit, and do not accept the
-current density. Task 32 applied this same decision to `Tests/MockURLProtocol.swift`, whose per-test
-scope registry moved to `Tests/MockURLProtocolScope.swift`; a relocated group may widen from
-`private` to internal only where the new file genuinely owns it, as `0c877ce` did.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- the new file that receives the relocated group
-- `README.md` if the file layout changes
-
-**Required change.**
-
-1. Restore one declaration per line for every semicolon-joined stored property.
-2. Apply the user's chosen approach to create headroom.
-3. Leave every declaration's type, access level, and initialization byte-identical.
-
-**Non-goals and invariants.**
-
-- Do not change behavior, isolation annotations, or the documented confinement rules.
-- Do not disable `file_length`, and do not move a declaration into a file that does not own it.
-- Do not bundle this with Task 19 or Task 22.
-
-**Validation and falsification.**
-
-- Confirm `swiftlint --strict` and the complete-concurrency build stay clean, and the full suite
-  passes unchanged.
-- Confirm `git diff` shows only formatting or relocation, with no semantic edit.
-
-**Done when.** The manager file declares one property per line and has documented headroom for the
-Phase 2 and Phase 3 changes that target it.
 
 ### 34. Make mock-scope timeout recovery bounded and publication-free
 
@@ -251,7 +210,7 @@ it down.
 ### Phase 1 gap review — closed
 
 The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opened Tasks 30–33. Do
-not begin Phase 2 until Tasks 33 and 34 are complete.
+not begin Phase 2 until Task 34 is complete.
 
 ---
 
@@ -264,7 +223,7 @@ during a deferred UI action.
 
 **Classification:** Blocking — credential transport security
 
-**Depends on:** Tasks 33–34
+**Depends on:** Task 34
 
 **Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
 key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
@@ -325,7 +284,7 @@ except to an explicitly recognized loopback endpoint.
 
 **Classification:** Blocking — explicit two-click playback behavior
 
-**Depends on:** Tasks 33–34
+**Depends on:** Task 34
 
 **Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
 0.2-second delayed clipboard read. The closure does not check again. A Services request or another
