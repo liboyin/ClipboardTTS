@@ -168,12 +168,27 @@ audio state cannot describe a finished request whose accepted audio is still in 
 schedule through that owner so a superseded attempt is dropped; injecting its scheduler is how a
 test owns that timing. See [README.md](README.md#architecture) for the rule.
 
-### Phase 2 mandatory gap review
+### Phase 2 gap review — closed
 
-Run the **Phase review gate** on the Phase 2 commit range. Scrutinize URL parsing and host confusion,
-credential/header construction, loopback exceptions, ATS assumptions, delayed-action ownership,
-Services/clipboard interleavings, and cancellation generations. Do not begin Phase 3 until the
-review is closed with no blocking findings.
+The 2026-08-16 review over `b871b09..c5db8fa` rechecked URL parsing and host confusion,
+credential/header construction, loopback exceptions, redirect transport, delayed-action ownership,
+Services/clipboard interleavings, and cancellation generations. Focused host-parsing probes covered
+trailing-dot and percent-encoded names, backslash authority confusion, mapped IPv6, expanded IPv6,
+leading-zero IPv4, and Unicode-dot normalization; every accepted cleartext form still resolved to
+the loopback interface under Foundation's parsed host. The review found no blocking or non-blocking
+Phase 2 gap and added no task, so Phase 3 may begin.
+
+All three gates passed at `c5db8fa`: `./check-coverage.sh` (157 tests, 0 failures,
+`Sources/Managers/` at 97.50%), `swiftlint --strict` (0 violations across 51 files), and the
+complete-concurrency build (no source warnings).
+
+The same review revalidated Tasks 21–24 against current code, test output, and official provider
+documentation. Google still documents exactly 30 Gemini TTS voices and the rare Gemini 3.1 TTS
+HTTP 500 with automated retry guidance; the full suite still emits the unhosted `StateObject`
+warnings; and failed legacy-key migration still has no in-app retry. Google now recommends its
+Interactions API for new development, but explicitly says the app's existing `generateContent`
+API remains fully supported. No migration task is justified by the current remediation boundary;
+Task 22 stays on the existing endpoint and response contract.
 
 ---
 
@@ -186,7 +201,7 @@ adds the bounded recovery Google recommends for the model's documented transient
 
 **Classification:** Blocking — incomplete provider-authoritative menu metadata
 
-**Depends on:** Phase 2 mandatory gap review
+**Depends on:** Phase 2 gap review
 
 **Purpose.** The app currently publishes only `Aoede`, `Charon`, `Fenrir`, `Kore`, and `Puck` for
 Gemini. At review time Google's official Gemini TTS guide documented 30 supported voices. Task 13
@@ -208,7 +223,7 @@ valid choices.
 1. Re-verify the supported Gemini TTS voices against the current official Google documentation at
    execution time, starting from the
    [Gemini TTS guide](https://ai.google.dev/gemini-api/docs/speech-generation). Do not copy the
-   2026-08-10 count mechanically if the provider contract changed.
+   2026-08-16 count mechanically if the provider contract changed.
 2. Keep one production source of truth for the documented Gemini voice catalog.
 3. Publish the complete current list through the existing freshness-guarded metadata path so both
    menu and Settings suggestions use the same provider-authoritative values.
@@ -261,7 +276,8 @@ into an immediate terminal error.
 
 1. Re-verify Google's current retry guidance in the
    [Gemini TTS limitations](https://ai.google.dev/gemini-api/docs/speech-generation#limitations)
-   before implementation.
+   and its Generate Content variant before implementation, because the latter matches the app's
+   current endpoint and SSE response contract.
 2. Treat the retry as part of one logical user request with the same immutable settings, text,
    credentials, decoder, handler, and cancellation generation.
 3. Retry Gemini HTTP 500 at most once and only when the request is still current. Keep
@@ -281,6 +297,9 @@ into an immediate terminal error.
 **Non-goals and invariants.**
 
 - Do not add exponential backoff, a general retry framework, or more than one automatic attempt.
+- Do not migrate Gemini to the Interactions API as part of this task. `generateContent` remains
+  fully supported, and that migration would replace the request and streaming-response contracts
+  rather than implement the bounded retry requested here.
 - Do not rebuild retry input from mutable current Settings.
 - Do not expose response bodies, keys, or provider-controlled error text.
 - Preserve incremental delivery, ordering, final-event accounting, and the 0.1-second audio
