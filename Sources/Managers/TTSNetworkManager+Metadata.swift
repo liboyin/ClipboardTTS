@@ -41,6 +41,16 @@ extension TTSNetworkManager {
         baseURL.contains("generativelanguage.googleapis.com") ? "Gemini" : "OpenAICompatible"
     }
 
+    /// Builds a metadata endpoint, refusing one whose transport would expose the key it carries.
+    ///
+    /// A discovery request attaches the same `Authorization: Bearer` credential as a speech
+    /// request, so it answers to the same rule as `requestEndpoint(for:)`. A refusal is silent, as
+    /// every other metadata failure is: the lists stay as they were and no request is created.
+    private func metadataURL(from urlString: String) -> URL? {
+        guard let url = URL(string: urlString), EndpointTransportPolicy.permitsCredentials(url) else { return nil }
+        return url
+    }
+
     private func beginMetadataRequest(for kind: MetadataKind,
                                       source: MetadataSource) -> MetadataRequestToken? {
         stateQueue.sync {
@@ -191,7 +201,7 @@ extension TTSNetworkManager {
         }
 
         let modelsURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/models")
-        guard let url = URL(string: modelsURLString) else {
+        guard let url = metadataURL(from: modelsURLString) else {
             finishMetadataRequest(for: .models, token: token)
             return
         }
@@ -239,7 +249,7 @@ extension TTSNetworkManager {
         }
 
         let voicesURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/audio/voices")
-        guard let url = URL(string: voicesURLString) else {
+        guard let url = metadataURL(from: voicesURLString) else {
             finishMetadataRequest(for: .voices, token: token)
             return
         }

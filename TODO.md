@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly six active implementation tasks: Tasks 19–24.
+- There are exactly five active implementation tasks: Tasks 20–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,7 +91,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Custom credentials can be attached to an arbitrary plain-HTTP endpoint | Blocking | 19 |
 | The deferred clipboard action can replace a stream started during its delay | Blocking | 20 |
 | Gemini exposes only 5 of the 30 currently documented TTS voices | Blocking | 21 |
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
@@ -114,7 +113,7 @@ A file that reaches SwiftLint's `file_length` limit is split along cohesion, nev
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
 file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 309 lines under a 400-line
-limit, so Tasks 19 and 22 have room; `TTSNetworkManager+RequestLifecycle.swift` now owns starting,
+limit, so Task 22 has room; `TTSNetworkManager+RequestLifecycle.swift` now owns starting,
 replacing, and stopping a request. Note that `lastError` has a file-private setter, which keeps the
 state-publication group in the declaring file.
 
@@ -153,66 +152,13 @@ The 2026-08-13 review over `8a81b50..4d8a842` verified the gates above and opene
 This phase prevents request setup from leaking credentials or replacing work that became active
 during a deferred UI action.
 
-### 19. Reject insecure non-loopback Custom endpoints
-
-**Classification:** Blocking — credential transport security
-
-**Depends on:** Phase 1 gap review
-
-**Purpose.** `requestURL` accepts both HTTP and HTTPS, and Custom requests attach their saved API
-key as `Authorization: Bearer`. Application Transport Security currently provides a platform layer,
-but the app contract itself does not prevent future configuration or policy changes from sending
-credentials and clipboard text to an arbitrary cleartext remote endpoint. `requestURL(for:)` moved
-to `TTSNetworkManager+Requests.swift` in `0c877ce`. The metadata paths are weaker still: the model
-and voice requests build their URL with a bare `URL(string:)`, attach `Authorization: Bearer`, and
-apply no scheme check at all.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Managers/TTSNetworkManager+Requests.swift`
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Sources/Views/SettingsView.swift`
-- `Tests/TTSNetworkManagerAuthenticationTests.swift`
-- `Tests/TTSNetworkManagerFailureTests.swift`
-- `Tests/SettingsViewTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Centralize endpoint transport validation for every Custom request path.
-2. Permit HTTPS endpoints with an otherwise valid host.
-3. Permit plain HTTP only for explicit loopback hosts needed by local engines: `localhost`, IPv4
-   loopback addresses, and IPv6 loopback. Do not treat private-network or DNS-resolved remote hosts
-   as loopback merely because they may be local to one machine.
-4. Reject every other HTTP endpoint before creating or resuming a URL-session task and before
-   attaching credentials or request content.
-5. Publish a short actionable application-owned configuration error that contains no key, request
-   body, or full credential-bearing URL.
-6. Apply the same rule to any Custom metadata request that remains reachable after re-reading the
-   current UI and manager contract.
-7. Document the HTTPS/loopback rule in README's Custom-provider assumptions.
-
-**Non-goals and invariants.**
-
-- Do not add certificate pinning, custom trust handling, an ATS exception, or a general networking
-  policy framework.
-- Do not block HTTP loopback engines that satisfy the existing OpenAI-compatible contract.
-- Do not alter fixed OpenAI or Gemini endpoints and authentication headers.
-- Do not log or render rejected URLs containing user-controlled query values.
-
-**Validation and falsification.**
-
-- Intercept HTTPS Custom, `http://localhost`, IPv4 loopback, and IPv6 loopback requests and prove
-  they use the expected request contract.
-- Assert public-host HTTP, private-LAN HTTP, deceptive hostnames, user-info tricks, missing hosts,
-  and unsupported schemes fail without starting a request.
-- Inject a conspicuous fake key and prove it appears nowhere in the rejection error, URL, logs,
-  preferences, or an emitted request.
-- Mutation-test allowing arbitrary HTTP and over-restricting valid loopback HTTP.
-
-**Done when.** The app cannot send Custom credentials or clipboard text over cleartext transport
-except to an explicitly recognized loopback endpoint.
+Endpoint transport is now one app-owned rule: every credential-bearing endpoint, speech and
+metadata alike, resolves through `EndpointTransportPolicy`, and so does every redirect target the
+session offers to follow. A refused speech endpoint publishes its own message instead of returning
+no URL, and a refused redirect records itself on the active request so completion reports that
+message rather than the provider's redirect status. A later task that adds, replaces, or retries a
+request MUST resolve its endpoint through that path rather than build a URL beside it. See
+[README.md](README.md#design-assumptions) for the rule.
 
 ### 20. Revalidate the deferred clipboard action at execution time
 

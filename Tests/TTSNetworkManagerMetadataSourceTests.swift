@@ -51,6 +51,71 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         XCTAssertEqual(manager.availableVoices, ["current-voice"])
     }
 
+    func testCleartextMetadataSourceCannotStartARequestOrPublishLists() {
+        // WHY: Discovery carries the same bearer key as speech, so an endpoint the speech path
+        // refuses must not leak that key through Settings or the menu instead. No handler is
+        // installed: this scope's unhandled-request accounting fails if a request is created.
+        let manager = TestNetworkFactory.makeManager()
+        let endpoint = "http://custom-metadata.example.com/v1/audio/speech"
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "cleartext-metadata-key",
+            model: "custom-model",
+            voice: "custom-voice",
+            selectedProvider: "Custom"
+        )
+
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "cleartext-metadata-key", selectedProvider: "Custom")
+        manager.fetchAvailableVoices(baseURL: endpoint, apiKey: "cleartext-metadata-key", selectedProvider: "Custom")
+
+        let publicationWindowClosed = expectation(description: "Any metadata publication has run")
+        DispatchQueue.main.async { publicationWindowClosed.fulfill() }
+        wait(for: [publicationWindowClosed], timeout: 1.0)
+        XCTAssertEqual(manager.availableModels, [])
+        XCTAssertEqual(manager.availableVoices, [])
+    }
+
+    func testLoopbackMetadataSourceStillDiscoversModelsAndVoices() {
+        // WHY: The transport rule must not cost a local engine its discovery. If loopback HTTP were
+        // over-restricted here, Settings would silently offer no models or voices for the one
+        // endpoint kind that legitimately cannot serve HTTPS.
+        let manager = TestNetworkFactory.makeManager()
+        let endpoint = "http://127.0.0.1:8080/v1/audio/speech"
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "loopback-metadata-key",
+            model: "local-model",
+            voice: "local-voice",
+            selectedProvider: "Custom"
+        )
+
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer loopback-metadata-key")
+            guard request.url?.path == "/v1/models" else {
+                return sourceTestResponse(for: request, json: "{ \"voices\": [\"local-voice\"] }")
+            }
+            return sourceTestResponse(for: request, json: "{ \"data\": [{\"id\": \"local-tts-model\"}] }")
+        }
+
+        let modelsPublished = expectation(description: "Loopback models published")
+        let voicesPublished = expectation(description: "Loopback voices published")
+        let observations = [
+            manager.$availableModels.dropFirst().sink { models in
+                guard models == ["local-tts-model"] else { return }
+                modelsPublished.fulfill()
+            },
+            manager.$availableVoices.dropFirst().sink { voices in
+                guard voices == ["local-voice"] else { return }
+                voicesPublished.fulfill()
+            }
+        ]
+        defer { observations.forEach { $0.cancel() } }
+
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "loopback-metadata-key", selectedProvider: "Custom")
+        manager.fetchAvailableVoices(baseURL: endpoint, apiKey: "loopback-metadata-key", selectedProvider: "Custom")
+        wait(for: [modelsPublished, voicesPublished], timeout: 2.0)
+    }
+
     func testReentrantScopeChangeClearsMetadataAfterPublication() {
         // WHY: @Published sends synchronously before assigning its new value. A subscriber that
         // changes provider at that point must leave no stale metadata after the assignment returns.

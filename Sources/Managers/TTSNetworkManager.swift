@@ -100,6 +100,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         var geminiIncompletePCM = Data()
         var hasGeminiStreamFailure = false
         var providerAudioByteCount = 0
+        var didRefuseInsecureRedirect = false
     }
 
     /// Creates a manager and optionally observes the lifecycle of its underlying URL session.
@@ -301,6 +302,31 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             }
         }
         completionHandler(shouldAllow ? .allow : .cancel)
+    }
+
+    /// Applies the endpoint transport rule to a redirect the provider asks the app to follow.
+    ///
+    /// URLSession follows redirects on its own, and a 307 or 308 replays the original method and
+    /// body — the user's clipboard text — at whatever endpoint the response names, so checking the
+    /// configured endpoint alone would let a provider move a request onto cleartext after it
+    /// started. This runs for metadata tasks as well, which URLSession consults here even though
+    /// they carry their own completion handler. A refused target records itself on the active
+    /// speech request so completion reports the transport failure instead of the redirect status.
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        if let url = request.url, EndpointTransportPolicy.permitsCredentials(url) {
+            completionHandler(request)
+            return
+        }
+        stateQueue.sync {
+            guard var context = activeRequest, task.taskIdentifier == context.taskIdentifier else { return }
+            context.didRefuseInsecureRedirect = true
+            activeRequest = context
+        }
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {

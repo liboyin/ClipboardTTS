@@ -58,8 +58,15 @@ extension TTSNetworkManager {
             publishFailure("Custom TTS requires a model and voice. Update Settings and try again.", requestGeneration: requestGeneration)
             return
         }
-        guard let url = requestURL(for: settings) else {
+        let url: URL
+        switch requestEndpoint(for: settings) {
+        case .allowed(let endpoint):
+            url = endpoint
+        case .malformed:
             publishFailure("TTS configuration is invalid. Check the API endpoint and try again.", requestGeneration: requestGeneration)
+            return
+        case .insecureTransport:
+            publishFailure(Self.insecureTransportFailure, requestGeneration: requestGeneration)
             return
         }
 

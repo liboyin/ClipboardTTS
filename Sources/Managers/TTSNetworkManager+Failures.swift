@@ -8,6 +8,7 @@ extension TTSNetworkManager {
         let providerAudioByteCount: Int
         let hasGeminiStreamFailure: Bool
         let hasIncompleteGeminiEvent: Bool
+        let didRefuseInsecureRedirect: Bool
         let isStale: Bool
     }
 
@@ -21,6 +22,7 @@ extension TTSNetworkManager {
                     providerAudioByteCount: 0,
                     hasGeminiStreamFailure: false,
                     hasIncompleteGeminiEvent: false,
+                    didRefuseInsecureRedirect: false,
                     isStale: true
                 )
             }
@@ -32,6 +34,7 @@ extension TTSNetworkManager {
                 providerAudioByteCount: context.providerAudioByteCount,
                 hasGeminiStreamFailure: context.hasGeminiStreamFailure,
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
+                didRefuseInsecureRedirect: context.didRefuseInsecureRedirect,
                 isStale: false
             )
             if !context.hasGeminiStreamFailure {
@@ -55,29 +58,37 @@ extension TTSNetworkManager {
             requestGeneration = result.requestGeneration
         }
 
-        let failureMessage: String?
-        if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
-            failureMessage = userFacingHTTPError(statusCode: statusCode)
-        } else if result.provider == .gemini && result.hasGeminiStreamFailure {
-            failureMessage = "The TTS service returned no playable audio. Please try again."
-        } else if error != nil {
-            failureMessage = "Couldn't reach the TTS service. Check your connection and try again."
-        } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
-            failureMessage = "The TTS service returned no playable audio. Please try again."
-        } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
-            failureMessage = "The TTS service returned no playable audio. Please try again."
-        } else if (result.provider == .openAICompatible || result.provider == .custom)
-                    && !containsCompletePCMFrame(result.providerAudioByteCount) {
-            failureMessage = "The TTS service returned no playable audio. Please try again."
-        } else {
-            failureMessage = nil
-        }
-
-        if let failureMessage {
+        if let failureMessage = userFacingFailure(for: result, error: error) {
             publishFailure(failureMessage, requestGeneration: requestGeneration)
         } else {
             setStreaming(false, requestGeneration: requestGeneration)
         }
+    }
+
+    /// Returns the app-owned message a finished request must publish, or nil when it succeeded.
+    ///
+    /// The order is the order of what the user can act on: a refused redirect explains itself
+    /// before the redirect status the provider happened to send, and an HTTP status explains
+    /// itself before the transport error that may accompany it.
+    private func userFacingFailure(for result: TaskCompletionResult, error: Error?) -> String? {
+        let noPlayableAudio = "The TTS service returned no playable audio. Please try again."
+        if result.didRefuseInsecureRedirect {
+            return Self.insecureTransportFailure
+        } else if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
+            return userFacingHTTPError(statusCode: statusCode)
+        } else if result.provider == .gemini && result.hasGeminiStreamFailure {
+            return noPlayableAudio
+        } else if error != nil {
+            return "Couldn't reach the TTS service. Check your connection and try again."
+        } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
+            return noPlayableAudio
+        } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
+            return noPlayableAudio
+        } else if (result.provider == .openAICompatible || result.provider == .custom)
+                    && !containsCompletePCMFrame(result.providerAudioByteCount) {
+            return noPlayableAudio
+        }
+        return nil
     }
 
     /// Returns whether a byte count represents at least one whole 16-bit PCM frame.

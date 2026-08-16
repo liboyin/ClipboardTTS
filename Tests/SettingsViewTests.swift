@@ -288,6 +288,34 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         XCTAssertFalse(networkManager.isStreaming)
     }
 
+    func testCustomTestVoiceRejectsACleartextEndpointWithoutStartingARequest() {
+        // WHY: Settings is where the Custom endpoint is typed, so Test Voice is the first action
+        // that would send the saved key to it. It must refuse cleartext with the same message and
+        // the same no-request outcome as clipboard and Services speech.
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("test-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
+        UserDefaults.standard.set("http://custom.api/v1/audio/speech", forKey: SettingsKeys.apiBaseURL)
+        UserDefaults.standard.set("custom-model", forKey: SettingsKeys.customModel)
+        UserDefaults.standard.set("custom-voice", forKey: SettingsKeys.customVoice)
+
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("A cleartext Custom endpoint must not be contacted")
+            return (HTTPURLResponse(), Data())
+        }
+
+        view.runTestVoice()
+
+        XCTAssertEqual(
+            networkManager.lastError,
+            "The TTS endpoint must use HTTPS unless it runs on localhost. Update Settings and try again."
+        )
+        XCTAssertFalse(networkManager.isStreaming)
+    }
+
     func testProviderDidChangeAndTestVoice() {
         // Isolated even though this test writes nothing: SettingsView reads the provider from
         // UserDefaults.standard, so without it the exercised code path depends on machine state.
