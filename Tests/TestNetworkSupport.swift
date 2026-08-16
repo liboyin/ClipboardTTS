@@ -376,12 +376,16 @@ final class MockURLProtocolConstructionTests: XCTestCase {
 
 final class FakePasteboardReader: PasteboardReading {
     private let text: String?
+    /// Counts reads so a test can prove a dropped clipboard action never touched the pasteboard.
+    /// Written and read on the main queue, where the menu's clipboard flow runs.
+    private(set) var readCount = 0
 
     init(text: String? = nil) {
         self.text = text
     }
 
     func string(forType dataType: NSPasteboard.PasteboardType) -> String? {
-        text
+        readCount += 1
+        return text
     }
 }

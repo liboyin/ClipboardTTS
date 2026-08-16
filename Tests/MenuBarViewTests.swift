@@ -3,6 +3,19 @@ import AppKit
 import SwiftUI
 @testable import ClipboardTTSApp
 
+/// Builds the menu with its own deferred-action owner unless a test needs a controllable one.
+func makeMenu(audioPlayer: AudioPlayerManager,
+              textExtraction: TextExtractionManager,
+              networkManager: TTSNetworkManager,
+              deferredClipboardAction: DeferredClipboardAction = DeferredClipboardAction()) -> MenuBarView {
+    MenuBarView(
+        audioPlayer: audioPlayer,
+        textExtraction: textExtraction,
+        networkManager: networkManager,
+        deferredClipboardAction: deferredClipboardAction
+    )
+}
+
 final class MenuBarViewTests: MockURLProtocolTestCase {
     func testMenuLoadsProviderVoiceMetadataBeforeSettingsAppears() {
         // WHY: The menu is the primary interaction surface, so its voice picker cannot depend on
@@ -10,7 +23,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager()
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
 
@@ -45,7 +58,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             voice: "custom-voice",
             selectedProvider: "Custom"
         )
-        let configuredVoiceView = MenuBarView(
+        let configuredVoiceView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,
             networkManager: networkManager
@@ -53,7 +66,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         XCTAssertEqual(configuredVoiceView.voiceOptions, ["custom-voice"])
 
         UserDefaults.standard.set(" \t\n", forKey: SettingsKeys.customVoice)
-        let emptyVoiceView = MenuBarView(
+        let emptyVoiceView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,
             networkManager: networkManager
@@ -76,7 +89,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             selectedProvider: "OpenAI"
         )
         networkManager.availableVoices = ["alloy", "nova"]
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         XCTAssertEqual(view.voiceOptions, ["alloy", "nova"])
         view.selectVoice("nova")
@@ -115,7 +128,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             selectedProvider: "OpenAI"
         )
         networkManager.availableVoices = ["alloy", "nova"]
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
         XCTAssertEqual(view.voiceOptions, [])
@@ -130,7 +143,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             selectedProvider: "Gemini"
         )
         networkManager.availableVoices = ["Aoede", "Puck"]
-        let geminiView = MenuBarView(
+        let geminiView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,
             networkManager: networkManager
@@ -149,7 +162,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             selectedProvider: "OpenAI"
         )
         networkManager.availableVoices = ["alloy", "nova"]
-        let openAIView = MenuBarView(
+        let openAIView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,
             networkManager: networkManager
@@ -182,7 +195,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
 
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
         view.speakCopiedText()
 
         // speakCopiedText defers clipboard extraction and request creation by 0.2 seconds.
@@ -196,7 +209,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager()
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
         networkManager.streamTTS(text: "Create an error before clearing") { _ in }
@@ -224,7 +237,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager()
-        let view = MenuBarView(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 300, height: 280)
 
@@ -245,6 +258,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         }
         wait(for: [rendered], timeout: 1.0)
     }
+
 }
 
 private extension NSView {

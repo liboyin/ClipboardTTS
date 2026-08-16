@@ -182,6 +182,16 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
+    /// Returns the token identifying which request attempt currently owns the pipeline.
+    ///
+    /// It advances only when a request starts, is replaced, or is stopped, so a caller that
+    /// captured it earlier can tell that somebody else claimed or released the pipeline in between
+    /// — including while a finished request's accepted audio has not reached the player yet, when
+    /// neither `isStreaming` nor `hasAudio` reports the pipeline as busy.
+    func currentRequestGeneration() -> UInt64 {
+        stateQueue.sync { requestGeneration }
+    }
+
     /// Returns whether the manager's future-request settings belong to the supplied persisted provider.
     func isCurrentProvider(_ provider: String) -> Bool {
         stateQueue.sync {

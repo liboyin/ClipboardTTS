@@ -78,6 +78,11 @@ struct ClipboardTTSApp: App {
     // @StateObject (like the managers) so all four share first-wins lifecycle semantics and can
     // never end up pointing at different manager instances.
     @StateObject private var servicesCoordinator: ServicesCoordinator
+
+    // Owns the menu's pending deferred clipboard read for the app's lifetime. A @StateObject for
+    // the same reason as the managers: SwiftUI rebuilds the MenuBarExtra content on every publish,
+    // and a per-view instance could not drop an attempt an earlier view value scheduled.
+    @StateObject private var deferredClipboardAction = DeferredClipboardAction()
     private let secretStore: SecretStoring
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -96,7 +101,8 @@ struct ClipboardTTSApp: App {
             MenuBarView(
                 audioPlayer: audioPlayer,
                 textExtraction: textExtraction,
-                networkManager: networkManager
+                networkManager: networkManager,
+                deferredClipboardAction: deferredClipboardAction
             )
         }
         .menuBarExtraStyle(.window)

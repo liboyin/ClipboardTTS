@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly five active implementation tasks: Tasks 20–24.
+- There are exactly four active implementation tasks: Tasks 21–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,7 +91,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| The deferred clipboard action can replace a stream started during its delay | Blocking | 20 |
 | Gemini exposes only 5 of the 30 currently documented TTS voices | Blocking | 21 |
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
@@ -160,57 +159,14 @@ message rather than the provider's redirect status. A later task that adds, repl
 request MUST resolve its endpoint through that path rather than build a URL beside it. See
 [README.md](README.md#design-assumptions) for the rule.
 
-### 20. Revalidate the deferred clipboard action at execution time
-
-**Classification:** Blocking — explicit two-click playback behavior
-
-**Depends on:** Phase 1 gap review
-
-**Purpose.** `MenuBarView.speakCopiedText()` checks stream/audio readiness before scheduling its
-0.2-second delayed clipboard read. The closure does not check again. A Services request or another
-invocation can become active during that window, after which the stale closure starts a new audio
-generation and replaces it without the required Clear Buffer action.
-
-**Primary paths.**
-
-- `Sources/Views/MenuBarView.swift`
-- `Sources/Managers/AudioPlayerManager.swift`
-- `Sources/Managers/ServicesCoordinator.swift`
-- `Tests/MenuBarViewTests.swift`
-- `Tests/ServicesCoordinatorTests.swift`
-- `README.md`
-- `USER_STORIES.md` for the existing two-click requirement only
-
-**Required change.**
-
-1. Revalidate the complete idle/readiness condition inside the delayed action immediately before
-   reading the clipboard or changing the audio/network generation.
-2. If another stream, retained buffer, invalid audio configuration, or superseding clipboard
-   attempt exists, drop the stale action without reading the pasteboard, stopping current work, or
-   changing any generation.
-3. Ensure rapid repeated Speak invocations can start at most one request.
-4. Preserve the 0.2-second deactivation delay and the existing first-click Clear Buffer behavior.
-5. Make delayed-action ownership deterministic in tests through an injected scheduler/token or an
-   equivalently isolated seam; correctness tests must not rely only on wall-clock sleeps.
-
-**Non-goals and invariants.**
-
-- Do not change the Services payload or move its observer back into `MenuBarView`.
-- Do not add interrupt-and-replace behavior or remove the two-click contract.
-- Do not read or write `NSPasteboard.general` in tests.
-- Do not change the independent 0.1-second audio prebuffer.
-
-**Validation and falsification.**
-
-- Queue a clipboard action, start a Services request before releasing it, and prove the clipboard
-  action performs no read, generation change, cancellation, or network request.
-- Queue two clipboard actions and prove exactly one request can start.
-- Clear an already active stream and prove a later, explicit Speak action still works.
-- Cover invalid sample-rate readiness at delayed execution time.
-- Mutation-test keeping only the pre-delay guard and allowing both rapid actions to run.
-
-**Done when.** A deferred clipboard action starts speech only if it still owns an idle, playable
-pipeline at execution time and can never replace intervening work.
+The menu's deferred clipboard read now revalidates the complete idle condition at execution time,
+drops itself when the manager's request generation changed after it was scheduled, and schedules
+through `DeferredClipboardAction`, which owns which attempt may run. A later task that adds, defers,
+or retries a menu-initiated request MUST revalidate inside the deferred action rather than trust a
+pre-delay check, MUST treat a changed request generation as staleness because published request and
+audio state cannot describe a finished request whose accepted audio is still in flight, and MUST
+schedule through that owner so a superseded attempt is dropped; injecting its scheduler is how a
+test owns that timing. See [README.md](README.md#architecture) for the rule.
 
 ### Phase 2 mandatory gap review
 

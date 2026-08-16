@@ -5,6 +5,8 @@ struct MenuBarView: View {
     @ObservedObject var audioPlayer: AudioPlayerManager
     @ObservedObject var textExtraction: TextExtractionManager
     @ObservedObject var networkManager: TTSNetworkManager
+    /// The app-lifetime owner of the deferred clipboard read; see `speakCopiedText()`.
+    let deferredClipboardAction: DeferredClipboardAction
 
     @Environment(\.openWindow) var openWindow
 
@@ -48,6 +50,14 @@ struct MenuBarView: View {
     /// Whether neither a network stream nor a retained audio buffer prevents a voice change.
     var isVoiceSelectionEnabled: Bool {
         !networkManager.isStreaming && !audioPlayer.hasAudio
+    }
+
+    /// Whether an idle, playable pipeline is available to start speech from the clipboard.
+    ///
+    /// Spelled out rather than reusing `isVoiceSelectionEnabled`: the two conditions coincide
+    /// today, but a change to what may be selected must not silently change what may be spoken.
+    var isReadyForNewSpeech: Bool {
+        !networkManager.isStreaming && !audioPlayer.hasAudio && audioPlayer.isReadyForNewStream
     }
 
     private var voiceBinding: Binding<String> {
@@ -144,14 +154,26 @@ struct MenuBarView: View {
             networkManager.stopStreaming()
             audioPlayer.stop()
         } else {
-            guard audioPlayer.isReadyForNewStream else { return }
+            guard isReadyForNewSpeech else { return }
             NSApp.deactivate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if let text = textExtraction.getCopiedText() {
-                    let gen = audioPlayer.startNewStream()
-                    networkManager.streamTTS(text: text) { [audioPlayer] data in
-                        audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
-                    }
+            // The 0.2-second delay lets the menu close before the pasteboard is read, so the
+            // readiness observed above can be stale by the time it does: a Services request, a
+            // Test Voice request, a Clear Buffer click, or a second Speak click can own the
+            // pipeline by then. Starting speech now would replace that work without the Clear
+            // Buffer click the two-click contract requires, so revalidate immediately before
+            // reading the clipboard or changing any generation. The request generation carries
+            // what the published state cannot: a request that already finished may still have
+            // accepted audio in flight, which leaves both `isStreaming` and `hasAudio` false while
+            // the pipeline is not this attempt's to take. Superseded attempts never arrive here at
+            // all; `deferredClipboardAction` drops them.
+            let pipelineGeneration = networkManager.currentRequestGeneration()
+            deferredClipboardAction.schedule(after: 0.2) {
+                guard networkManager.currentRequestGeneration() == pipelineGeneration,
+                      isReadyForNewSpeech,
+                      let text = textExtraction.getCopiedText() else { return }
+                let gen = audioPlayer.startNewStream()
+                networkManager.streamTTS(text: text) { [audioPlayer] data in
+                    audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
                 }
             }
         }
