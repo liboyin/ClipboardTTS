@@ -109,8 +109,8 @@ disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--t
 A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
-file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 349 lines under a 400-line
-limit, so a later task has 51 lines there and more in the extensions it also names;
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 352 lines under a 400-line
+limit, so a later task has 48 lines there and more in the extensions it also names;
 `TTSNetworkManager+RequestLifecycle.swift` now owns starting, retrying, replacing, and stopping a
 request.
 Note that `lastError` has a file-private setter, which keeps the state-publication group in the
@@ -196,7 +196,7 @@ the Phase 3 Gemini work stayed on the existing endpoint and response contract.
 
 This phase brings user-visible Gemini metadata in line with current official documentation and
 adds the bounded recovery Google recommends for the model's documented transient failure mode. Both
-of its implementation tasks have landed, so only its gap review remains before Phase 4 may begin.
+implementation tasks and the phase gap review are complete, so Phase 4 may begin.
 
 The complete documented Gemini voice catalog is now one production constant published through the
 existing freshness-guarded metadata path, so the menu and Settings cannot offer different subsets.
@@ -212,12 +212,21 @@ and MUST keep the retry on its original cancellation generation so a stop, Clear
 replacement in that window prevents it from starting. See
 [README.md](README.md#design-assumptions) for the rule and its provider rationale.
 
-### Phase 3 mandatory gap review
+### Phase 3 gap review — closed
 
-Run the **Phase review gate** on the Phase 3 commit range. Re-check current official Google
-documentation, exact voice coverage, provider/list isolation, retry bounds, captured settings,
-cancellation between attempts, error publication, duplicate-audio prevention, and incremental SSE
-delivery. Do not begin Phase 4 until the review is closed with no blocking findings.
+The 2026-08-17 review over `48234e4^..30409d7` rechecked current official Google documentation,
+exact voice coverage and ordering, provider/list isolation, retry bounds, immutable captured inputs,
+cancellation generations, error publication, duplicate-audio prevention, and incremental SSE
+delivery. It found no blocking or non-blocking Phase 3 gap and added no task, so Phase 4 may begin.
+
+The complete documented list remains 30 voices in the same order as the production constant, and
+Google's Generate Content guide still documents the Gemini 3.1 TTS HTTP 500 failure and automated
+retry guidance. Three isolated mutants proved that the focused tests reject an omitted documented
+voice, retrying the wrong provider, and accepting a retry after its generation was revoked.
+
+All three gates passed at `30409d7`: `./check-coverage.sh` (168 tests, 0 failures,
+`Sources/Managers/` at 97.55%), `swiftlint --strict` (0 violations across 55 files), and the
+complete-concurrency build (no source warnings).
 
 ---
 
@@ -241,6 +250,7 @@ hosted production view.
 
 - `Sources/Views/SettingsView.swift`
 - `Tests/SettingsViewTests.swift`
+- `Tests/SettingsVoiceMetadataTests.swift`
 - `Tests/TTSNetworkManagerAuthenticationTests.swift`
 - `Tests/TestNetworkSupport.swift`
 - `Tests/TerminalStateAssertion.swift`, which owns the terminal-state helper since `dc08bc2`
@@ -373,7 +383,7 @@ tasks to this file and complete them before declaring the remediation finished.
 
 3. Run the manager tests with Thread Sanitizer when the host toolchain supports it. Record and
    investigate every sanitizer report; a clean run is supporting evidence, not proof that no race
-   exists. Task 17 (`2476718`) and Task 28 (`1b9a65e`) are the isolation work this exercises.
+   exists. Task 16 (`2476718`) and Task 28 (`1b9a65e`) are the isolation work this exercises.
 4. Confirm with repository searches that:
    - network tests automatically isolate app settings before manager construction and restore only
      after asynchronous quiescence;
@@ -393,7 +403,7 @@ tasks to this file and complete them before declaring the remediation finished.
    non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, migration retry, and About.
    Obtain user permission and credentials before live-provider tests; never record keys or provider
    response audio.
-6. Run a final adversarial review on the complete remediation range — Tasks 17–33, currently
+6. Run a final adversarial review on the complete remediation range — Tasks 17–34, currently
    `2476718..HEAD` — plus any phase-review follow-up tasks added later. Resolve every blocking
    finding and obtain explicit disposition for every non-blocking finding.
 7. Reconcile `README.md`, `USER_STORIES.md`, and verified behavior. Remove completed active tasks
