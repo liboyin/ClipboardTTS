@@ -12,7 +12,8 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There is exactly one active implementation task: Task 24.
+- No implementation task is active. The remaining work is the Phase 4 gap review, then the final
+  acceptance sweep.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -89,9 +90,8 @@ inside a later task.
 
 ## Work map
 
-| Verified gap | Classification | Task |
-| --- | --- | --- |
-| Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
+Every verified gap has been remediated. A phase review or the final sweep that discovers new work
+adds its own self-contained task here.
 
 ---
 
@@ -108,10 +108,14 @@ disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--t
 A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
-file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 352 lines under a 400-line
-limit, so a later task has 48 lines there and more in the extensions it also names;
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 389 lines under a 400-line
+limit, so a later task has 11 lines there and more in the extensions it also names;
 `TTSNetworkManager+RequestLifecycle.swift` now owns starting, retrying, replacing, and stopping a
-request.
+request. `Sources/Views/SettingsView.swift` reached the limit twice and was split the same way, to
+361 lines: `SettingsSecretState.swift` owns the form's key storage and its migration recovery, and
+`ModelVoiceConfigurationView.swift` owns the model and voice fields every provider form shares.
+`Tests/SettingsMigrationRecoveryTests.swift` was split along the same seam, into the hosted-form
+recovery tests, `SettingsSecretStateTests.swift`, and the shared `ScriptedSecretStore.swift` double.
 Note that `lastError` has a file-private setter, which keeps the state-publication group in the
 declaring file.
 
@@ -183,8 +187,9 @@ complete-concurrency build (no source warnings).
 
 The same review revalidated Tasks 21–24 against current code, test output, and official provider
 documentation. Google still documents exactly 30 Gemini TTS voices and the rare Gemini 3.1 TTS
-HTTP 500 with automated retry guidance; the full suite still emits the unhosted `StateObject`
-warnings; and failed legacy-key migration still has no in-app retry. Google now recommends its
+HTTP 500 with automated retry guidance; the full suite still emitted the unhosted `StateObject`
+warnings; and failed legacy-key migration had no in-app retry. Phase 4 closed both of those last
+two findings. Google now recommends its
 Interactions API for new development, but explicitly says the app's existing `generateContent`
 API remains fully supported. No migration task is justified by the current remediation boundary, and
 the Phase 3 Gemini work stayed on the existing endpoint and response contract.
@@ -232,76 +237,25 @@ complete-concurrency build (no source warnings).
 ## Phase 4 — Make recovery and test evidence trustworthy
 
 This phase removes lifecycle warnings from Settings tests and gives failed secret migration the
-user action promised by its error message. Task 23 is implemented.
+user action promised by its error message. Both implementation tasks are complete, so only the
+phase gap review remains.
 
 Settings tests now drive an installed view through `Tests/HostedSettings.swift` instead of calling
-methods on a constructed `SettingsView` value, and both Settings actions render through
+methods on a constructed `SettingsView` value, and every Settings action renders through
 `SettingsActionButton` because a hosted SwiftUI `Button` backs no AppKit control a test could press.
 A later task that adds a Settings *action* MUST render it through that button and reach it by
 clicking the hosted control; a text field is already AppKit-backed, and is addressed by its position
 together with the text it expects to find there. See [README.md](README.md#build--test) for the rule.
 
-### 24. Add an explicit in-app retry for failed legacy-key migration
-
-**Classification:** Non-blocking — recovery UX
-
-**Depends on:** Task 23 (landed)
-
-**Purpose.** Failed migration preserves the plaintext value and tells the user to check Keychain
-access and try again, but migration currently reruns only when a new `TTSNetworkManager` is created.
-Opening Settings reads Keychain state without offering a retry, so recovery normally requires an
-undocumented relaunch.
-
-**Primary paths.**
-
-- `Sources/SecretStore.swift`
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Views/SettingsView.swift`
-- `Tests/SecretStoreTests.swift`
-- `Tests/SettingsViewTests.swift`
-- `Tests/TTSNetworkManagerAuthenticationTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Retain structured migration-failure state long enough for Settings to identify that one or more
-   legacy provider keys still need migration. Do not infer retry eligibility by parsing a rendered
-   error string.
-2. When migration has failed, show an explicit user-initiated Settings action such as
-   **Retry Securing Saved Keys** alongside actionable, secret-free guidance.
-3. The action must rerun migration for every still-pending provider using the same injected secret
-   store *and* the same injected `UserDefaults`. Task 26 threaded `defaults` explicitly through
-   `APIKeyStartupState.load` and `APIKeyMigrationService.migrateLegacyAPIKeys`; a retry that relies
-   on either default parameter would read the developer's domain from the hosted test app. Remove
-   each legacy value only after its Keychain write is confirmed.
-4. On success, refresh Settings' retained secret state and the network manager's future-request
-   credentials, clear the migration-specific warning, and leave unrelated request/audio state
-   unchanged.
-5. On failure, preserve the legacy value, retain the previous usable Keychain value when one
-   exists, and keep retry available with safe guidance.
-6. Preserve the existing rule that an already saved Keychain value wins over stale plaintext.
-7. Document the recovery path in README without exposing storage values or security-system details.
-
-**Non-goals and invariants.**
-
-- Do not display, log, copy, or return the retained plaintext secret to the user.
-- Do not automatically retry in a loop or trigger repeated Keychain prompts without user action.
-- Do not replace the Keychain store, change its service/accounts, or add credential export.
-- Do not clear unrelated speech-request failures when migration remains unresolved.
-
-**Validation and falsification.**
-
-- With an in-memory store and isolated defaults, fail migration, mount Settings, and prove the
-  retry action is visible while the legacy value remains intact.
-- Retry successfully and assert the secret reaches the store, plaintext is removed, the retained
-  Settings/network value updates, and the warning/action disappear.
-- Fail the retry and assert plaintext and any newer Keychain value remain unchanged.
-- Cover multiple pending providers and partial success without losing the still-failing values.
-- Prove a normal launch with no migration failure shows no retry action and does no extra writes.
-- Mutation-test deleting plaintext before a failed write and overwriting an existing newer secret.
-
-**Done when.** A user can recover from transient Keychain migration failure inside Settings without
-relaunching and without risking secret loss, disclosure, or stale network credentials.
+Failed legacy-key migration is now recoverable without relaunching: `SettingsSecretState` owns both
+the pending-provider set and the retry, and the manager withdraws or renames the startup warning it
+published instead of clearing request state blindly. A later task that adds a Settings action
+touching secrets MUST keep the injected `UserDefaults` explicit — `SettingsView.init` deliberately
+has no default for it — MUST derive pending state from the retained legacy values rather than a
+rendered message, MUST NOT let a migration outcome overwrite a newer speech failure, and MUST retire
+a provider's legacy value on any confirmed write to it, because a plaintext copy that outlives the
+user's own edit restores a credential they replaced or withdrew. See
+[README.md](README.md#architecture) for the rule.
 
 ### Phase 4 mandatory gap review
 

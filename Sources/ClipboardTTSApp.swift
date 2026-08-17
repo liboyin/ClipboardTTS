@@ -84,12 +84,16 @@ struct ClipboardTTSApp: App {
     // and a per-view instance could not drop an attempt an earlier view value scheduled.
     @StateObject private var deferredClipboardAction = DeferredClipboardAction()
     private let secretStore: SecretStoring
+    /// The same preferences the startup manager migrated legacy keys from, so the Settings retry
+    /// works on that domain rather than whichever one `.standard` names in this process.
+    private let defaults: UserDefaults
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
         let dependencies = AppStartupDependencies.make()
         self.secretStore = dependencies.secretStore
+        self.defaults = dependencies.defaults
         _audioPlayer = StateObject(wrappedValue: dependencies.audioPlayer)
         _textExtraction = StateObject(wrappedValue: dependencies.textExtraction)
         _networkManager = StateObject(wrappedValue: dependencies.networkManager)
@@ -108,7 +112,12 @@ struct ClipboardTTSApp: App {
         .menuBarExtraStyle(.window)
 
         Window("Settings", id: "settings") {
-            SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+            SettingsView(
+                networkManager: networkManager,
+                audioPlayer: audioPlayer,
+                secretStore: secretStore,
+                defaults: defaults
+            )
         }
     }
 }

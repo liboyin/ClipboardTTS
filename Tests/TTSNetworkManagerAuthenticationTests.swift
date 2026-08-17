@@ -70,7 +70,7 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
         // to erase the warning even though the user's new key was never saved.
         let store = InMemorySecretStore()
         try store.saveSecret("test-original-custom-key", for: .custom)
-        let secretState = SettingsSecretState(secretStore: store)
+        let secretState = SettingsSecretState(secretStore: store, defaults: .standard)
         store.nextError = .unavailable
 
         secretState.saveSecret("test-new-custom-key", for: .custom)
@@ -80,6 +80,49 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             "Couldn't save the Custom API key. Check Keychain access and try again."
         )
         XCTAssertEqual(try store.secret(for: .custom), "test-original-custom-key")
+    }
+
+    func testSecuringEveryPendingKeyWithdrawsTheStartupMigrationWarning() {
+        // WHY: The warning is the app's own claim that a saved key is still sitting in preferences.
+        // Leaving it up after the user's retry secured every one of them would send them back to a
+        // Keychain problem they already solved.
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("test-legacy-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
+        let store = InMemorySecretStore()
+        store.nextError = .unavailable
+        let manager = TestNetworkFactory.makeManager(secretStore: store)
+        XCTAssertEqual(manager.lastError, APIKeyMigrationService.failureMessage(for: .custom))
+
+        manager.updateMigrationFailureWarning(for: nil)
+
+        XCTAssertNil(manager.lastError)
+    }
+
+    func testWithdrawingTheMigrationWarningCannotEraseANewerRequestFailure() {
+        // WHY: Migration guidance and request failures share one menu-bar channel. Securing a key
+        // resolves nothing about a request that failed afterwards, so withdrawing the warning must
+        // not silence the guidance the user still needs to make the app speak.
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("test-legacy-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
+        let store = InMemorySecretStore()
+        store.nextError = .unavailable
+        let manager = TestNetworkFactory.makeManager(secretStore: store)
+        XCTAssertEqual(manager.lastError, APIKeyMigrationService.failureMessage(for: .custom))
+        let requestFailure = "The TTS endpoint must use HTTPS unless it runs on localhost. Update Settings and try again."
+        manager.updateSettings(
+            baseURL: "http://custom.api/v1/audio/speech",
+            apiKey: "test-custom-key",
+            model: "custom-model",
+            voice: "custom-voice",
+            selectedProvider: "Custom"
+        )
+        assertTerminalState(of: manager, expectedError: requestFailure) {
+            manager.streamTTS(text: "Speech a cleartext endpoint must refuse") { _ in }
+        }
+
+        manager.updateMigrationFailureWarning(for: nil)
+
+        XCTAssertEqual(manager.lastError, requestFailure)
     }
 
     func testProviderCredentialsUseOnlyTheirDocumentedHeaders() {

@@ -33,9 +33,14 @@ final class HostedSettings {
 
     private var host: NSHostingView<SettingsView>?
 
+    /// Mounts the form. `defaults` is the standard domain because that is the one
+    /// `MockURLProtocolTestCase` isolates and `TestNetworkFactory` hands the manager under test, so
+    /// the form retries the same migration the manager attempted; pass another domain to separate
+    /// them deliberately.
     init(networkManager: TTSNetworkManager,
          audioPlayer: AudioPlayerManager,
          secretStore: SecretStoring,
+         defaults: UserDefaults = .standard,
          aboutAction: AboutAction = AboutAction(),
          testCase: XCTestCase,
          file: StaticString = #filePath,
@@ -44,6 +49,7 @@ final class HostedSettings {
             networkManager: networkManager,
             audioPlayer: audioPlayer,
             secretStore: secretStore,
+            defaults: defaults,
             aboutAction: aboutAction
         )
         let host = NSHostingView(rootView: view)
@@ -69,6 +75,14 @@ final class HostedSettings {
         }
         button.performClick(nil)
         settle(file: file, line: line)
+    }
+
+    /// Returns whether Settings currently offers a control carrying this title.
+    ///
+    /// `click` fails a missing control, which cannot express the case a conditional action needs:
+    /// that the form deliberately renders nothing to press.
+    func rendersButton(titled title: String) -> Bool {
+        host?.descendantButton(titled: title) != nil
     }
 
     /// Types `newText` into a Custom-form field after proving the position still addresses it.

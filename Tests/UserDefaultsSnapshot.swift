@@ -35,6 +35,28 @@ struct UserDefaultsSnapshot {
     }
 }
 
+/// `UserDefaults` storage that lives only for its owning test, backed by memory instead of a suite.
+///
+/// Overrides the three primitive accessors that `UserDefaults` derives its typed accessors from.
+/// A path under test that needs an accessor built on something else must override it here too;
+/// `testStartupRegressionDefaultsWriteNeitherToDiskNorToTheAppSettingsDomain` fails when a value
+/// falls through to the inherited storage instead.
+final class InMemoryDefaults: UserDefaults {
+    private var storage: [String: Any] = [:]
+
+    override func object(forKey defaultName: String) -> Any? {
+        storage[defaultName]
+    }
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        storage[defaultName] = value
+    }
+
+    override func removeObject(forKey defaultName: String) {
+        storage.removeValue(forKey: defaultName)
+    }
+}
+
 extension XCTestCase {
     /// Detaches the running test from the developer's real app settings.
     ///

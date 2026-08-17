@@ -70,6 +70,7 @@ final class SettingsAboutTests: MockURLProtocolTestCase {
             networkManager: networkManager,
             audioPlayer: audioPlayer,
             secretStore: secretStore,
+            defaults: .standard,
             aboutAction: AboutAction(
                 metadata: StaticAboutMetadata(applicationName: "Test Clipboard TTS", applicationVersion: "7.3"),
                 presenter: presenter

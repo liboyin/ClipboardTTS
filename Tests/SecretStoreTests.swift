@@ -26,9 +26,10 @@ final class SecretStoreTests: MockURLProtocolTestCase {
         UserDefaults.standard.set(legacySecret, forKey: SettingsKeys.legacyOpenAIAPIKey)
         store.nextError = .unavailable
 
-        let failures = APIKeyMigrationService(secretStore: store).migrateLegacyAPIKeys()
+        let outcome = APIKeyMigrationService(secretStore: store).migrateLegacyAPIKeys()
 
-        XCTAssertEqual(failures, [.openAI])
+        XCTAssertEqual(outcome.pendingProviders, [.openAI])
+        XCTAssertEqual(outcome.securedSecrets, [:])
         XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.legacyOpenAIAPIKey), legacySecret)
         XCTAssertNil(try store.secret(for: .openAI))
         XCTAssertEqual(
@@ -56,6 +57,27 @@ final class SecretStoreTests: MockURLProtocolTestCase {
         XCTAssertNil(try? store.secret(for: .custom))
     }
 
+    func testPendingProvidersNameOnlyTheKeysAMigrationRetryStillHasToSecure() {
+        // WHY: Settings decides from this set whether to offer recovery at all. A key the store
+        // already accepted must not invite a retry that touches the Keychain again, and an empty
+        // legacy value carries no secret to rescue — only a retained plaintext key can still be
+        // lost, which is exactly what a failed migration leaves behind.
+        let store = InMemorySecretStore()
+        UserDefaults.standard.set("test-legacy-openai-key", forKey: SettingsKeys.legacyOpenAIAPIKey)
+        UserDefaults.standard.set("", forKey: SettingsKeys.legacyGeminiAPIKey)
+        UserDefaults.standard.set("test-legacy-custom-key", forKey: SettingsKeys.legacyCustomAPIKey)
+        store.nextError = .unavailable
+
+        XCTAssertEqual(APIKeyMigrationService.pendingProviders(defaults: .standard), [.openAI, .custom])
+
+        // The scheduled failure lands on the first provider the migration touches.
+        let outcome = APIKeyMigrationService(secretStore: store).migrateLegacyAPIKeys()
+
+        XCTAssertEqual(outcome.pendingProviders, [.openAI])
+        XCTAssertEqual(outcome.securedSecrets, [.custom: "test-legacy-custom-key"])
+        XCTAssertEqual(APIKeyMigrationService.pendingProviders(defaults: .standard), [.openAI])
+    }
+
     func testMigrationMovesLegacySecretOnceAndDoesNotRewriteOnTheNextLaunch() throws {
         // WHY: A completed migration must remove the plaintext source, so a later launch neither
         // exposes it through UserDefaults nor overwrites the Keychain value again.
@@ -64,11 +86,11 @@ final class SecretStoreTests: MockURLProtocolTestCase {
         UserDefaults.standard.set(legacySecret, forKey: SettingsKeys.legacyGeminiAPIKey)
         let migration = APIKeyMigrationService(secretStore: store)
 
-        XCTAssertEqual(migration.migrateLegacyAPIKeys(), [])
+        XCTAssertEqual(migration.migrateLegacyAPIKeys(), APIKeyMigrationOutcome(securedSecrets: [.gemini: legacySecret]))
         XCTAssertEqual(try store.secret(for: .gemini), legacySecret)
         XCTAssertNil(UserDefaults.standard.object(forKey: SettingsKeys.legacyGeminiAPIKey))
 
-        XCTAssertEqual(migration.migrateLegacyAPIKeys(), [])
+        XCTAssertEqual(migration.migrateLegacyAPIKeys(), APIKeyMigrationOutcome())
         XCTAssertEqual(try store.secret(for: .gemini), legacySecret)
         XCTAssertNil(UserDefaults.standard.object(forKey: SettingsKeys.legacyGeminiAPIKey))
     }
@@ -80,7 +102,10 @@ final class SecretStoreTests: MockURLProtocolTestCase {
         try store.saveSecret("test-new-keychain-key", for: .openAI)
         UserDefaults.standard.set("test-stale-legacy-key", forKey: SettingsKeys.legacyOpenAIAPIKey)
 
-        XCTAssertEqual(APIKeyMigrationService(secretStore: store).migrateLegacyAPIKeys(), [])
+        XCTAssertEqual(
+            APIKeyMigrationService(secretStore: store).migrateLegacyAPIKeys(),
+            APIKeyMigrationOutcome(securedSecrets: [.openAI: "test-new-keychain-key"])
+        )
         XCTAssertEqual(try store.secret(for: .openAI), "test-new-keychain-key")
         XCTAssertNil(UserDefaults.standard.object(forKey: SettingsKeys.legacyOpenAIAPIKey))
     }

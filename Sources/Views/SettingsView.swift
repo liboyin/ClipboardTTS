@@ -18,14 +18,24 @@ struct SettingsView: View {
     @State private var customSampleRateText = ""
     @State private var isCustomSampleRateDraftValid = true
 
+    /// Builds the form. `defaults` has no default value on purpose: the migration this form can
+    /// retry reads and clears legacy keys, so it must be the same domain the app migrated at
+    /// startup rather than whichever one `.standard` names in the caller's process.
+    ///
+    /// It reaches only that migration. The properties below are plain `@AppStorage`, which resolves
+    /// against the process's default store, so the app must pass the domain its own preferences
+    /// live in — production passes `AppStartupDependencies.defaults`, which is `UserDefaults`
+    /// `.standard`. Passing a domain that holds different provider settings makes the form migrate
+    /// one domain's keys while displaying another's configuration.
     init(networkManager: TTSNetworkManager,
          audioPlayer: AudioPlayerManager,
          secretStore: SecretStoring = KeychainSecretStore(),
+         defaults: UserDefaults,
          aboutAction: AboutAction = AboutAction()) {
         self.networkManager = networkManager
         self.audioPlayer = audioPlayer
         self.aboutAction = aboutAction
-        _secretState = StateObject(wrappedValue: SettingsSecretState(secretStore: secretStore))
+        _secretState = StateObject(wrappedValue: SettingsSecretState(secretStore: secretStore, defaults: defaults))
     }
 
     private var selectedProvider: APIKeyProvider {
@@ -90,6 +100,9 @@ struct SettingsView: View {
                         Text(secretStoreError)
                             .foregroundStyle(.red)
                     }
+
+                    legacyKeyMigrationRecovery
+
                     if selectedProvider == .openAI {
                         openAISettings
                     } else if selectedProvider == .gemini {
@@ -168,6 +181,30 @@ struct SettingsView: View {
         }
     }
 
+    /// The recovery offered while a saved key is still waiting to be moved into the Keychain.
+    ///
+    /// Migration otherwise reruns only when a new `TTSNetworkManager` is created, so the guidance's
+    /// "try again" would mean relaunching the app. It is rendered for every pending provider,
+    /// because one that keeps failing must stay visible after another one succeeds.
+    @ViewBuilder
+    private var legacyKeyMigrationRecovery: some View {
+        if !secretState.pendingMigrationProviders.isEmpty {
+            Section {
+                ForEach(secretState.pendingMigrationProviders, id: \.self) { provider in
+                    Text(APIKeyMigrationService.failureMessage(for: provider))
+                        .foregroundStyle(.red)
+                }
+
+                HStack {
+                    SettingsActionButton(title: "Retry Securing Saved Keys", action: retrySecuringSavedKeys)
+                        .fixedSize()
+
+                    Spacer()
+                }
+            }
+        }
+    }
+
     private var testVoiceButton: some View {
         HStack {
             // An `NSViewRepresentable` is greedy by default, so `.fixedSize()` keeps this control
@@ -199,16 +236,29 @@ struct SettingsView: View {
         aboutAction.showAbout()
     }
 
+    /// Retries the legacy-key migration at the user's request and republishes what it changed.
+    ///
+    /// The manager's future-request credentials are refreshed without re-fetching provider
+    /// metadata or rebuilding the audio graph, because securing a stored key changes neither the
+    /// selected endpoint nor the audio format.
+    func retrySecuringSavedKeys() {
+        secretState.retryLegacyKeyMigration()
+        applyCredentialsToFutureRequests()
+        refreshMigrationWarning()
+    }
+
+    /// Points the menu bar's migration warning at whatever is still unsecured, or withdraws it.
+    ///
+    /// Every path that can resolve a pending provider calls this, because saving or clearing a key
+    /// retires that provider's plaintext copy just as securing it does.
+    private func refreshMigrationWarning() {
+        networkManager.updateMigrationFailureWarning(for: secretState.pendingMigrationProviders.first)
+    }
+
     func runTestVoice() {
         normalizeSelectedProvider()
         guard syncAudioFormat() else { return }
-        networkManager.updateSettings(
-            baseURL: currentBaseURL,
-            apiKey: currentAPIKey,
-            model: currentModel,
-            voice: currentVoice,
-            selectedProvider: selectedProvider.settingsValue
-        )
+        applyCredentialsToFutureRequests()
         networkManager.stopStreaming()
         audioPlayer.stop()
         let gen = audioPlayer.startNewStream()
@@ -223,6 +273,13 @@ struct SettingsView: View {
 
     func syncSettings() {
         normalizeSelectedProvider()
+        applyCredentialsToFutureRequests()
+        _ = syncAudioFormat()
+        fetchMetadata()
+    }
+
+    /// Hands the form's current provider configuration to requests that start after this call.
+    private func applyCredentialsToFutureRequests() {
         networkManager.updateSettings(
             baseURL: currentBaseURL,
             apiKey: currentAPIKey,
@@ -230,8 +287,6 @@ struct SettingsView: View {
             voice: currentVoice,
             selectedProvider: selectedProvider.settingsValue
         )
-        _ = syncAudioFormat()
-        fetchMetadata()
     }
 
     /// Selects the fixed provider format or the validated Custom override for future audio.
@@ -298,94 +353,9 @@ struct SettingsView: View {
             get: { secretState.secret(for: provider) },
             set: {
                 secretState.saveSecret($0, for: provider)
+                refreshMigrationWarning()
                 syncSettings()
             }
         )
-    }
-}
-
-/// Holds the Settings form's API keys and surfaces safe Keychain failures to the user.
-final class SettingsSecretState: ObservableObject {
-    @Published private var secrets: [APIKeyProvider: String] = [:]
-    @Published private(set) var errorMessage: String?
-    private let secretStore: SecretStoring
-
-    init(secretStore: SecretStoring) {
-        self.secretStore = secretStore
-        for provider in APIKeyProvider.allCases {
-            do {
-                secrets[provider] = try secretStore.secret(for: provider) ?? ""
-            } catch {
-                secrets[provider] = ""
-                if errorMessage == nil {
-                    errorMessage = "Couldn't read the saved \(provider.displayName) API key. Check Keychain access and try again."
-                }
-            }
-        }
-    }
-
-    /// Returns the key currently shown for a provider without reading preferences or the Keychain again.
-    func secret(for provider: APIKeyProvider) -> String {
-        secrets[provider] ?? ""
-    }
-
-    /// Persists a user edit immediately so future clipboard and Services requests use the same key.
-    func saveSecret(_ secret: String, for provider: APIKeyProvider) {
-        do {
-            if secret.isEmpty {
-                try secretStore.deleteSecret(for: provider)
-            } else {
-                try secretStore.saveSecret(secret, for: provider)
-            }
-            errorMessage = nil
-            secrets[provider] = secret
-        } catch {
-            errorMessage = "Couldn't save the \(provider.displayName) API key. Check Keychain access and try again."
-        }
-    }
-}
-
-struct ModelVoiceConfigurationView: View {
-    @Binding var ttsModel: String
-    @Binding var ttsVoice: String
-    @ObservedObject var networkManager: TTSNetworkManager
-    var onSync: () -> Void
-
-    var body: some View {
-        Section(header: Text("Model & Voice").font(.headline)) {
-            HStack {
-                TextField("Model", text: $ttsModel)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: ttsModel) { _ in onSync() }
-
-                if !networkManager.availableModels.isEmpty {
-                    Picker("", selection: $ttsModel) {
-                        ForEach(networkManager.availableModels, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 30)
-                    .onChange(of: ttsModel) { _ in onSync() }
-                }
-            }
-
-            HStack {
-                TextField("Voice", text: $ttsVoice)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: ttsVoice) { _ in onSync() }
-
-                if !networkManager.availableVoices.isEmpty {
-                    Picker("", selection: $ttsVoice) {
-                        ForEach(networkManager.availableVoices, id: \.self) { voice in
-                            Text(voice).tag(voice)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 30)
-                    .onChange(of: ttsVoice) { _ in onSync() }
-                }
-            }
-        }
     }
 }

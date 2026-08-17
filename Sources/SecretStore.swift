@@ -157,32 +157,58 @@ final class InMemorySecretStore: SecretStoring {
     }
 }
 
+/// What one migration attempt secured, and which providers it had to leave in plaintext.
+struct APIKeyMigrationOutcome: Equatable {
+    /// The value the store now holds for each provider the attempt secured.
+    ///
+    /// Reported so a caller can adopt it directly. Asking the store again would add a second way
+    /// for a transient failure to leave the app without the key it has already migrated, and the
+    /// plaintext it could have re-read is deliberately gone by then.
+    var securedSecrets: [APIKeyProvider: String] = [:]
+    /// The providers whose plaintext value was kept because the store refused the write.
+    var pendingProviders: [APIKeyProvider] = []
+}
+
 /// Migrates legacy plaintext API-key preferences without discarding a key that could not be saved.
 struct APIKeyMigrationService {
     let secretStore: SecretStoring
 
-    /// Moves every non-empty legacy key to the secret store and returns the providers that need user attention.
-    func migrateLegacyAPIKeys(defaults: UserDefaults = .standard) -> [APIKeyProvider] {
-        APIKeyProvider.allCases.compactMap { provider in
+    /// Moves every non-empty legacy key to the secret store and reports what it secured and kept.
+    func migrateLegacyAPIKeys(defaults: UserDefaults = .standard) -> APIKeyMigrationOutcome {
+        var outcome = APIKeyMigrationOutcome()
+        for provider in APIKeyProvider.allCases {
             guard let legacySecret = defaults.string(forKey: provider.legacyUserDefaultsKey) else {
-                return nil
+                continue
             }
             guard !legacySecret.isEmpty else {
                 defaults.removeObject(forKey: provider.legacyUserDefaultsKey)
-                return nil
+                continue
             }
 
             do {
-                if let savedSecret = try secretStore.secret(for: provider) {
-                    try secretStore.saveSecret(savedSecret, for: provider)
-                } else {
-                    try secretStore.saveSecret(legacySecret, for: provider)
-                }
+                // An already saved key wins over stale plaintext, and writing it back is what
+                // confirms the store accepts writes before the plaintext copy is removed.
+                let securedSecret = try secretStore.secret(for: provider) ?? legacySecret
+                try secretStore.saveSecret(securedSecret, for: provider)
                 defaults.removeObject(forKey: provider.legacyUserDefaultsKey)
-                return nil
+                outcome.securedSecrets[provider] = securedSecret
             } catch {
-                return provider
+                outcome.pendingProviders.append(provider)
             }
+        }
+        return outcome
+    }
+
+    /// Returns the providers whose legacy plaintext key still has to be secured.
+    ///
+    /// Migration removes a legacy value only after the store confirms its write, so a retained
+    /// non-empty legacy value is exactly what says a provider still needs one. Deriving the set
+    /// from the same preferences the migration reads keeps one source of truth for a recovery the
+    /// user may start long after launch, when a startup-time failure list is no longer reachable.
+    /// An empty legacy value is not pending: it holds no secret to lose, and migration drops it.
+    static func pendingProviders(defaults: UserDefaults) -> [APIKeyProvider] {
+        APIKeyProvider.allCases.filter { provider in
+            !(defaults.string(forKey: provider.legacyUserDefaultsKey) ?? "").isEmpty
         }
     }
 
@@ -201,7 +227,9 @@ struct APIKeyStartupState {
     static func load(selectedProvider: String,
                      secretStore: SecretStoring,
                      defaults: UserDefaults = .standard) -> APIKeyStartupState {
-        let migrationFailures = APIKeyMigrationService(secretStore: secretStore).migrateLegacyAPIKeys(defaults: defaults)
+        let migrationFailures = APIKeyMigrationService(secretStore: secretStore)
+            .migrateLegacyAPIKeys(defaults: defaults)
+            .pendingProviders
         let provider = APIKeyProvider(selectedProvider: selectedProvider)
         do {
             return APIKeyStartupState(

@@ -8,8 +8,9 @@ import Foundation
 /// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
 ///   `baseURL`, `apiKey`, `model`, `voice`, `selectedMetadataProvider`, the metadata request
 ///   records, and the publication-depth counter) is read and written only under `stateQueue`.
-/// - The `@Published` properties and `isPublishingMetadata` are written only on the main queue
-///   (every write path dispatches or already runs there) and are observed by SwiftUI on main.
+/// - The `@Published` properties, `isPublishingMetadata`, and `migrationFailureMessage` are written
+///   only on the main queue (every write path dispatches or already runs there) and are observed by
+///   SwiftUI on main.
 /// - A recursive callback-authority lock spans delivery authorization through the complete handler
 ///   call and generation revocation; it is never the request-state lock, so direct re-entrant stops work.
 /// - A path that needs both locks acquires callback authority before `stateQueue`; fatal Gemini
@@ -44,6 +45,9 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     var activeRequest: ActiveRequestContext?
     var requestGeneration: UInt64 = 0
     private var requestStatePublicationDepth = 0
+    /// The legacy-key migration warning this manager last published, retained so a later recovery
+    /// can withdraw or replace exactly that message rather than whatever `lastError` holds by then.
+    private var migrationFailureMessage: String?
     private(set) var selectedMetadataProvider: String
     var metadataGeneration: UInt64 = 0
     var nextMetadataRequestIdentifier: UInt64 = 0
@@ -148,6 +152,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
         if let errorMessage = secretStartupState.errorMessage { self.lastError = errorMessage }
+        // Startup collapses its migration failures into the first provider's guidance, so the same
+        // provider's message identifies the warning published above. A key that could not be read
+        // produces a different message, which securing a legacy key does not resolve.
+        self.migrationFailureMessage = APIKeyMigrationService.pendingProviders(defaults: defaults)
+            .first
+            .map(APIKeyMigrationService.failureMessage(for:))
     }
 
     /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
@@ -255,6 +265,33 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
                 self.lastError = nil
+            }
+        }
+        if Thread.isMainThread {
+            update()
+        } else {
+            DispatchQueue.main.async(execute: update)
+        }
+    }
+
+    /// Republishes or withdraws the warning about a legacy key that could not be secured.
+    ///
+    /// Settings calls this after the user retries that migration: passing the provider still
+    /// pending keeps the menu bar naming a key that really is unsecured, and passing `nil`
+    /// withdraws the warning once every one of them is secured. Only the message this manager
+    /// itself published for migration is replaced: a request that published or cleared `lastError`
+    /// since then owns that line, and what it says — including saying nothing — is not something
+    /// securing a key changes. An unresolved migration therefore stays visible in Settings, which
+    /// is where its recovery is.
+    func updateMigrationFailureWarning(for provider: APIKeyProvider?) {
+        let message = provider.map(APIKeyMigrationService.failureMessage(for:))
+        let update: @Sendable () -> Void = { [weak self] in
+            guard let self else { return }
+            let publishedWarning = self.migrationFailureMessage
+            self.migrationFailureMessage = message
+            guard self.lastError == publishedWarning else { return }
+            self.withRequestStatePublication {
+                self.lastError = message
             }
         }
         if Thread.isMainThread {

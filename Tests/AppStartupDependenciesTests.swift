@@ -208,28 +208,6 @@ final class AppStartupDependenciesTests: XCTestCase {
     }
 }
 
-/// `UserDefaults` storage that lives only for its owning test, backed by memory instead of a suite.
-///
-/// Overrides the three primitive accessors that `UserDefaults` derives its typed accessors from.
-/// A future startup path that needs an accessor built on something else must override it here too;
-/// `testStartupRegressionDefaultsWriteNeitherToDiskNorToTheAppSettingsDomain` fails when a value
-/// falls through to the inherited storage instead.
-private final class InMemoryDefaults: UserDefaults {
-    private var storage: [String: Any] = [:]
-
-    override func object(forKey defaultName: String) -> Any? {
-        storage[defaultName]
-    }
-
-    override func set(_ value: Any?, forKey defaultName: String) {
-        storage[defaultName] = value
-    }
-
-    override func removeObject(forKey defaultName: String) {
-        storage.removeValue(forKey: defaultName)
-    }
-}
-
 private final class RecordingSecretStore: SecretStoring {
     enum Operation: Equatable {
         case read(APIKeyProvider)
