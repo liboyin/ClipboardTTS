@@ -12,8 +12,10 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- No implementation task is active. The remaining work is the Phase 4 gap review, then the final
-  acceptance sweep.
+- Task 35 is active. The Phase 4 gap review found that Settings can render a provider's saved
+  model or voice against another provider's still-published suggestion list, so the phase remains
+  open until that task lands and the review is rerun. The final acceptance sweep follows only
+  after Phase 4 closes.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -90,8 +92,9 @@ inside a later task.
 
 ## Work map
 
-Every verified gap has been remediated. A phase review or the final sweep that discovers new work
-adds its own self-contained task here.
+Task 35 is the only active implementation task. It closes the invalid Settings picker state found
+by the Phase 4 gap review; no later phase or final-sweep work may begin until its implementation and
+the rerun review close Phase 4.
 
 ---
 
@@ -237,8 +240,8 @@ complete-concurrency build (no source warnings).
 ## Phase 4 — Make recovery and test evidence trustworthy
 
 This phase removes lifecycle warnings from Settings tests and gives failed secret migration the
-user action promised by its error message. Both implementation tasks are complete, so only the
-phase gap review remains.
+user action promised by its error message. Tasks 23 and 24 are complete. The phase gap review found
+Task 35, so Phase 4 remains open until that task and the rerun review are complete.
 
 Settings tests now drive an installed view through `Tests/HostedSettings.swift` instead of calling
 methods on a constructed `SettingsView` value, and every Settings action renders through
@@ -257,12 +260,86 @@ a provider's legacy value on any confirmed write to it, because a plaintext copy
 user's own edit restores a credential they replaced or withdrew. See
 [README.md](README.md#architecture) for the rule.
 
+### 35. Keep Settings suggestion pickers valid across provider and free-text changes
+
+**Classification:** Non-blocking — Settings state validity and diagnostic trustworthiness
+
+**Depends on:** Tasks 23 and 24 (landed)
+
+**Purpose.** The lifecycle-valid provider-switch regression added by Task 23 deterministically
+emits SwiftUI's `Picker: the selection "Aoede" is invalid and does not have an associated tag, this
+will give undefined results` warning. When the persisted provider changes from OpenAI to Gemini,
+the form renders Gemini's saved model and voice before its `onChange` callback synchronizes the
+manager and clears the still-published OpenAI suggestion lists. The same invalid selection can
+occur when a user types a model or voice that is not in a currently published catalog. A passing
+hosted test therefore still exercises a configuration SwiftUI declares undefined, and the picker
+can transiently offer suggestions belonging to the wrong provider.
+
+**Primary paths.**
+
+- `Sources/Views/SettingsView.swift`
+- `Sources/Views/ModelVoiceConfigurationView.swift`
+- `Sources/Managers/TTSNetworkManager+Metadata.swift`
+- `Tests/HostedSettings.swift`
+- `Tests/SettingsViewTests.swift`
+- `Tests/SettingsVoiceMetadataTests.swift`
+- `README.md`
+
+**Required change.**
+
+1. Associate each rendered model and voice suggestion list with the provider/source it belongs to.
+   A provider switch MUST NOT construct a picker for the new provider from values still published
+   for the old one, even for the render that precedes the selection binding's `onChange` callback.
+2. Every rendered picker MUST contain a tag equal to its current selection. Preserve a user's
+   off-catalog typed model or voice without normalizing or replacing it, and keep the provider's
+   valid suggestions available so the user can correct that value from the picker.
+3. Preserve the manager's existing metadata freshness, cancellation, and provider/endpoint guards.
+   Do not solve the warning by suppressing diagnostics, delaying the provider binding, or exposing
+   a stale provider's choices under a placeholder tag.
+4. Drive provider switches and free-text edits through `HostedSettings`. Tests MUST distinguish
+   the transient state before replacement metadata arrives, not merely assert the final catalog
+   after the main queue and mock response have both settled.
+5. Release every host through the established teardown boundary and inspect focused and full-suite
+   output to prove there is no invalid-picker or uninstalled-state warning.
+
+**Non-goals and invariants.**
+
+- Do not change any provider's documented catalog, discovery endpoint, ordering, or request format.
+- Do not remove free-text model or voice editing, silently choose a catalog default, or reject a
+  saved value merely because metadata does not currently list it.
+- Keep Settings' selected provider synchronized with future speech and metadata requests, and keep
+  delayed metadata from a former provider unable to publish into the current form.
+- Do not add sleeps, real windows, live requests, or log filtering to the regression suite.
+
+**Validation and falsification.**
+
+- Publish OpenAI suggestions, hold replacement metadata, switch the hosted form to Gemini, and
+  prove the form offers no OpenAI choice while its Gemini model and voice remain unchanged and
+  valid picker selections.
+- Type off-catalog model and voice values while suggestions are present; prove both values remain
+  selected, the catalog remains usable, and Test Voice sends the typed values to the correct
+  provider.
+- Rapidly switch providers with delayed former-provider completions and prove neither stale list
+  nor invalid selection can reappear.
+- Mutation-test rendering the former provider's list, omitting the current off-catalog selection's
+  tag, and over-restricting the control by replacing the typed value with a catalog default.
+- Run the focused hosted Settings suites and all repository gates, inspecting their logs for both
+  invalid-picker and uninstalled-state warnings.
+
+**Done when.** Settings never renders a picker whose selection lacks a matching tag, never offers
+one provider's stale suggestions after another provider is selected, retains off-catalog typed
+values, and the lifecycle-valid Settings tests complete without either SwiftUI warning.
+
 ### Phase 4 mandatory gap review
 
 Run the **Phase review gate** on the Phase 4 commit range. Scrutinize SwiftUI state identity, host
 teardown, late network work, Keychain/test-double boundaries, partial migration, retry visibility,
-secret precedence, manager synchronization, and error clearing. The remediation is not complete
-until this review is closed with no blocking findings.
+secret precedence, manager synchronization, error clearing, and provider-scoped picker identity.
+The 2026-08-17 review over `a9dc781^..657d396` found Task 35. Before that finding, all three gates
+passed at `657d396`: `./check-coverage.sh` (189 tests, 0 failures, `Sources/Managers/` at 97.60%),
+`swiftlint --strict` (0 violations across 62 files), and the complete-concurrency build (no source
+warnings). The full and focused hosted Settings runs both emitted the invalid-picker warning named
+in Task 35, so the review remains open and must be rerun after that task lands.
 
 ---
 
