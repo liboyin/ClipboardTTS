@@ -23,6 +23,18 @@ extension TTSNetworkManager {
         "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
         "shimmer", "verse", "marin", "cedar"
     ]
+    /// The complete Gemini TTS voice catalog, in the order Google's guide lists it.
+    ///
+    /// Gemini documents no voice-discovery endpoint, so this list is the app's only source of
+    /// truth for both the menu and the Settings suggestions. Transcribed from the "Voice options"
+    /// table of https://ai.google.dev/gemini-api/docs/speech-generation, verified 2026-08-16;
+    /// it must be re-verified against that guide whenever Google changes the documented set.
+    private static let geminiVoices = [
+        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+        "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib",
+        "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
+        "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+    ]
 
     private struct MetadataSource: Equatable {
         let baseURL: String
@@ -244,7 +256,7 @@ extension TTSNetworkManager {
             return
         }
         if selectedProvider == "Gemini" {
-            publishMetadata(["Aoede", "Charon", "Fenrir", "Kore", "Puck"], for: .voices, token: token)
+            publishMetadata(Self.geminiVoices, for: .voices, token: token)
             return
         }
 

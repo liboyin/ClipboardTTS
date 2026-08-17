@@ -181,6 +181,80 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice), "nova")
     }
 
+    func testMenuOffersEveryDocumentedGeminiVoiceAndSpeaksOneOutsideTheOriginalFive() {
+        // WHY: Gemini publishes no voice-discovery endpoint, so the menu is the only place a user
+        // can reach a documented voice. A voice the catalog omits is unreachable, and one the menu
+        // offers outside its synchronized provider would write another provider's setting, so this
+        // mounts the real menu lifecycle and follows a voice from the catalog into the next
+        // request body.
+        UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
+        let audioPlayer = AudioPlayerManager()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(
+            baseURL: "https://generativelanguage.googleapis.com/v1beta",
+            apiKey: "gemini-token",
+            model: "gemini-3.1-flash-tts-preview",
+            voice: "Aoede",
+            selectedProvider: "Gemini"
+        )
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        var host: NSHostingView? = NSHostingView(rootView: view)
+        host?.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+        host?.layoutSubtreeIfNeeded()
+
+        let voiceSelected = expectation(description: "Menu offers and accepts a documented Gemini voice")
+        DispatchQueue.main.async {
+            host?.layoutSubtreeIfNeeded()
+            XCTAssertEqual(view.voiceOptions, documentedGeminiTTSVoices)
+            view.selectVoice("Sulafat")
+            XCTAssertEqual(view.selectedVoice, "Sulafat")
+            XCTAssertEqual(UserDefaults.standard.string(forKey: SettingsKeys.geminiVoice), "Sulafat")
+            voiceSelected.fulfill()
+        }
+        wait(for: [voiceSelected], timeout: 1.0)
+
+        // A Gemini catalog offered to a menu synchronized with another provider would let a Gemini
+        // voice be written into that provider's setting, where no request could ever use it. A
+        // separate menu value reads the switched provider without waiting for a view-graph update.
+        UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
+        let openAIMenu = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        XCTAssertEqual(openAIMenu.voiceOptions, [])
+        openAIMenu.selectVoice("Sulafat")
+        XCTAssertNil(UserDefaults.standard.string(forKey: SettingsKeys.openAIVoice))
+        UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
+
+        let requestStarted = expectation(description: "The chosen Gemini voice is used by the next request")
+        MockURLProtocol.installRequestHandler { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            guard let bodyData = requestBodyData(from: request),
+                  let body = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+                XCTFail("The menu request should contain a JSON Gemini speech payload.")
+                requestStarted.fulfill()
+                return (response, Data())
+            }
+            let generationConfig = body["generationConfig"] as? [String: Any]
+            let speechConfig = generationConfig?["speechConfig"] as? [String: Any]
+            let voiceConfig = speechConfig?["voiceConfig"] as? [String: Any]
+            let prebuiltVoiceConfig = voiceConfig?["prebuiltVoiceConfig"] as? [String: Any]
+            XCTAssertEqual(prebuiltVoiceConfig?["voiceName"] as? String, "Sulafat")
+            requestStarted.fulfill()
+            return (response, Data())
+        }
+
+        networkManager.streamTTS(text: "Speak with a newly documented voice") { _ in }
+        wait(for: [requestStarted], timeout: 2.0)
+
+        // The hosted menu owns settings observers; release it and give AppKit a main-queue turn so
+        // no deferred metadata work outlives this test's mock scope.
+        host = nil
+        let viewGraphReleased = expectation(description: "Hosted menu view graph is released")
+        DispatchQueue.main.async {
+            viewGraphReleased.fulfill()
+        }
+        wait(for: [viewGraphReleased], timeout: 1.0)
+    }
+
     func testSpeakCopiedTextStartsStreamingFromClipboard() {
         // WHY: This is the core "Speak Copied Text" story - with text on the clipboard and nothing
         // playing, the button must pull the clipboard text and start a network request. Audio

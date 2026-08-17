@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly four active implementation tasks: Tasks 21–24.
+- There are exactly three active implementation tasks: Tasks 22–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,7 +91,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Gemini exposes only 5 of the 30 currently documented TTS voices | Blocking | 21 |
 | Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
@@ -111,10 +110,11 @@ disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--t
 A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
-file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 309 lines under a 400-line
-limit, so Task 22 has room; `TTSNetworkManager+RequestLifecycle.swift` now owns starting,
-replacing, and stopping a request. Note that `lastError` has a file-private setter, which keeps the
-state-publication group in the declaring file.
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 345 lines under a 400-line
+limit, so Task 22 has 55 lines there and more in the extensions it also names;
+`TTSNetworkManager+RequestLifecycle.swift` now owns starting, replacing, and stopping a request.
+Note that `lastError` has a file-private setter, which keeps the state-publication group in the
+declaring file.
 
 Mock-scope revocation now runs in two halves, and the half that can block runs off the tearing-down
 thread under the scope deadline. Every later task that revokes or retries a request through the mock
@@ -197,65 +197,17 @@ Task 22 stays on the existing endpoint and response contract.
 This phase brings user-visible Gemini metadata in line with current official documentation and
 adds the bounded recovery Google recommends for the model's documented transient failure mode.
 
-### 21. Expose the complete documented Gemini TTS voice catalog
-
-**Classification:** Blocking — incomplete provider-authoritative menu metadata
-
-**Depends on:** Phase 2 gap review
-
-**Purpose.** The app currently publishes only `Aoede`, `Charon`, `Fenrir`, `Kore`, and `Puck` for
-Gemini. At review time Google's official Gemini TTS guide documented 30 supported voices. Task 13
-required provider-authoritative metadata, so the current menu and Settings suggestions omit most
-valid choices.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Sources/Views/MenuBarView.swift`
-- `Sources/Views/SettingsView.swift`
-- `Tests/TTSNetworkManagerMetadataProviderTests.swift`
-- `Tests/MenuBarViewTests.swift`
-- `Tests/SettingsViewTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Re-verify the supported Gemini TTS voices against the current official Google documentation at
-   execution time, starting from the
-   [Gemini TTS guide](https://ai.google.dev/gemini-api/docs/speech-generation). Do not copy the
-   2026-08-16 count mechanically if the provider contract changed.
-2. Keep one production source of truth for the documented Gemini voice catalog.
-3. Publish the complete current list through the existing freshness-guarded metadata path so both
-   menu and Settings suggestions use the same provider-authoritative values.
-4. Preserve the saved voice when it remains valid. Do not silently replace a user selection merely
-   because list ordering changes.
-5. Update README with the verified source and maintenance assumption without duplicating a long
-   list unless that list is itself the architectural source of truth.
-
-**Non-goals and invariants.**
-
-- Do not invent a Gemini discovery endpoint when none is documented.
-- Do not mix OpenAI, Gemini, or Custom voice lists.
-- Preserve Task 5 freshness tokens and Task 13's idle-only menu selection rule.
-- Do not make a live provider request in unit tests.
-
-**Validation and falsification.**
-
-- Assert exact agreement between the verified production catalog and the current documented set,
-  including voices outside the previous five.
-- Mount the menu lifecycle and prove a newly added Gemini voice is selectable only for the current
-  Gemini provider while idle and is used by the next intercepted request.
-- Switch providers and prove Gemini voices cannot leak into OpenAI or Custom selection.
-- Mutation-test omission of one documented voice and accidental reuse of another provider's list.
-
-**Done when.** Menu and Settings expose every currently documented Gemini TTS voice through one
-freshness-guarded source without weakening provider or idle-state boundaries.
+The complete documented Gemini voice catalog is now one production constant published through the
+existing freshness-guarded metadata path, so the menu and Settings cannot offer different subsets.
+Gemini still documents no discovery endpoint: a later task that touches Gemini voice metadata must
+keep that single source of truth and re-verify it against Google's guide instead of adding a second
+list or a discovery request. See [README.md](README.md#design-assumptions) for the rule.
 
 ### 22. Retry the documented transient Gemini 500 failure once
 
 **Classification:** Non-blocking — provider reliability
 
-**Depends on:** Task 21
+**Depends on:** Task 21 (landed)
 
 **Purpose.** Google documents that Gemini 3.1 TTS can rarely return HTTP 500 when it emits text
 tokens instead of audio and recommends automated retry handling. The app currently turns every 500
@@ -338,7 +290,7 @@ user action promised by its error message.
 
 **Classification:** Non-blocking — test validity and maintainability
 
-**Depends on:** Task 21
+**Depends on:** Task 21 (landed)
 
 **Purpose.** Several Settings tests construct `SettingsView` as a value and call methods that read
 its `@StateObject`. SwiftUI reports that the object is not installed on a view and creates a new
