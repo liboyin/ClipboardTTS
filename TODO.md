@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly two active implementation tasks: Tasks 23–24.
+- There is exactly one active implementation task: Task 24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,7 +91,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
 
 ---
@@ -233,69 +232,20 @@ complete-concurrency build (no source warnings).
 ## Phase 4 — Make recovery and test evidence trustworthy
 
 This phase removes lifecycle warnings from Settings tests and gives failed secret migration the
-user action promised by its error message.
+user action promised by its error message. Task 23 is implemented.
 
-### 23. Exercise Settings state through a valid SwiftUI lifecycle
-
-**Classification:** Non-blocking — test validity and maintainability
-
-**Depends on:** Task 21 (landed)
-
-**Purpose.** Several Settings tests construct `SettingsView` as a value and call methods that read
-its `@StateObject`. SwiftUI reports that the object is not installed on a view and creates a new
-instance for each access. Those tests can pass while exercising different state identity from the
-hosted production view.
-
-**Primary paths.**
-
-- `Sources/Views/SettingsView.swift`
-- `Tests/SettingsViewTests.swift`
-- `Tests/SettingsVoiceMetadataTests.swift`
-- `Tests/TTSNetworkManagerAuthenticationTests.swift`
-- `Tests/TestNetworkSupport.swift`
-- `Tests/TerminalStateAssertion.swift`, which owns the terminal-state helper since `dc08bc2`
-- `README.md`
-
-**Required change.**
-
-1. Inventory every Settings test that accesses lifecycle-managed `@State` or `@StateObject`
-   outside an installed view.
-2. Host lifecycle-dependent behavior in `NSHostingView`, lay it out, drive the rendered control or
-   a lifecycle-valid binding, then release it and drain the main queue before mock teardown.
-3. Test extracted non-view collaborators such as `SettingsSecretState` directly where the test owns
-   that object; do not create a SwiftUI host when no view lifecycle is involved.
-4. If a very small production extraction is necessary for deterministic action testing, keep it
-   behavior-preserving and narrowly scoped. Do not redesign Settings architecture merely to avoid
-   hosting tests.
-5. Remove the `Accessing StateObject ... without being installed on a View` warnings from focused
-   and full-suite output.
-6. Replace lifecycle sleeps with explicit control, publication, request, or main-queue-drain
-   boundaries where the affected tests permit it.
-
-**Non-goals and invariants.**
-
-- Do not present real windows, About panels, Keychain prompts, or live network requests.
-- Preserve the documented rule against wrapping test hosts in `NSWindow`.
-- Preserve Settings autosave, provider synchronization, secret-store failure visibility, sample
-  rate validation, Test Voice, and About behavior.
-- Do not suppress or filter the SwiftUI warnings instead of fixing their cause.
-
-**Validation and falsification.**
-
-- Run the focused Settings and authentication suites and inspect their logs for lifecycle warnings.
-- Prove hosted controls route to the same retained secret state across multiple edits/actions.
-- Release each host, drain the main queue, and verify mock teardown quiesces with no late request.
-- Mutation-test reverting one lifecycle-dependent test to direct unhosted state access or replacing
-  the retained state with a fresh instance.
-
-**Done when.** Settings tests exercise production-equivalent state identity, emit no uninstalled
-`StateObject` warnings, and remain hermetic and teardown-safe.
+Settings tests now drive an installed view through `Tests/HostedSettings.swift` instead of calling
+methods on a constructed `SettingsView` value, and both Settings actions render through
+`SettingsActionButton` because a hosted SwiftUI `Button` backs no AppKit control a test could press.
+A later task that adds a Settings *action* MUST render it through that button and reach it by
+clicking the hosted control; a text field is already AppKit-backed, and is addressed by its position
+together with the text it expects to find there. See [README.md](README.md#build--test) for the rule.
 
 ### 24. Add an explicit in-app retry for failed legacy-key migration
 
 **Classification:** Non-blocking — recovery UX
 
-**Depends on:** Task 23
+**Depends on:** Task 23 (landed)
 
 **Purpose.** Failed migration preserves the plaintext value and tells the user to check Keychain
 access and try again, but migration currently reruns only when a new `TTSNetworkManager` is created.

@@ -37,19 +37,32 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
 
         let audioPlayer = AudioPlayerManager()
         let manager = TestNetworkFactory.makeManager(secretStore: store)
-        let view = SettingsView(networkManager: manager, audioPlayer: audioPlayer, secretStore: store)
         let requestEmitted = expectation(description: "Settings uses a normalized OpenAI request")
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/speech")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
-            XCTAssertFalse(request.url?.absoluteString.contains("test-openai-api-key") ?? true)
-            requestEmitted.fulfill()
+            let url = request.url?.absoluteString ?? ""
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            // Opening Settings also fetches the normalized provider's model and voice suggestions,
+            // which carry the same key and so must not reach the corrupted endpoint either.
+            guard url == "https://api.openai.com/v1/audio/speech" else {
+                XCTAssertFalse(url.contains("custom.example"), "Settings must not contact the corrupted Custom endpoint.")
+                return (response, Data("{ \"data\": [] }".utf8))
+            }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
+            XCTAssertFalse(url.contains("test-openai-api-key"))
+            requestEmitted.fulfill()
             return (response, Data([0, 1]))
         }
+        let settings = HostedSettings(
+            networkManager: manager,
+            audioPlayer: audioPlayer,
+            secretStore: store,
+            testCase: self
+        )
 
-        view.runTestVoice()
+        settings.click("Test Voice")
+
         wait(for: [requestEmitted], timeout: 2.0)
+        settings.release()
     }
 
     func testFailedSettingsSecretEditRetainsItsActionableError() throws {

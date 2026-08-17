@@ -1,124 +1,8 @@
 import XCTest
-import SwiftUI
-import AVFoundation
-import AppKit
 @testable import ClipboardTTSApp
 
+/// Covers how the Settings form configures audio format, credentials, and the next speech request.
 final class SettingsViewTests: MockURLProtocolTestCase {
-
-    func testDefaultBundleAboutMetadataReadsHostedApplicationInfoDictionary() throws {
-        // WHY: The shipped About action must use the generated app bundle rather than a test-only
-        // metadata source, so changing Info.plist metadata is reflected without source edits.
-        let expectedName = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
-        let expectedVersion = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
-        let metadata = BundleAboutMetadata()
-
-        XCTAssertEqual(metadata.applicationName, expectedName)
-        XCTAssertEqual(metadata.applicationVersion, expectedVersion)
-    }
-
-    func testBundleAboutMetadataReadsNameAndMarketingVersionFromInfoDictionary() {
-        // WHY: The standard About panel must receive release metadata from the app bundle, so a
-        // source-level version string cannot silently diverge from the packaged Info.plist.
-        let metadata = BundleAboutMetadata(bundle: BundleInfoStub(values: [
-            "CFBundleName": "Metadata Clipboard TTS",
-            "CFBundleShortVersionString": "9.4"
-        ]))
-
-        XCTAssertEqual(metadata.applicationName, "Metadata Clipboard TTS")
-        XCTAssertEqual(metadata.applicationVersion, "9.4")
-    }
-
-    func testSettingsFormExposesAboutButtonThatRoutesToPresenter() throws {
-        // WHY: An injected action alone does not prove users can reach About; the rendered form
-        // must keep the conventional control and route its click without opening AppKit UI in tests.
-        let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        MockURLProtocol.installRequestHandler { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{\"data\": []}".utf8))
-        }
-        let presenter = CapturingAboutPanelPresenter()
-        let view = SettingsView(
-            networkManager: networkManager,
-            audioPlayer: audioPlayer,
-            secretStore: secretStore,
-            aboutAction: AboutAction(
-                metadata: StaticAboutMetadata(applicationName: "Test Clipboard TTS", applicationVersion: "7.3"),
-                presenter: presenter
-            )
-        )
-        var host: NSHostingView? = NSHostingView(rootView: view)
-        host?.frame = NSRect(x: 0, y: 0, width: 600, height: 350)
-
-        let buttonRouted = expectation(description: "Settings renders and routes its About button")
-        DispatchQueue.main.async {
-            guard let host else {
-                XCTFail("Settings host must remain available until its About control is routed.")
-                buttonRouted.fulfill()
-                return
-            }
-            host.layoutSubtreeIfNeeded()
-            guard let button = host.descendantButton(titled: "About Clipboard TTS") else {
-                XCTFail("Settings must render an About Clipboard TTS button.")
-                buttonRouted.fulfill()
-                return
-            }
-            button.performClick(nil)
-            XCTAssertEqual(presenter.presentedApplicationName, "Test Clipboard TTS")
-            XCTAssertEqual(presenter.presentedApplicationVersion, "7.3")
-            buttonRouted.fulfill()
-        }
-        wait(for: [buttonRouted], timeout: 1.0)
-
-        // The hosted SwiftUI view owns settings observers. Release it and give AppKit a main-queue
-        // turn before MockURLProtocol invalidates this test's session, so no deferred observer can
-        // start a metadata request after its owner has been torn down.
-        host = nil
-        let viewGraphReleased = expectation(description: "Hosted Settings view graph is released")
-        DispatchQueue.main.async {
-            viewGraphReleased.fulfill()
-        }
-        wait(for: [viewGraphReleased], timeout: 1.0)
-    }
-
-    func testAboutActionPassesInjectedBundleMetadataWithoutPresentingSystemUI() {
-        // WHY: The About command must route the bundle's marketing version to macOS's panel, not
-        // a second hard-coded string, while tests must never present an interactive AppKit panel.
-        let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let presenter = CapturingAboutPanelPresenter()
-        let view = SettingsView(
-            networkManager: networkManager,
-            audioPlayer: audioPlayer,
-            secretStore: secretStore,
-            aboutAction: AboutAction(
-                metadata: StaticAboutMetadata(applicationName: "Test Clipboard TTS", applicationVersion: "7.3"),
-                presenter: presenter
-            )
-        )
-
-        view.showAbout()
-
-        XCTAssertEqual(presenter.presentedApplicationName, "Test Clipboard TTS")
-        XCTAssertEqual(presenter.presentedApplicationVersion, "7.3")
-    }
-
-    func testStandardAboutPanelOptionsLinkToBundledLicense() throws {
-        // WHY: “LICENSE” in About credits must open the exact resource users receive, rather than
-        // leaving them with an unresolvable filename inside the app bundle.
-        let expectedLicenseURL = try XCTUnwrap(Bundle.main.url(forResource: "LICENSE", withExtension: nil))
-        let options = StandardAboutPanelPresenter().aboutPanelOptions(
-            applicationName: "Test Clipboard TTS",
-            applicationVersion: "7.3"
-        )
-        let credits = try XCTUnwrap(options[.credits] as? NSAttributedString)
-        let licenseRange = (credits.string as NSString).range(of: "LICENSE")
-
-        XCTAssertEqual(credits.attribute(.link, at: licenseRange.location, effectiveRange: nil) as? URL, expectedLicenseURL)
-    }
 
     func testCustomSampleRatePersistsAndOtherProvidersResetTo24KHz() {
         // WHY: Only Custom PCM may use a user override. Switching away must reset the live graph
@@ -130,19 +14,24 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
-
-        view.syncSettings()
-        XCTAssertEqual(audioPlayer.sampleRate, 48_000)
-
+        // Selecting OpenAI also fetches its model and voice suggestions.
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, Data("{ \"data\": [] }".utf8))
         }
-        UserDefaults.standard.set("OpenAI", forKey: SettingsKeys.ttsProvider)
-        view.providerDidChange(to: "OpenAI")
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
+
+        XCTAssertEqual(audioPlayer.sampleRate, 48_000)
+
+        settings.selectProvider("OpenAI")
 
         XCTAssertEqual(audioPlayer.sampleRate, 24_000)
+        settings.release()
     }
 
     func testInvalidCustomSampleRateIsReportedWithoutStartingTestVoice() {
@@ -154,17 +43,23 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid PCM rate must not start Test Voice")
             return (HTTPURLResponse(), Data())
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.runTestVoice()
+        settings.click("Test Voice")
 
         XCTAssertEqual(audioPlayer.sampleRate, 24_000)
         XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
         XCTAssertFalse(networkManager.isStreaming)
+        settings.release()
     }
 
     func testInvalidCustomSampleRateEditKeepsTheLastKnownGoodPersistedValue() {
@@ -176,13 +71,19 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.updateCustomSampleRate(from: "48001")
+        settings.type("48001", into: .customSampleRate, expecting: "24000")
 
         XCTAssertEqual(UserDefaults.standard.double(forKey: SettingsKeys.customSampleRate), 24_000)
         XCTAssertFalse(audioPlayer.hasValidSampleRateConfiguration)
         XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
+        settings.release()
     }
 
     func testInvalidCustomSampleRateDraftBlocksTestVoiceAndSubsequentSettingsSync() {
@@ -193,22 +94,30 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid Custom PCM draft must not start Test Voice")
             return (HTTPURLResponse(), Data())
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.updateCustomSampleRate(from: "48001")
-        view.syncSettings()
+        settings.type("48001", into: .customSampleRate, expecting: "24000")
+        // Editing the model runs the same settings sync an endpoint or provider edit runs, so the
+        // invalid draft has to survive a sync it did not initiate.
+        settings.type("custom-model", into: .customModel, expecting: "")
 
         XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
         XCTAssertFalse(networkManager.isStreaming)
 
-        view.runTestVoice()
+        settings.click("Test Voice")
 
         XCTAssertEqual(audioPlayer.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
         XCTAssertFalse(networkManager.isStreaming)
+        settings.release()
     }
 
     func testTestVoiceDoesNotStartRequestWhenDefaultRateEngineCannotRecover() {
@@ -218,17 +127,30 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager(engineStarter: { _ in throw EngineStartFailure.failed })
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
-        MockURLProtocol.installRequestHandler { _ in
-            XCTFail("A stopped audio graph must not start Test Voice")
-            return (HTTPURLResponse(), Data())
+        // Opening Settings on OpenAI fetches its model and voice suggestions, so only a request to
+        // the speech endpoint would mean Test Voice ignored the stopped graph.
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertNotEqual(
+                request.url?.absoluteString,
+                "https://api.openai.com/v1/audio/speech",
+                "A stopped audio graph must not start Test Voice"
+            )
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{ \"data\": [] }".utf8))
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.runTestVoice()
+        settings.click("Test Voice")
 
         XCTAssertEqual(audioPlayer.sampleRate, 24_000)
         XCTAssertEqual(audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
         XCTAssertFalse(networkManager.isStreaming)
+        settings.release()
     }
 
     func testCustomTestVoiceEmitsConfiguredOpenAICompatiblePayload() {
@@ -242,8 +164,9 @@ final class SettingsViewTests: MockURLProtocolTestCase {
 
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
+        // Constructing the manager first migrates the legacy plaintext key into the store, which is
+        // where the form then reads it.
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
 
         let requestEmitted = expectation(description: "Custom Test Voice request is emitted")
         MockURLProtocol.installRequestHandler { request in
@@ -259,9 +182,17 @@ final class SettingsViewTests: MockURLProtocolTestCase {
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, Data([0, 1]))
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.runTestVoice()
+        settings.click("Test Voice")
+
         wait(for: [requestEmitted], timeout: 2.0)
+        settings.release()
     }
 
     func testCustomTestVoiceRejectsWhitespaceConfigurationWithoutStartingARequest() {
@@ -276,16 +207,24 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("Invalid Custom Test Voice configuration must not contact the endpoint")
             return (HTTPURLResponse(), Data())
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.runTestVoice()
-
-        XCTAssertEqual(networkManager.lastError, "Custom TTS requires a model and voice. Update Settings and try again.")
-        XCTAssertFalse(networkManager.isStreaming)
+        assertTerminalState(
+            of: networkManager,
+            expectedError: "Custom TTS requires a model and voice. Update Settings and try again."
+        ) {
+            settings.click("Test Voice")
+        }
+        settings.release()
     }
 
     func testCustomTestVoiceRejectsACleartextEndpointWithoutStartingARequest() {
@@ -301,82 +240,109 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("A cleartext Custom endpoint must not be contacted")
             return (HTTPURLResponse(), Data())
         }
-
-        view.runTestVoice()
-
-        XCTAssertEqual(
-            networkManager.lastError,
-            "The TTS endpoint must use HTTPS unless it runs on localhost. Update Settings and try again."
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
         )
-        XCTAssertFalse(networkManager.isStreaming)
+
+        assertTerminalState(
+            of: networkManager,
+            expectedError: "The TTS endpoint must use HTTPS unless it runs on localhost. Update Settings and try again."
+        ) {
+            settings.click("Test Voice")
+        }
+        settings.release()
     }
 
-    func testProviderDidChangeAndTestVoice() {
-        // Isolated even though this test writes nothing: SettingsView reads the provider from
-        // UserDefaults.standard, so without it the exercised code path depends on machine state.
+    func testProviderSwitchRetargetsTestVoiceAtTheNewlySelectedProvider() throws {
+        // WHY: After the user selects a provider, Test Voice must resolve that provider's endpoint
+        // and send its own documented credential header. Gemini is the case worth driving from the
+        // form, because it is the one provider whose endpoint and header both differ from the
+        // OpenAI-compatible default, so a per-provider mistake in either reaches users as a key
+        // sent to the wrong host or a request that cannot authenticate.
         let secretStore = InMemorySecretStore()
+        try secretStore.saveSecret("test-gemini-api-key", for: .gemini)
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
-        let view = SettingsView(networkManager: networkManager, audioPlayer: audioPlayer, secretStore: secretStore)
 
-        // providerDidChange fetches metadata, so its local handler must be installed before it runs.
+        let requestEmitted = expectation(description: "Test Voice reaches the newly selected Gemini endpoint")
         MockURLProtocol.installRequestHandler { request in
+            let url = request.url?.absoluteString ?? ""
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{ \"data\": [] }".utf8))
+            // Opening Settings on OpenAI first fetches its model and voice suggestions.
+            guard url.contains(":streamGenerateContent") else {
+                return (response, Data("{ \"data\": [] }".utf8))
+            }
+            XCTAssertTrue(url.hasPrefix("https://generativelanguage.googleapis.com/v1beta/models/"), url)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-goog-api-key"), "test-gemini-api-key")
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            requestEmitted.fulfill()
+            return (response, Data())
         }
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
 
-        view.providerDidChange(to: "OpenAI")
-        view.providerDidChange(to: "Gemini")
+        settings.selectProvider("Gemini")
+        settings.click("Test Voice")
 
-        view.runTestVoice()
+        wait(for: [requestEmitted], timeout: 2.0)
+        settings.release()
+    }
 
-        // Let async execute
-        let expectation = XCTestExpectation(description: "Wait for test voice")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            XCTAssertFalse(networkManager.isStreaming)
-            expectation.fulfill()
+    func testSettingsKeepsOneRetainedSecretStateAcrossEditsAndActions() throws {
+        // WHY: Settings holds the user's typed keys in one state object that reads the secret store
+        // once. A form that rebuilt that object per access — which is exactly what an uninstalled
+        // view does — would re-read storage instead of retaining the edit, so a later action could
+        // speak with a key the user never typed here. Changing the store behind the form is what
+        // separates the retained object from one rebuilt on demand.
+        UserDefaults.standard.set("Custom", forKey: SettingsKeys.ttsProvider)
+        UserDefaults.standard.set("https://custom.api/v1/audio/speech", forKey: SettingsKeys.apiBaseURL)
+        UserDefaults.standard.set("custom-model", forKey: SettingsKeys.customModel)
+        UserDefaults.standard.set("custom-voice", forKey: SettingsKeys.customVoice)
+
+        let secretStore = InMemorySecretStore()
+        try secretStore.saveSecret("test-stored-key", for: .custom)
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore)
+
+        let requestEmitted = expectation(description: "Test Voice uses the key retained by the form")
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-typed-key")
+            requestEmitted.fulfill()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data([0, 1]))
         }
-        wait(for: [expectation], timeout: 2.0)
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            testCase: self
+        )
+
+        settings.typeAPIKey("test-first-key")
+        settings.typeAPIKey("test-typed-key")
+        // Nothing in the app rewrites the key behind an open form. This stands in for the rebuilt
+        // state an uninstalled view produced, which would read this value instead of the edit.
+        try secretStore.saveSecret("test-out-of-band-key", for: .custom)
+
+        settings.click("Test Voice")
+
+        wait(for: [requestEmitted], timeout: 2.0)
+        XCTAssertEqual(try secretStore.secret(for: .custom), "test-out-of-band-key")
+        settings.release()
     }
 }
 
 private enum EngineStartFailure: Error {
     case failed
-}
-
-private struct StaticAboutMetadata: AboutMetadataProviding {
-    let applicationName: String
-    let applicationVersion: String
-}
-
-private struct BundleInfoStub: BundleInfoReading {
-    let values: [String: Any]
-
-    func object(forInfoDictionaryKey key: String) -> Any? {
-        values[key]
-    }
-}
-
-private final class CapturingAboutPanelPresenter: AboutPanelPresenting {
-    private(set) var presentedApplicationName: String?
-    private(set) var presentedApplicationVersion: String?
-
-    func showAbout(applicationName: String, applicationVersion: String) {
-        presentedApplicationName = applicationName
-        presentedApplicationVersion = applicationVersion
-    }
-}
-
-private extension NSView {
-    func descendantButton(titled title: String) -> NSButton? {
-        if let button = self as? NSButton, button.title == title {
-            return button
-        }
-        return subviews.lazy.compactMap { $0.descendantButton(titled: title) }.first
-    }
 }

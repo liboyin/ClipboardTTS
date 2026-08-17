@@ -170,10 +170,10 @@ struct SettingsView: View {
 
     private var testVoiceButton: some View {
         HStack {
-            Button("Test Voice") {
-                runTestVoice()
-            }
-            .buttonStyle(.bordered)
+            // An `NSViewRepresentable` is greedy by default, so `.fixedSize()` keeps this control
+            // hugging its title the way `.buttonStyle(.bordered)` laid it out.
+            SettingsActionButton(title: "Test Voice", action: runTestVoice)
+                .fixedSize()
 
             Spacer()
         }
@@ -185,7 +185,7 @@ struct SettingsView: View {
             Divider()
 
             HStack {
-                SettingsAboutButton(action: showAbout)
+                SettingsActionButton(title: "About Clipboard TTS", action: showAbout)
 
                 Spacer()
             }
