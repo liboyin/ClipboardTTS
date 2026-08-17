@@ -93,7 +93,11 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         let taskIdentifier: Int
         let requestGeneration: UInt64
         let provider: ProviderKind
+        /// The request this attempt sent, retained so its permitted retry replays exactly it.
+        let request: URLRequest
         let dataHandler: @Sendable (Data) -> Void
+        /// Whether this attempt is itself the retry, which is what bounds recovery to one extra try.
+        let isRetryAttempt: Bool
         var isErrorResponse = false
         var responseStatusCode: Int?
         var geminiEventParser = GeminiSSEEventParser()
@@ -182,12 +186,15 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
-    /// Returns the token identifying which request attempt currently owns the pipeline.
+    /// Returns the token identifying which logical request currently owns the pipeline.
     ///
     /// It advances only when a request starts, is replaced, or is stopped, so a caller that
     /// captured it earlier can tell that somebody else claimed or released the pipeline in between
     /// — including while a finished request's accepted audio has not reached the player yet, when
-    /// neither `isStreaming` nor `hasAudio` reports the pipeline as busy.
+    /// neither `isStreaming` nor `hasAudio` reports the pipeline as busy. A request's own automatic
+    /// retry inherits this token rather than advancing it, because recovering from a transient
+    /// provider failure is not somebody else claiming the pipeline; keep it that way, or every
+    /// waiting menu action would go stale on a retry the user never asked for.
     func currentRequestGeneration() -> UInt64 {
         stateQueue.sync { requestGeneration }
     }

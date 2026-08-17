@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- There are exactly three active implementation tasks: Tasks 22–24.
+- There are exactly two active implementation tasks: Tasks 23–24.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,7 +91,6 @@ inside a later task.
 
 | Verified gap | Classification | Task |
 | --- | --- | --- |
-| Transient Gemini 500 responses have no bounded automatic retry | Non-blocking | 22 |
 | Unhosted Settings tests recreate `@StateObject` state and emit lifecycle warnings | Non-blocking | 23 |
 | Failed legacy-key migration tells the user to retry but offers no in-app retry | Non-blocking | 24 |
 
@@ -110,9 +109,10 @@ disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--t
 A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
-file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 345 lines under a 400-line
-limit, so Task 22 has 55 lines there and more in the extensions it also names;
-`TTSNetworkManager+RequestLifecycle.swift` now owns starting, replacing, and stopping a request.
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 349 lines under a 400-line
+limit, so a later task has 51 lines there and more in the extensions it also names;
+`TTSNetworkManager+RequestLifecycle.swift` now owns starting, retrying, replacing, and stopping a
+request.
 Note that `lastError` has a file-private setter, which keeps the state-publication group in the
 declaring file.
 
@@ -187,15 +187,16 @@ documentation. Google still documents exactly 30 Gemini TTS voices and the rare 
 HTTP 500 with automated retry guidance; the full suite still emits the unhosted `StateObject`
 warnings; and failed legacy-key migration still has no in-app retry. Google now recommends its
 Interactions API for new development, but explicitly says the app's existing `generateContent`
-API remains fully supported. No migration task is justified by the current remediation boundary;
-Task 22 stays on the existing endpoint and response contract.
+API remains fully supported. No migration task is justified by the current remediation boundary, and
+the Phase 3 Gemini work stayed on the existing endpoint and response contract.
 
 ---
 
 ## Phase 3 — Complete and harden the Gemini provider contract
 
 This phase brings user-visible Gemini metadata in line with current official documentation and
-adds the bounded recovery Google recommends for the model's documented transient failure mode.
+adds the bounded recovery Google recommends for the model's documented transient failure mode. Both
+of its implementation tasks have landed, so only its gap review remains before Phase 4 may begin.
 
 The complete documented Gemini voice catalog is now one production constant published through the
 existing freshness-guarded metadata path, so the menu and Settings cannot offer different subsets.
@@ -203,74 +204,13 @@ Gemini still documents no discovery endpoint: a later task that touches Gemini v
 keep that single source of truth and re-verify it against Google's guide instead of adding a second
 list or a discovery request. See [README.md](README.md#design-assumptions) for the rule.
 
-### 22. Retry the documented transient Gemini 500 failure once
-
-**Classification:** Non-blocking — provider reliability
-
-**Depends on:** Task 21 (landed)
-
-**Purpose.** Google documents that Gemini 3.1 TTS can rarely return HTTP 500 when it emits text
-tokens instead of audio and recommends automated retry handling. The app currently turns every 500
-into an immediate terminal error.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Managers/TTSNetworkManager+Failures.swift`
-- `Sources/Managers/TTSNetworkManager+Requests.swift`
-- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
-- `Tests/TTSNetworkManagerFailureTests.swift`
-- `Tests/TTSNetworkManagerRequestLifecycleTests.swift`
-- `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. Re-verify Google's current retry guidance in the
-   [Gemini TTS limitations](https://ai.google.dev/gemini-api/docs/speech-generation#limitations)
-   and its Generate Content variant before implementation, because the latter matches the app's
-   current endpoint and SSE response contract.
-2. Treat the retry as part of one logical user request with the same immutable settings, text,
-   credentials, decoder, handler, and cancellation generation.
-3. Retry Gemini HTTP 500 at most once and only when the request is still current. Keep
-   `isStreaming` truthful across the handoff and do not publish a terminal error before the retry
-   outcome is known.
-4. A stop, Clear Buffer, replacement request, or invalidated generation must prevent the retry from
-   starting and revoke its queued deliveries under the [README's queued-delivery ownership
-   contract](README.md#architecture). That contract now includes the callback-authority lock added
-   by Task 28: acquire callback authority before `stateQueue`, never the reverse, and do not start
-   a retry from inside a client handler that already holds callback authority.
-5. If the retry also fails, publish the existing sanitized HTTP failure exactly once and finish the
-   request normally.
-6. Do not retry authentication, configuration, transport, cancellation, malformed SSE, empty
-   audio, OpenAI-compatible, or Custom failures.
-7. Record the bounded retry behavior and provider rationale in README.
-
-**Non-goals and invariants.**
-
-- Do not add exponential backoff, a general retry framework, or more than one automatic attempt.
-- Do not migrate Gemini to the Interactions API as part of this task. `generateContent` remains
-  fully supported, and that migration would replace the request and streaming-response contracts
-  rather than implement the bounded retry requested here.
-- Do not rebuild retry input from mutable current Settings.
-- Do not expose response bodies, keys, or provider-controlled error text.
-- Preserve incremental delivery, ordering, final-event accounting, and the 0.1-second audio
-  prebuffer. A retry must not duplicate already authorized audio.
-
-**Validation and falsification.**
-
-- Return Gemini 500 then valid SSE audio; assert two requests, one logical lifecycle, one audio
-  stream, and no terminal error.
-- Return 500 twice; assert exactly two attempts and one sanitized terminal failure.
-- Stop or replace between attempts and prove no retry or stale callback escapes.
-- Assert 401, 403, other HTTP statuses, transport errors, OpenAI, and Custom each make one attempt.
-- Verify the retry uses the original captured URL, body, headers, model, voice, and handler after a
-  Settings change.
-- Mutation-test an unbounded retry, retrying the wrong provider/status, and rebuilding from mutable
-  settings.
-
-**Done when.** A current Gemini request transparently receives one safe retry for the documented
-500 failure and every other lifecycle, cancellation, and error contract remains unchanged.
+A Gemini speech request that fails with exactly the transient error Google documents — HTTP 500
+with no transport error — is now retried once, silently, as a continuation of the same logical
+request rather than as a new one. A later task that adds, replaces, or retries a request MUST NOT
+add a second automatic attempt, MUST NOT rebuild a retry's inputs from mutable current Settings,
+and MUST keep the retry on its original cancellation generation so a stop, Clear Buffer, or
+replacement in that window prevents it from starting. See
+[README.md](README.md#design-assumptions) for the rule and its provider rationale.
 
 ### Phase 3 mandatory gap review
 

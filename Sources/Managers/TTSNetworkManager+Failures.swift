@@ -9,10 +9,11 @@ extension TTSNetworkManager {
         let hasGeminiStreamFailure: Bool
         let hasIncompleteGeminiEvent: Bool
         let didRefuseInsecureRedirect: Bool
+        let retryAttempt: RetryAttempt?
         let isStale: Bool
     }
 
-    private func processCompletedTask(_ task: URLSessionTask) -> TaskCompletionResult {
+    private func processCompletedTask(_ task: URLSessionTask, error: Error?) -> TaskCompletionResult {
         stateQueue.sync {
             guard let context = activeRequest, task.taskIdentifier == context.taskIdentifier else {
                 return TaskCompletionResult(
@@ -23,6 +24,7 @@ extension TTSNetworkManager {
                     hasGeminiStreamFailure: false,
                     hasIncompleteGeminiEvent: false,
                     didRefuseInsecureRedirect: false,
+                    retryAttempt: nil,
                     isStale: true
                 )
             }
@@ -35,6 +37,7 @@ extension TTSNetworkManager {
                 hasGeminiStreamFailure: context.hasGeminiStreamFailure,
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
                 didRefuseInsecureRedirect: context.didRefuseInsecureRedirect,
+                retryAttempt: context.hasGeminiStreamFailure ? nil : permittedRetryAttempt(for: context, error: error),
                 isStale: false
             )
             if !context.hasGeminiStreamFailure {
@@ -44,9 +47,34 @@ extension TTSNetworkManager {
         }
     }
 
+    /// Returns the inputs for the one automatic retry this completion earns, or nil when it earns none.
+    ///
+    /// Google documents that a Gemini TTS model rarely emits text tokens instead of audio, that the
+    /// server then fails the request with HTTP 500, and that an application should retry those
+    /// automatically. Only that failure qualifies. Another provider, another status, a transport
+    /// error alongside the response, and an attempt that is already the retry all publish their
+    /// failure instead, which is what keeps recovery bounded to one extra attempt and keeps every
+    /// other error the user must act on immediately visible.
+    private func permittedRetryAttempt(for context: ActiveRequestContext, error: Error?) -> RetryAttempt? {
+        guard context.provider == .gemini,
+              !context.isRetryAttempt,
+              context.responseStatusCode == 500,
+              error == nil else {
+            return nil
+        }
+        return RetryAttempt(
+            request: context.request,
+            provider: context.provider,
+            requestGeneration: context.requestGeneration,
+            dataHandler: context.dataHandler
+        )
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let result = processCompletedTask(task)
+        let result = processCompletedTask(task, error: error)
         if result.isStale { return }
+        // A retry that starts owns the rest of this logical request, including what it publishes.
+        if let retryAttempt = result.retryAttempt, startRetryAttempt(retryAttempt) { return }
         let requestGeneration: UInt64?
         if result.hasGeminiStreamFailure {
             guard let dataTask = task as? URLSessionDataTask,
