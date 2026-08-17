@@ -88,7 +88,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
-        networkManager.availableVoices = ["alloy", "nova"]
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["alloy", "nova"])
         let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         XCTAssertEqual(view.voiceOptions, ["alloy", "nova"])
@@ -127,7 +127,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
-        networkManager.availableVoices = ["alloy", "nova"]
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["alloy", "nova"])
         let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
         UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
@@ -142,7 +142,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
-        networkManager.availableVoices = ["Aoede", "Puck"]
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: "Gemini", values: ["Aoede", "Puck"])
         let geminiView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,
@@ -161,7 +161,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
-        networkManager.availableVoices = ["alloy", "nova"]
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["alloy", "nova"])
         let openAIView = makeMenu(
             audioPlayer: audioPlayer,
             textExtraction: textExtraction,

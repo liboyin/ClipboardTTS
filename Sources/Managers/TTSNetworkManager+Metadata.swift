@@ -1,5 +1,26 @@
 import Foundation
 
+/// A published model or voice suggestion list together with the provider it was fetched for.
+///
+/// Settings renders a newly selected provider's saved model and voice one render before its
+/// `onChange` can resynchronize the manager, so the previous provider's list is still published at
+/// that point. Naming the owner on the list itself is what lets a form refuse it: SwiftUI documents
+/// a picker whose selection has no matching tag as undefined, and offering one provider's choices
+/// under another provider's configuration would be wrong even where it is defined.
+struct ProviderSuggestions: Equatable {
+    /// The state before any list is published, and the one an invalidated metadata scope returns to.
+    static let unpublished = ProviderSuggestions(provider: "", values: [])
+
+    /// The persisted provider value these suggestions were fetched for.
+    let provider: String
+    let values: [String]
+
+    /// The suggestions when they belong to `provider`, and none otherwise.
+    func values(for provider: String) -> [String] {
+        self.provider == provider ? values : []
+    }
+}
+
 extension TTSNetworkManager {
     enum MetadataKind {
         case models
@@ -9,6 +30,10 @@ extension TTSNetworkManager {
     struct MetadataRequestToken: Equatable {
         let identifier: UInt64
         let generation: UInt64
+        /// The provider this request's results may be published for, carried on the token so a
+        /// publication takes its identity from the request that earned it rather than from settings
+        /// that may have changed since.
+        let provider: String
     }
 
     struct MetadataRequest {
@@ -78,7 +103,8 @@ extension TTSNetworkManager {
             nextMetadataRequestIdentifier &+= 1
             let token = MetadataRequestToken(
                 identifier: nextMetadataRequestIdentifier,
-                generation: metadataGeneration
+                generation: metadataGeneration,
+                provider: source.provider
             )
             let request = MetadataRequest(token: token, task: nil)
             switch kind {
@@ -131,11 +157,12 @@ extension TTSNetworkManager {
             guard self.completeMetadataRequest(for: kind, token: token) else { return }
             self.isPublishingMetadata = true
             defer { self.isPublishingMetadata = false }
+            let suggestions = ProviderSuggestions(provider: token.provider, values: values)
             switch kind {
             case .models:
-                self.availableModels = values
+                self.modelSuggestions = suggestions
             case .voices:
-                self.availableVoices = values
+                self.voiceSuggestions = suggestions
             }
         }
     }
@@ -192,8 +219,8 @@ extension TTSNetworkManager {
         let clearLists: @Sendable () -> Void = { [weak self] in
             guard let self else { return }
             guard self.stateQueue.sync(execute: { self.metadataGeneration == generation }) else { return }
-            self.availableModels = []
-            self.availableVoices = []
+            self.modelSuggestions = .unpublished
+            self.voiceSuggestions = .unpublished
         }
 
         if Thread.isMainThread, !isPublishingMetadata {

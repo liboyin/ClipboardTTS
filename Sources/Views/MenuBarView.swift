@@ -39,12 +39,15 @@ struct MenuBarView: View {
     }
 
     /// Voices eligible for selection by the menu's currently synchronized provider.
+    ///
+    /// The published list must name that provider too: a catalog outlives the request that fetched
+    /// it, so synchronization alone does not establish whose choices these are.
     var voiceOptions: [String] {
         guard networkManager.isCurrentProvider(selectedProvider.settingsValue) else { return [] }
         if selectedProvider == .custom {
             return customVoice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [customVoice]
         }
-        return networkManager.availableVoices
+        return networkManager.voiceSuggestions.values(for: selectedProvider.settingsValue)
     }
 
     /// Whether neither a network stream nor a retained audio buffer prevents a voice change.

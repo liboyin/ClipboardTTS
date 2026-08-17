@@ -207,7 +207,7 @@ final class TTSNetworkManagerEndpointTransportTests: MockURLProtocolTestCase {
         ) { followedRequest = $0 }
 
         XCTAssertNil(followedRequest, "A discovery redirect to cleartext must not be followed.")
-        XCTAssertEqual(manager.availableModels, [], "A refused discovery redirect must publish nothing.")
+        XCTAssertEqual(manager.modelSuggestions.values, [], "A refused discovery redirect must publish nothing.")
     }
 
     /// Returns a manager whose future requests use one protected Custom endpoint.

@@ -14,21 +14,35 @@ import AppKit
 /// Every member must be used from the main thread: `NSHostingView`, the AppKit controls it builds,
 /// and the main-queue turns that order SwiftUI's updates all require it.
 final class HostedSettings {
-    /// A plain (non-secure) Custom-form text field, addressed by its position among those fields.
+    /// A plain (non-secure) text field, addressed by its position among the fields its form renders.
     enum PlainTextField {
+        case providerModel
+        case providerVoice
         case customModel
         case customSampleRate
 
-        /// The field's index among the Custom form's plain text fields, in rendering order:
-        /// Base URL, Model, Voice, PCM Sample Rate. The API key is excluded because it is secure.
+        /// The field's index among its form's plain text fields, in rendering order. OpenAI and
+        /// Gemini render Model then Voice; Custom renders Base URL, Model, Voice, PCM Sample Rate.
+        /// Each form's API key is excluded because it is secure.
         var position: Int {
             switch self {
+            case .providerModel:
+                return 0
+            case .providerVoice:
+                return 1
             case .customModel:
                 return 1
             case .customSampleRate:
                 return 3
             }
         }
+    }
+
+    /// A suggestion control the form renders: the choices it offers and the one it shows selected.
+    struct SuggestionControl: Equatable {
+        let choices: [String]
+        /// The choice the control displays, which is absent when it shows none.
+        let selection: String?
     }
 
     private var host: NSHostingView<SettingsView>?
@@ -85,7 +99,7 @@ final class HostedSettings {
         host?.descendantButton(titled: title) != nil
     }
 
-    /// Types `newText` into a Custom-form field after proving the position still addresses it.
+    /// Types `newText` into a form field after proving the position still addresses it.
     ///
     /// Neither a placeholder nor an accessibility identifier survives into the AppKit layer of a
     /// windowless host, so position is the only address available. `expecting` is what makes that
@@ -98,7 +112,7 @@ final class HostedSettings {
         let plainFields = editableTextFields().filter { !($0 is NSSecureTextField) }
         guard field.position < plainFields.count else {
             XCTFail(
-                "The Custom form renders \(plainFields.count) plain text fields, so position \(field.position) is absent.",
+                "The current form renders \(plainFields.count) plain text fields, so position \(field.position) is absent.",
                 file: file,
                 line: line
             )
@@ -133,11 +147,16 @@ final class HostedSettings {
         edit(control, to: newText, file: file, line: line)
     }
 
+    /// Returns every suggestion control the form currently renders, in rendering order.
+    func suggestionControls() -> [SuggestionControl] {
+        var controls: [SuggestionControl] = []
+        host?.collectSuggestionControls(into: &controls)
+        return controls
+    }
+
     /// Returns the choices offered by each suggestion control the form currently renders.
     func suggestionLists() -> [[String]] {
-        var lists: [[String]] = []
-        host?.collectSuggestionLists(into: &lists)
-        return lists
+        suggestionControls().map(\.choices)
     }
 
     /// Switches provider the way the sidebar does, by writing the setting its selection is bound to.
@@ -186,26 +205,84 @@ final class HostedSettings {
         return fields
     }
 
-    /// Runs the main-queue turns SwiftUI needs to apply a change and rebuild its AppKit controls.
-    ///
-    /// One turn delivers the observation a change produced; the next runs the work its updated body
-    /// scheduled. Laying out around them forces the controls a later lookup addresses to exist now
-    /// rather than at some arbitrary later moment, which is what replaces a timing delay here.
     private func settle(file: StaticString, line: UInt) {
-        for _ in 0..<2 {
-            host?.layoutSubtreeIfNeeded()
-            drainMainQueue(file: file, line: line)
-        }
-        host?.layoutSubtreeIfNeeded()
+        settleHostedView(host, file: file, line: line)
     }
 
     private func drainMainQueue(file: StaticString, line: UInt) {
-        let drained = XCTestExpectation(description: "Hosted Settings completed a main-queue turn")
-        DispatchQueue.main.async { drained.fulfill() }
-        guard XCTWaiter().wait(for: [drained], timeout: 2.0) == .completed else {
-            XCTFail("The hosted Settings view did not complete a main-queue turn within 2 seconds.", file: file, line: line)
-            return
+        drainHostedMainQueue(file: file, line: line)
+    }
+}
+
+/// Hosts the shared model and voice fields alone, in a configuration Settings itself only passes
+/// through inside one SwiftUI update.
+///
+/// A provider switch renders the new provider's fields once before `onChange` resynchronizes the
+/// manager, and SwiftUI commits no AppKit state for that render: by the time a hosted form can be
+/// inspected, the manager has already been resynchronized and its stale lists cleared. Rendering
+/// these fields directly is therefore the only way a test can hold that configuration still.
+final class HostedModelVoiceFields {
+    private var host: NSHostingView<ModelVoiceConfigurationView>?
+
+    /// Mounts the fields for `provider` with fixed values, because this host exists to render one
+    /// configuration rather than to drive edits; `HostedSettings` owns editing and synchronization.
+    init(networkManager: TTSNetworkManager,
+         provider: String,
+         model: String,
+         voice: String,
+         testCase: XCTestCase,
+         file: StaticString = #filePath,
+         line: UInt = #line) {
+        let view = ModelVoiceConfigurationView(
+            ttsModel: .constant(model),
+            ttsVoice: .constant(voice),
+            networkManager: networkManager,
+            provider: provider,
+            onSync: {}
+        )
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 560, height: 200)
+        self.host = host
+        testCase.addTeardownBlock {
+            self.release(file: file, line: line)
         }
+        settleHostedView(host, file: file, line: line)
+    }
+
+    /// Returns every suggestion control these fields currently render, in rendering order.
+    func suggestionControls() -> [HostedSettings.SuggestionControl] {
+        var controls: [HostedSettings.SuggestionControl] = []
+        host?.collectSuggestionControls(into: &controls)
+        return controls
+    }
+
+    /// Releases the hosted view graph and drains the main queue. Calling it twice is safe.
+    func release(file: StaticString = #filePath, line: UInt = #line) {
+        guard host != nil else { return }
+        host = nil
+        drainHostedMainQueue(file: file, line: line)
+    }
+}
+
+/// Runs the main-queue turns SwiftUI needs to apply a change and rebuild its AppKit controls.
+///
+/// One turn delivers the observation a change produced; the next runs the work its updated body
+/// scheduled. Laying out around them forces the controls a later lookup addresses to exist now
+/// rather than at some arbitrary later moment, which is what replaces a timing delay here.
+private func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
+    for _ in 0..<2 {
+        host?.layoutSubtreeIfNeeded()
+        drainHostedMainQueue(file: file, line: line)
+    }
+    host?.layoutSubtreeIfNeeded()
+}
+
+private func drainHostedMainQueue(file: StaticString, line: UInt) {
+    let drained = XCTestExpectation(description: "Hosted view completed a main-queue turn")
+    DispatchQueue.main.async { drained.fulfill() }
+    guard XCTWaiter().wait(for: [drained], timeout: 2.0) == .completed else {
+        XCTFail("The hosted view did not complete a main-queue turn within 2 seconds.", file: file, line: line)
+        return
     }
 }
 
@@ -225,12 +302,17 @@ private extension NSView {
         subviews.forEach { $0.collectEditableTextFields(into: &fields) }
     }
 
-    /// Collects the item titles of every descendant pop-up button, which is how the form renders
-    /// its model and voice suggestions.
-    func collectSuggestionLists(into lists: inout [[String]]) {
+    /// Collects every descendant pop-up button, which is how the form renders its model and voice
+    /// suggestions, as the choices it offers and the choice it currently displays.
+    func collectSuggestionControls(into controls: inout [HostedSettings.SuggestionControl]) {
         if let popUpButton = self as? NSPopUpButton {
-            lists.append(popUpButton.itemTitles)
+            controls.append(
+                HostedSettings.SuggestionControl(
+                    choices: popUpButton.itemTitles,
+                    selection: popUpButton.titleOfSelectedItem
+                )
+            )
         }
-        subviews.forEach { $0.collectSuggestionLists(into: &lists) }
+        subviews.forEach { $0.collectSuggestionControls(into: &controls) }
     }
 }

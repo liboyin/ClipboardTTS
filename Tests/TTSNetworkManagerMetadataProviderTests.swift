@@ -33,7 +33,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         let geminiModelsPublished = expectation(description: "Gemini models published")
         DispatchQueue.main.async {
-            XCTAssertEqual(manager.availableModels, ["gemini-3.1-flash-tts-preview"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
             geminiModelsPublished.fulfill()
         }
         wait(for: [geminiModelsPublished], timeout: 1.0)
@@ -56,7 +56,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         let openAIModelsPublished = expectation(description: "OpenAI models published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, ["tts-1", "tts-1-hd"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["tts-1", "tts-1-hd"])
             openAIModelsPublished.fulfill()
         }
         wait(for: [openAIModelsPublished], timeout: 1.0)
@@ -79,7 +79,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         let openAIVoicesPublished = expectation(description: "OpenAI voices published")
         DispatchQueue.main.async {
             XCTAssertEqual(
-                manager.availableVoices,
+                manager.voiceSuggestions.values,
                 ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
             )
             openAIVoicesPublished.fulfill()
@@ -101,7 +101,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         let openAIHDVoicesPublished = expectation(description: "OpenAI HD voices published")
         DispatchQueue.main.async {
             XCTAssertEqual(
-                manager.availableVoices,
+                manager.voiceSuggestions.values,
                 ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
             )
             openAIHDVoicesPublished.fulfill()
@@ -123,7 +123,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         let currentOpenAIVoicesPublished = expectation(description: "Current OpenAI voices published")
         DispatchQueue.main.async {
             XCTAssertEqual(
-                manager.availableVoices,
+                manager.voiceSuggestions.values,
                 [
                     "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
                     "shimmer", "verse", "marin", "cedar"
@@ -152,7 +152,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             // catalog that drifted from the provider contract, in either direction. Order is part
             // of that agreement: presenting the voices in the guide's order is what makes the two
             // comparable at a glance, so a deliberate reordering has to be restated here.
-            XCTAssertEqual(manager.availableVoices, documentedGeminiTTSVoices)
+            XCTAssertEqual(manager.voiceSuggestions.values, documentedGeminiTTSVoices)
             geminiVoicesPublished.fulfill()
         }
         wait(for: [geminiVoicesPublished], timeout: 1.0)
@@ -175,7 +175,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         let customVoicesPublished = expectation(description: "Custom voices published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableVoices, ["custom-voice-1", "custom-voice-2"])
+            XCTAssertEqual(manager.voiceSuggestions.values, ["custom-voice-1", "custom-voice-2"])
             customVoicesPublished.fulfill()
         }
         wait(for: [customVoicesPublished], timeout: 1.0)
@@ -202,7 +202,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         let voicesPublished = expectation(description: "Gemini catalog published before the request")
         DispatchQueue.main.async {
-            XCTAssertEqual(manager.availableVoices, documentedGeminiTTSVoices)
+            XCTAssertEqual(manager.voiceSuggestions.values, documentedGeminiTTSVoices)
             voicesPublished.fulfill()
         }
         wait(for: [voicesPublished], timeout: 1.0)

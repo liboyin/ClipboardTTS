@@ -133,7 +133,9 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
-                                        networkManager: networkManager, onSync: syncSettings)
+                                        networkManager: networkManager,
+                                        provider: selectedProvider.settingsValue,
+                                        onSync: syncSettings)
 
             testVoiceButton
         }
@@ -147,7 +149,9 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
-                                        networkManager: networkManager, onSync: syncSettings)
+                                        networkManager: networkManager,
+                                        provider: selectedProvider.settingsValue,
+                                        onSync: syncSettings)
 
             testVoiceButton
         }
@@ -165,7 +169,9 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
-                                        networkManager: networkManager, onSync: syncSettings)
+                                        networkManager: networkManager,
+                                        provider: selectedProvider.settingsValue,
+                                        onSync: syncSettings)
 
             Section(header: Text("Audio Format").font(.headline)) {
                 TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)

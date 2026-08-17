@@ -46,7 +46,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
-        XCTAssertEqual(manager.availableModels, [])
+        XCTAssertEqual(manager.modelSuggestions.values, [])
         manager.fetchAvailableModels(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "gemini-test-key",
@@ -55,7 +55,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let geminiModelsPublished = expectation(description: "Gemini models published")
         DispatchQueue.main.async {
-            XCTAssertEqual(manager.availableModels, ["gemini-3.1-flash-tts-preview"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
             geminiModelsPublished.fulfill()
         }
         wait(for: [geminiModelsPublished], timeout: 1.0)
@@ -68,7 +68,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let staleResponseIgnored = expectation(description: "Stale OpenAI response ignored")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, ["gemini-3.1-flash-tts-preview"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
             staleResponseIgnored.fulfill()
         }
         wait(for: [staleResponseIgnored], timeout: 1.0)
@@ -114,7 +114,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             voice: "voice-b",
             selectedProvider: "Custom"
         )
-        XCTAssertEqual(manager.availableModels, [])
+        XCTAssertEqual(manager.modelSuggestions.values, [])
         manager.fetchAvailableModels(baseURL: secondEndpoint, apiKey: "custom-b-key", selectedProvider: "Custom")
 
         // The mock protocol may serialize its loads, so release endpoint A only after endpoint B
@@ -124,14 +124,14 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let currentModelsPublished = expectation(description: "Second Custom models published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, ["current-tts-model"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
             currentModelsPublished.fulfill()
         }
         wait(for: [currentModelsPublished], timeout: 1.0)
 
         let staleResponseIgnored = expectation(description: "Stale Custom models response ignored")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, ["current-tts-model"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
             staleResponseIgnored.fulfill()
         }
         wait(for: [staleResponseIgnored], timeout: 1.0)
@@ -179,7 +179,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             voice: "voice-b",
             selectedProvider: "Custom"
         )
-        XCTAssertEqual(manager.availableVoices, [])
+        XCTAssertEqual(manager.voiceSuggestions.values, [])
         manager.fetchAvailableVoices(baseURL: secondEndpoint, apiKey: "custom-b-key", selectedProvider: "Custom")
 
         releaseOldResponse.signal()
@@ -187,7 +187,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let currentVoicesPublished = expectation(description: "Second Custom voices published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableVoices, ["current-voice"])
+            XCTAssertEqual(manager.voiceSuggestions.values, ["current-voice"])
             currentVoicesPublished.fulfill()
         }
         wait(for: [currentVoicesPublished], timeout: 1.0)
@@ -198,7 +198,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let staleResponseIgnored = expectation(description: "Stale Custom voices response ignored")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableVoices, ["current-voice"])
+            XCTAssertEqual(manager.voiceSuggestions.values, ["current-voice"])
             staleResponseIgnored.fulfill()
         }
         wait(for: [staleResponseIgnored], timeout: 1.0)
@@ -285,8 +285,8 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
-        manager.availableModels = ["known-tts-model"]
-        manager.availableVoices = ["known-voice"]
+        manager.modelSuggestions = ProviderSuggestions(provider: "Custom", values: ["known-tts-model"])
+        manager.voiceSuggestions = ProviderSuggestions(provider: "Custom", values: ["known-voice"])
 
         let requestsCompleted = expectation(description: "Malformed metadata requests completed")
         requestsCompleted.expectedFulfillmentCount = 2
@@ -304,8 +304,8 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let malformedResponsesIgnored = expectation(description: "Malformed metadata was not published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, ["known-tts-model"])
-            XCTAssertEqual(manager.availableVoices, ["known-voice"])
+            XCTAssertEqual(manager.modelSuggestions.values, ["known-tts-model"])
+            XCTAssertEqual(manager.voiceSuggestions.values, ["known-voice"])
             malformedResponsesIgnored.fulfill()
         }
         wait(for: [malformedResponsesIgnored], timeout: 1.0)
@@ -317,8 +317,8 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
-        manager.availableModels = ["old-tts-model"]
-        manager.availableVoices = ["old-voice"]
+        manager.modelSuggestions = ProviderSuggestions(provider: "Custom", values: ["old-tts-model"])
+        manager.voiceSuggestions = ProviderSuggestions(provider: "Custom", values: ["old-voice"])
 
         let requestsCompleted = expectation(description: "Empty metadata requests completed")
         requestsCompleted.expectedFulfillmentCount = 2
@@ -334,8 +334,8 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         let emptyListsPublished = expectation(description: "Empty metadata lists published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.availableModels, [])
-            XCTAssertEqual(manager.availableVoices, [])
+            XCTAssertEqual(manager.modelSuggestions.values, [])
+            XCTAssertEqual(manager.voiceSuggestions.values, [])
             emptyListsPublished.fulfill()
         }
         wait(for: [emptyListsPublished], timeout: 1.0)

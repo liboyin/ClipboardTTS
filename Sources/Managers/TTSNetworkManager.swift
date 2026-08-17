@@ -20,8 +20,9 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     @Published var isStreaming = false
     /// A short, sanitized explanation of the most recent speech-request failure.
     @Published private(set) var lastError: String?
-    @Published var availableModels: [String] = []
-    @Published var availableVoices: [String] = []
+    /// The model and voice choices currently offered, each naming the provider that published it.
+    @Published var modelSuggestions = ProviderSuggestions.unpublished
+    @Published var voiceSuggestions = ProviderSuggestions.unpublished
 
     private(set) var baseURL: String
     private var apiKey: String

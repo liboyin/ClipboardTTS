@@ -15,8 +15,8 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
             voice: "voice-current",
             selectedProvider: "Custom"
         )
-        manager.availableModels = ["current-model"]
-        manager.availableVoices = ["current-voice"]
+        manager.modelSuggestions = ProviderSuggestions(provider: "Custom", values: ["current-model"])
+        manager.voiceSuggestions = ProviderSuggestions(provider: "Custom", values: ["current-voice"])
 
         let staleRequestStarted = expectation(description: "Mismatched metadata request must not start")
         staleRequestStarted.isInverted = true
@@ -47,8 +47,8 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         )
         wait(for: [staleRequestStarted], timeout: 0.2)
 
-        XCTAssertEqual(manager.availableModels, ["current-model"])
-        XCTAssertEqual(manager.availableVoices, ["current-voice"])
+        XCTAssertEqual(manager.modelSuggestions.values, ["current-model"])
+        XCTAssertEqual(manager.voiceSuggestions.values, ["current-voice"])
     }
 
     func testCleartextMetadataSourceCannotStartARequestOrPublishLists() {
@@ -71,8 +71,8 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         let publicationWindowClosed = expectation(description: "Any metadata publication has run")
         DispatchQueue.main.async { publicationWindowClosed.fulfill() }
         wait(for: [publicationWindowClosed], timeout: 1.0)
-        XCTAssertEqual(manager.availableModels, [])
-        XCTAssertEqual(manager.availableVoices, [])
+        XCTAssertEqual(manager.modelSuggestions.values, [])
+        XCTAssertEqual(manager.voiceSuggestions.values, [])
     }
 
     func testLoopbackMetadataSourceStillDiscoversModelsAndVoices() {
@@ -100,12 +100,12 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         let modelsPublished = expectation(description: "Loopback models published")
         let voicesPublished = expectation(description: "Loopback voices published")
         let observations = [
-            manager.$availableModels.dropFirst().sink { models in
-                guard models == ["local-tts-model"] else { return }
+            manager.$modelSuggestions.dropFirst().sink { models in
+                guard models.values == ["local-tts-model"] else { return }
                 modelsPublished.fulfill()
             },
-            manager.$availableVoices.dropFirst().sink { voices in
-                guard voices == ["local-voice"] else { return }
+            manager.$voiceSuggestions.dropFirst().sink { voices in
+                guard voices.values == ["local-voice"] else { return }
                 voicesPublished.fulfill()
             }
         ]
@@ -130,8 +130,8 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         )
 
         let scopeChangeObserved = expectation(description: "Reentrant scope change observed")
-        let subscription = manager.$availableModels.dropFirst().sink { models in
-            guard models == ["stale-tts-model"] else { return }
+        let subscription = manager.$modelSuggestions.dropFirst().sink { models in
+            guard models.values == ["stale-tts-model"] else { return }
             manager.updateSettings(
                 baseURL: "https://generativelanguage.googleapis.com/v1beta",
                 apiKey: "gemini-key",
@@ -151,7 +151,7 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
 
         let staleMetadataCleared = expectation(description: "Stale metadata cleared after publication")
         DispatchQueue.main.async {
-            XCTAssertEqual(manager.availableModels, [])
+            XCTAssertEqual(manager.modelSuggestions.values, [])
             staleMetadataCleared.fulfill()
         }
         wait(for: [staleMetadataCleared], timeout: 1.0)

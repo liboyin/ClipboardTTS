@@ -12,10 +12,9 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Task 35 is active. The Phase 4 gap review found that Settings can render a provider's saved
-  model or voice against another provider's still-published suggestion list, so the phase remains
-  open until that task lands and the review is rerun. The final acceptance sweep follows only
-  after Phase 4 closes.
+- Task 36 is active. Task 35's adversarial review found that the menu's voice picker renders a
+  selection its own options need not contain, so Phase 4 closes only after that task lands and the
+  phase gap review is rerun over the complete range. The final acceptance sweep follows after that.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -92,9 +91,9 @@ inside a later task.
 
 ## Work map
 
-Task 35 is the only active implementation task. It closes the invalid Settings picker state found
-by the Phase 4 gap review; no later phase or final-sweep work may begin until its implementation and
-the rerun review close Phase 4.
+Task 36 is the only active implementation task. It carries Task 35's picker-validity rule to the
+menu surface; no later phase or final-sweep work may begin until it lands and the rerun Phase 4 gap
+review closes the phase.
 
 ---
 
@@ -239,9 +238,9 @@ complete-concurrency build (no source warnings).
 
 ## Phase 4 — Make recovery and test evidence trustworthy
 
-This phase removes lifecycle warnings from Settings tests and gives failed secret migration the
-user action promised by its error message. Tasks 23 and 24 are complete. The phase gap review found
-Task 35, so Phase 4 remains open until that task and the rerun review are complete.
+This phase removes lifecycle warnings from Settings tests, gives failed secret migration the user
+action promised by its error message, and keeps every suggestion picker valid. Tasks 23, 24, and 35
+are complete; Task 36 remains, so Phase 4 closes once that task lands and its gap review is rerun.
 
 Settings tests now drive an installed view through `Tests/HostedSettings.swift` instead of calling
 methods on a constructed `SettingsView` value, and every Settings action renders through
@@ -260,86 +259,77 @@ a provider's legacy value on any confirmed write to it, because a plaintext copy
 user's own edit restores a credential they replaced or withdrew. See
 [README.md](README.md#architecture) for the rule.
 
-### 35. Keep Settings suggestion pickers valid across provider and free-text changes
+Every published model and voice list now names the provider its request was made for, and a form or
+menu offers only a list naming the provider it renders; a Settings picker also always tags its own
+current selection. A later task that adds a suggestion source, a provider form, or another surface offering
+those choices MUST carry that identity on the list rather than infer it from current settings, and
+MUST NOT normalize an off-catalog model or voice to make a picker valid, because that would speak in
+one the user never chose. See [README.md](README.md#design-assumptions) for the rule.
 
-**Classification:** Non-blocking — Settings state validity and diagnostic trustworthiness
+### 36. Give the menu's voice picker a tag for its own current selection
 
-**Depends on:** Tasks 23 and 24 (landed)
+**Classification:** Non-blocking — menu picker validity and diagnostic trustworthiness
 
-**Purpose.** The lifecycle-valid provider-switch regression added by Task 23 deterministically
-emits SwiftUI's `Picker: the selection "Aoede" is invalid and does not have an associated tag, this
-will give undefined results` warning. When the persisted provider changes from OpenAI to Gemini,
-the form renders Gemini's saved model and voice before its `onChange` callback synchronizes the
-manager and clears the still-published OpenAI suggestion lists. The same invalid selection can
-occur when a user types a model or voice that is not in a currently published catalog. A passing
-hosted test therefore still exercises a configuration SwiftUI declares undefined, and the picker
-can transiently offer suggestions belonging to the wrong provider.
+**Depends on:** Task 35 (landed)
+
+**Purpose.** `MenuBarView` renders `Picker("Voice", selection: voiceBinding)` over `voiceOptions`
+alone, while the binding shows the saved voice. `voiceOptions` is deliberately the set that may be
+*selected*: it is empty until metadata arrives and while the manager holds another provider, and it
+never contains a voice the current catalog does not list. Those states leave the rendered picker
+with a selection that has no matching tag. Verified on 2026-08-17 by hosting the menu with the
+Gemini catalog published and an off-catalog saved voice, which emitted `Picker: the selection
+"Unlisted-Preview-Voice" is invalid and does not have an associated tag, this will give undefined
+results` both at `83d1372` and after Task 35. The defect therefore predates Task 35, but that task
+made an off-catalog model or voice an explicitly supported configuration, so the menu is now the
+only surface that renders it as undefined.
 
 **Primary paths.**
 
-- `Sources/Views/SettingsView.swift`
-- `Sources/Views/ModelVoiceConfigurationView.swift`
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Tests/HostedSettings.swift`
-- `Tests/SettingsViewTests.swift`
-- `Tests/SettingsVoiceMetadataTests.swift`
+- `Sources/Views/MenuBarView.swift`
+- `Tests/MenuBarViewTests.swift`
 - `README.md`
 
 **Required change.**
 
-1. Associate each rendered model and voice suggestion list with the provider/source it belongs to.
-   A provider switch MUST NOT construct a picker for the new provider from values still published
-   for the old one, even for the render that precedes the selection binding's `onChange` callback.
-2. Every rendered picker MUST contain a tag equal to its current selection. Preserve a user's
-   off-catalog typed model or voice without normalizing or replacing it, and keep the provider's
-   valid suggestions available so the user can correct that value from the picker.
-3. Preserve the manager's existing metadata freshness, cancellation, and provider/endpoint guards.
-   Do not solve the warning by suppressing diagnostics, delaying the provider binding, or exposing
-   a stale provider's choices under a placeholder tag.
-4. Drive provider switches and free-text edits through `HostedSettings`. Tests MUST distinguish
-   the transient state before replacement metadata arrives, not merely assert the final catalog
-   after the main queue and mock response have both settled.
-5. Release every host through the established teardown boundary and inspect focused and full-suite
-   output to prove there is no invalid-picker or uninstalled-state warning.
+1. The rendered voice picker MUST contain a tag equal to the voice it displays in every state:
+   before metadata arrives, while the manager is synchronized to another provider, and when the
+   saved voice is outside the published catalog.
+2. Keep `voiceOptions` as the eligibility rule `selectVoice(_:)` guards with. Rendering a voice
+   MUST NOT make a stale, wrong-provider, or uncatalogued voice selectable.
+3. Do not normalize, clear, or replace the saved voice, and do not solve the warning by suppressing
+   diagnostics or by hiding the picker's current value.
 
 **Non-goals and invariants.**
 
-- Do not change any provider's documented catalog, discovery endpoint, ordering, or request format.
-- Do not remove free-text model or voice editing, silently choose a catalog default, or reject a
-  saved value merely because metadata does not currently list it.
-- Keep Settings' selected provider synchronized with future speech and metadata requests, and keep
-  delayed metadata from a former provider unable to publish into the current form.
+- Do not change any provider's catalog, discovery endpoint, ordering, or request format.
+- Voice selection stays refused while a stream or buffered audio exists, and while the manager is
+  not synchronized with the menu's provider.
 - Do not add sleeps, real windows, live requests, or log filtering to the regression suite.
 
 **Validation and falsification.**
 
-- Publish OpenAI suggestions, hold replacement metadata, switch the hosted form to Gemini, and
-  prove the form offers no OpenAI choice while its Gemini model and voice remain unchanged and
-  valid picker selections.
-- Type off-catalog model and voice values while suggestions are present; prove both values remain
-  selected, the catalog remains usable, and Test Voice sends the typed values to the correct
-  provider.
-- Rapidly switch providers with delayed former-provider completions and prove neither stale list
-  nor invalid selection can reappear.
-- Mutation-test rendering the former provider's list, omitting the current off-catalog selection's
-  tag, and over-restricting the control by replacing the typed value with a catalog default.
-- Run the focused hosted Settings suites and all repository gates, inspecting their logs for both
-  invalid-picker and uninstalled-state warnings.
+- Host the menu with a saved voice outside the published catalog and prove the picker offers a tag
+  for it while `voiceOptions` still refuses it as a selection.
+- Host the menu before its metadata arrives and prove the same, then prove a stale or
+  wrong-provider voice still cannot be selected.
+- Mutation-test rendering `voiceOptions` directly, and over-restricting by adding the displayed
+  voice to `voiceOptions` itself.
+- Run the focused hosted menu suite and all repository gates, inspecting their logs for the
+  invalid-picker warning.
 
-**Done when.** Settings never renders a picker whose selection lacks a matching tag, never offers
-one provider's stale suggestions after another provider is selected, retains off-catalog typed
-values, and the lifecycle-valid Settings tests complete without either SwiftUI warning.
+**Done when.** The menu never renders a picker whose selection lacks a matching tag,
+`selectVoice(_:)` still refuses every voice outside `voiceOptions`, and the hosted menu tests
+complete without that SwiftUI warning.
 
 ### Phase 4 mandatory gap review
 
 Run the **Phase review gate** on the Phase 4 commit range. Scrutinize SwiftUI state identity, host
 teardown, late network work, Keychain/test-double boundaries, partial migration, retry visibility,
 secret precedence, manager synchronization, error clearing, and provider-scoped picker identity.
-The 2026-08-17 review over `a9dc781^..657d396` found Task 35. Before that finding, all three gates
-passed at `657d396`: `./check-coverage.sh` (189 tests, 0 failures, `Sources/Managers/` at 97.60%),
-`swiftlint --strict` (0 violations across 62 files), and the complete-concurrency build (no source
-warnings). The full and focused hosted Settings runs both emitted the invalid-picker warning named
-in Task 35, so the review remains open and must be rerun after that task lands.
+The 2026-08-17 review over `a9dc781^..657d396` found Task 35, which has since landed and whose own
+adversarial review added Task 36. The rerun must cover the complete phase range including both
+commits, and must inspect the full and focused hosted output for the invalid-picker warning that
+review observed.
 
 ---
 
@@ -384,7 +374,7 @@ tasks to this file and complete them before declaring the remediation finished.
    non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, migration retry, and About.
    Obtain user permission and credentials before live-provider tests; never record keys or provider
    response audio.
-6. Run a final adversarial review on the complete remediation range — Tasks 17–34, currently
+6. Run a final adversarial review on the complete remediation range — Tasks 17–35, currently
    `2476718..HEAD` — plus any phase-review follow-up tasks added later. Resolve every blocking
    finding and obtain explicit disposition for every non-blocking finding.
 7. Reconcile `README.md`, `USER_STORIES.md`, and verified behavior. Remove completed active tasks
