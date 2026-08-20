@@ -3,11 +3,11 @@ import XCTest
 
 /// Covers which suggestions a provider's Settings form may offer and how its selection stays valid.
 final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
-    func testSettingsSuggestsTheSameDocumentedGeminiVoiceCatalogAsTheMenu() {
-        // WHY: Settings is where a user types a voice, so its suggestions are the other surface a
-        // documented voice must reach. Publishing the catalog for the menu alone would leave
-        // Settings offering a stale subset of the same provider contract, so this drives the
-        // rendered Settings form and reads back the voice suggestions it actually shows.
+    func testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog() {
+        // WHY: Settings is where a user types a voice, and since the menu stopped offering one it is
+        // the only surface a documented voice can reach. Publishing a subset of the provider
+        // contract would put a documented voice out of reach entirely, so this drives the rendered
+        // Settings form and reads back the voice suggestions it actually shows.
         UserDefaults.standard.set("Gemini", forKey: SettingsKeys.ttsProvider)
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()

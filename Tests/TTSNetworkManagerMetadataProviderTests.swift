@@ -183,10 +183,10 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
 
     func testPublishingTheGeminiCatalogLeavesAValidSavedVoiceOnTheNextRequest() {
         // WHY: The catalog is provider metadata, not a selection. A refresh that also wrote a voice
-        // would speak in a voice the user never chose while the menu and Settings still display
-        // theirs, and the saved choice's position in the published order is no reason to replace
-        // it. The saved voice here is the catalog's last entry, so any reset toward the list's
-        // beginning is visible in the one place it matters: the next request's payload.
+        // would speak in a voice the user never chose while Settings still displays theirs, and the
+        // saved choice's position in the published order is no reason to replace it. The saved voice
+        // here is the catalog's last entry, so any reset toward the list's beginning is visible in
+        // the one place it matters: the next request's payload.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",

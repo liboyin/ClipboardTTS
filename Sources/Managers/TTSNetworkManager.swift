@@ -190,13 +190,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
-    /// Updates only the voice captured by speech requests that start after this call.
-    func updateVoice(_ voice: String) {
-        stateQueue.sync {
-            self.voice = voice
-        }
-    }
-
     /// Returns the token identifying which logical request currently owns the pipeline.
     ///
     /// It advances only when a request starts, is replaced, or is stopped, so a caller that

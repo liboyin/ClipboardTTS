@@ -12,9 +12,10 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Task 36 is active. Task 35's adversarial review found that the menu's voice picker renders a
-  selection its own options need not contain, so Phase 4 closes only after that task lands and the
-  phase gap review is rerun over the complete range. The final acceptance sweep follows after that.
+- No implementation task is active. Task 36 was withdrawn on 2026-08-20 when the user removed voice
+  selection from the menu-bar drop-down, so the picker it would have fixed no longer exists. Phase 4
+  closes once its gap review is rerun over the complete range, and the final acceptance sweep
+  follows after that.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -91,9 +92,8 @@ inside a later task.
 
 ## Work map
 
-Task 36 is the only active implementation task. It carries Task 35's picker-validity rule to the
-menu surface; no later phase or final-sweep work may begin until it lands and the rerun Phase 4 gap
-review closes the phase.
+No implementation task remains. No later phase or final-sweep work may begin until the rerun Phase 4
+gap review closes the phase.
 
 ---
 
@@ -240,7 +240,8 @@ complete-concurrency build (no source warnings).
 
 This phase removes lifecycle warnings from Settings tests, gives failed secret migration the user
 action promised by its error message, and keeps every suggestion picker valid. Tasks 23, 24, and 35
-are complete; Task 36 remains, so Phase 4 closes once that task lands and its gap review is rerun.
+are complete. Task 36 was withdrawn without landing: menu voice selection was removed on 2026-08-20,
+so the picker it would have fixed no longer exists. Phase 4 closes once its gap review is rerun.
 
 Settings tests now drive an installed view through `Tests/HostedSettings.swift` instead of calling
 methods on a constructed `SettingsView` value, and every Settings action renders through
@@ -259,67 +260,30 @@ a provider's legacy value on any confirmed write to it, because a plaintext copy
 user's own edit restores a credential they replaced or withdrew. See
 [README.md](README.md#architecture) for the rule.
 
-Every published model and voice list now names the provider its request was made for, and a form or
-menu offers only a list naming the provider it renders; a Settings picker also always tags its own
-current selection. A later task that adds a suggestion source, a provider form, or another surface offering
+Every published model and voice list now names the provider its request was made for, and a form
+offers only a list naming the provider it renders; a Settings picker also always tags its own current
+selection. A later task that adds a suggestion source, a provider form, or another surface offering
 those choices MUST carry that identity on the list rather than infer it from current settings, and
 MUST NOT normalize an off-catalog model or voice to make a picker valid, because that would speak in
-one the user never chose. See [README.md](README.md#design-assumptions) for the rule.
+one the user never chose. See [README.md](README.md#design-assumptions) for the rule. Settings is now
+the only surface that offers them.
 
-### 36. Give the menu's voice picker a tag for its own current selection
+### Menu voice selection removed — decision note, 2026-08-20
 
-**Classification:** Non-blocking — menu picker validity and diagnostic trustworthiness
+Voice is configured only in Settings, beside the model and API key that give it meaning. The
+menu-bar drop-down is playback control alone — speak/clear, play/pause, progress, speed — and
+neither offers the voice nor displays it. Task 36, which would have tagged the menu picker's own
+selection, was withdrawn with the control it targeted; its commit was discarded rather than
+reverted, so no history describes a picker the app never shipped.
 
-**Depends on:** Task 35 (landed)
+A later task that reintroduces any voice affordance in the menu MUST bring the provider-identity and
+picker-validity rules with it — a surface may offer only a list naming the provider it renders, and a
+rendered picker must tag its own selection — because those guarantees were deleted with the control
+they protected, not relaxed. See [README.md](README.md#design-assumptions) for the rule.
 
-**Purpose.** `MenuBarView` renders `Picker("Voice", selection: voiceBinding)` over `voiceOptions`
-alone, while the binding shows the saved voice. `voiceOptions` is deliberately the set that may be
-*selected*: it is empty until metadata arrives and while the manager holds another provider, and it
-never contains a voice the current catalog does not list. Those states leave the rendered picker
-with a selection that has no matching tag. Verified on 2026-08-17 by hosting the menu with the
-Gemini catalog published and an off-catalog saved voice, which emitted `Picker: the selection
-"Unlisted-Preview-Voice" is invalid and does not have an associated tag, this will give undefined
-results` both at `83d1372` and after Task 35. The defect therefore predates Task 35, but that task
-made an off-catalog model or voice an explicitly supported configuration, so the menu is now the
-only surface that renders it as undefined.
-
-**Primary paths.**
-
-- `Sources/Views/MenuBarView.swift`
-- `Tests/MenuBarViewTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. The rendered voice picker MUST contain a tag equal to the voice it displays in every state:
-   before metadata arrives, while the manager is synchronized to another provider, and when the
-   saved voice is outside the published catalog.
-2. Keep `voiceOptions` as the eligibility rule `selectVoice(_:)` guards with. Rendering a voice
-   MUST NOT make a stale, wrong-provider, or uncatalogued voice selectable.
-3. Do not normalize, clear, or replace the saved voice, and do not solve the warning by suppressing
-   diagnostics or by hiding the picker's current value.
-
-**Non-goals and invariants.**
-
-- Do not change any provider's catalog, discovery endpoint, ordering, or request format.
-- Voice selection stays refused while a stream or buffered audio exists, and while the manager is
-  not synchronized with the menu's provider.
-- Do not add sleeps, real windows, live requests, or log filtering to the regression suite.
-
-**Validation and falsification.**
-
-- Host the menu with a saved voice outside the published catalog and prove the picker offers a tag
-  for it while `voiceOptions` still refuses it as a selection.
-- Host the menu before its metadata arrives and prove the same, then prove a stale or
-  wrong-provider voice still cannot be selected.
-- Mutation-test rendering `voiceOptions` directly, and over-restricting by adding the displayed
-  voice to `voiceOptions` itself.
-- Run the focused hosted menu suite and all repository gates, inspecting their logs for the
-  invalid-picker warning.
-
-**Done when.** The menu never renders a picker whose selection lacks a matching tag,
-`selectVoice(_:)` still refuses every voice outside `voiceOptions`, and the hosted menu tests
-complete without that SwiftUI warning.
+It must also re-establish the regression that pins the absence, and read the scope note in
+`Tests/MenuBarViewTests.swift` first: a windowless host can prove a picker absent, but not a plain
+`Text` label, which SwiftUI draws itself.
 
 ### Phase 4 mandatory gap review
 
@@ -327,9 +291,10 @@ Run the **Phase review gate** on the Phase 4 commit range. Scrutinize SwiftUI st
 teardown, late network work, Keychain/test-double boundaries, partial migration, retry visibility,
 secret precedence, manager synchronization, error clearing, and provider-scoped picker identity.
 The 2026-08-17 review over `a9dc781^..657d396` found Task 35, which has since landed and whose own
-adversarial review added Task 36. The rerun must cover the complete phase range including both
-commits, and must inspect the full and focused hosted output for the invalid-picker warning that
-review observed.
+adversarial review added Task 36. Task 36 was then withdrawn with the menu picker it targeted, so the
+rerun must cover the complete phase range through that removal. It must still inspect the full and
+focused hosted output for the invalid-picker warning that review observed: the menu can no longer
+raise it, but Settings renders pickers of its own.
 
 ---
 
@@ -371,7 +336,8 @@ tasks to this file and complete them before declaring the remediation finished.
    intervening Services work during the clipboard delay, Clear Buffer, provider switching during a
    request, bad credentials, Custom HTTPS and loopback HTTP, rejected remote HTTP, Gemini voice
    selection, Gemini 500 retry, Gemini first-audio latency, seek-to-end and replay, Custom
-   non-24-kHz audio, the 0.1-second startup prebuffer, voice locking, migration retry, and About.
+   non-24-kHz audio, the 0.1-second startup prebuffer, a Settings voice change reaching only the
+   next request, migration retry, and About.
    Obtain user permission and credentials before live-provider tests; never record keys or provider
    response audio.
 6. Run a final adversarial review on the complete remediation range — Tasks 17–35, currently
