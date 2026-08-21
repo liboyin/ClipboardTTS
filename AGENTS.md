@@ -1,4 +1,4 @@
-All agents MUST follow this file.
+This file states principles that hold for every change. All agents MUST follow this file.
 
 CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and RFC 8174).
 
@@ -13,19 +13,19 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 
 # Workflow Guidelines
 
-- The planner defines a task's intended boundary, dependencies, non-goals, validation strategy, and done criteria in `TODO.md`. Each task MUST remain a self-contained commit.
-- The executor MUST re-read the task and affected code before implementation. `TODO.md` is a contract to validate against the repository, not permission to apply it mechanically.
+- Each change MUST have a stated boundary: intent, dependencies, non-goals, validation strategy, and done criteria. Each change MUST remain a self-contained commit.
+- The executor MUST re-read the boundary and the affected code before implementation. A written task is a contract to validate against the repository, not permission to apply it mechanically.
 - The executor MUST confirm the gates pass at `HEAD` before editing. A gate already failing at `HEAD` SHOULD be fixed in a self-contained commit that lands first.
-- When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the task boundary unilaterally.
+- When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the boundary unilaterally.
 - The executor MAY make a non-material assumption only when it is supported by repository evidence and does not alter the requested outcome. Its final hand-over MUST name the assumption, supporting evidence, and effect on the change.
-- If user direction changes a task's material boundary, update `TODO.md` before committing so the remaining execution plan stays authoritative.
+- If user direction changes a planned change's material boundary, update relevant records before committing so the remaining execution plan stays authoritative.
 - The adversarial reviewer independently evaluates the complete in-scope change, including staged, unstaged, and in-scope untracked files. Explicitly identify unrelated dirty paths as out of scope; review findings re-enter the executor's test and review loop.
 
 # Documentation Guidelines
 
 - Each document SHOULD be the unique owner of its assigned topic. Other docs SHOULD link or summarize without becoming competing sources of truth.
 - Documentation MUST be updated as soon as its content no longer reflects the latest state of the project.
-- Design decisions & assumptions MUST be documented, and SHOULD record the reasoning behind them.
+- Design decisions & assumptions MUST be documented, and SHOULD record the reasoning behind them. Once documented they bind later changes.
 - Every empirical claim in a document, status block, documentation comment, or other code comment MUST be verified immediately before writing down.
 - Document ownership:
     - `USER_STORIES.md` owns product requirements and user-visible behavior.
@@ -34,7 +34,7 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 - Completed-task handling:
     - Remove a completed task's full active entry from `TODO.md` in that task's implementation commit.
     - Record detailed implementation history in the commit and current operating behavior in `README.md`; do not duplicate either in `TODO.md`.
-    - `TODO.md` MAY retain one concise hand-over or decision note when the completion materially constrains remaining work. Link to `README.md` instead of repeating implementation detail.
+    - `TODO.md` MAY retain a one-line pointer to the governing `README.md` rule when the completion materially constrains remaining work. Never restate the rule there.
     - Update task counts, work-map references, and every remaining dependency that references the completed task in the same commit.
 - New or changed non-test types, functions, and methods MUST use Swift documentation comments (`///`) when their purpose, contract, side effects, or constraints are not obvious from the declaration. Test method names MUST describe the behavior under test; add a comment only when the reason or trade-off is not clear from the test.
 
@@ -54,15 +54,22 @@ CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and 
 - Removing one MUST meet the same standard: a mutant that breaks the property it protected still fails another test. An assertion no mutant can break is itself a defect; prove the property is covered elsewhere rather than dropping the coverage.
 - `check-coverage.sh` is the source of truth for coverage measurement and thresholds. It uses XCTest coverage from `xccov` and requires at least 85% aggregate line coverage for `Sources/Managers/`.
 - `Sources/Views/` is exempt from the line-coverage gate because declarative SwiftUI bodies are exercised through construction smoke tests. Other exclusions MUST have a documented rationale and an end-to-end smoke test.
-- XCTest test cases MUST import the app with `@testable import ClipboardTTSApp`. Prefer injected dependencies and test doubles over modifying process-wide macOS state.
+- XCTest test cases MUST import the app with `@testable import ClipboardTTSApp`, and MUST NOT reach state they do not own: no external service, no `NSPasteboard.general`, no developer Keychain, and no lasting change to the app's real `UserDefaults` domain. Prefer injected dependencies and test doubles over modifying process-wide macOS state.
 - A process-global test double or shared asynchronous resource MUST define a per-test lifecycle: isolated ownership, synchronized access, teardown cancellation or invalidation, a quiescence check, and local accounting for unexpected late work. Assertions about asynchronous behavior MUST verify that work cannot escape its owning test's teardown boundary.
 - Tests that touch persisted app settings MUST call `isolateAppSettingsDefaults()` so the hosted test bundle neither reads nor overwrites the developer's configuration.
 - Generate `ClipboardTTSApp.xcodeproj` with `xcodegen generate` before building or testing when it is absent or `project.yml` changed. The generated project MUST NOT be committed.
-- After every code change, all gates MUST pass:
+- After every code change, all gates below MUST pass. Inspect the per-file coverage report and the build output for warnings; a zero exit code alone is not a pass:
 
 ```bash
 ./check-coverage.sh
 swiftlint --strict
+xcodebuild \
+  -project ClipboardTTSApp.xcodeproj \
+  -scheme ClipboardTTSApp \
+  -configuration Debug \
+  SWIFT_STRICT_CONCURRENCY=complete \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
 
 # Review Guidelines
