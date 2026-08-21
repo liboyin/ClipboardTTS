@@ -111,6 +111,8 @@ struct ClipboardTTSApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        // Opens at the size the content's former fixed frame enforced; the content now fills
+        // whatever size the window takes.
         Window("Settings", id: "settings") {
             SettingsView(
                 networkManager: networkManager,
@@ -119,6 +121,7 @@ struct ClipboardTTSApp: App {
                 defaults: defaults
             )
         }
+        .defaultSize(width: 600, height: 350)
     }
 }
 

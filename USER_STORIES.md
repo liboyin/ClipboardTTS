@@ -8,7 +8,7 @@
     - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically.
     - Pause/Resume
     - Playback Speed, adjusted with a continuous slider from 0.5x to 2.5x (0.1x increments)
-    - Settings (Model Selection, Voice Selection, API Key, Local/Online API Base URL, Test Voice, About, etc.)
+    - Settings (Model Selection, Voice Selection, API Key, Local/Online API Base URL, Test Voice, About, etc.). The provider list is a left sidebar with About below it, and the configuration pane fills the window at any window size.
 - Voice selection lives only in Settings, alongside the model and API key it belongs with. The drop-down is for playback control; it neither offers nor displays the configured voice.
 - The menu bar icon should change to reflect the current state (Idle, Playing, Paused).
 

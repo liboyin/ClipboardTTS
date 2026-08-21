@@ -81,43 +81,45 @@ struct SettingsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            List(selection: $ttsProvider) {
-                Text("OpenAI").tag("OpenAI")
-                Text("Gemini").tag("Gemini")
-                Text("Custom").tag("Custom")
-            }
-            .listStyle(.sidebar)
-            .frame(width: 150)
-            .onChange(of: ttsProvider) { newValue in
-                providerDidChange(to: newValue)
-            }
-
-            Divider()
-
             VStack(spacing: 0) {
-                Form {
-                    if let secretStoreError = secretState.errorMessage {
-                        Text(secretStoreError)
-                            .foregroundStyle(.red)
-                    }
-
-                    legacyKeyMigrationRecovery
-
-                    if selectedProvider == .openAI {
-                        openAISettings
-                    } else if selectedProvider == .gemini {
-                        geminiSettings
-                    } else {
-                        customSettings
-                    }
+                List(selection: $ttsProvider) {
+                    Text("OpenAI").tag("OpenAI")
+                    Text("Gemini").tag("Gemini")
+                    Text("Custom").tag("Custom")
                 }
-                .padding(20)
+                .listStyle(.sidebar)
+                .onChange(of: ttsProvider) { newValue in
+                    providerDidChange(to: newValue)
+                }
 
                 aboutButton
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: 170)
+
+            Divider()
+
+            Form {
+                if let secretStoreError = secretState.errorMessage {
+                    Text(secretStoreError)
+                        .foregroundStyle(.red)
+                }
+
+                legacyKeyMigrationRecovery
+
+                if selectedProvider == .openAI {
+                    openAISettings
+                } else if selectedProvider == .gemini {
+                    geminiSettings
+                } else {
+                    customSettings
+                }
+            }
+            .padding(20)
         }
-        .frame(width: 600, height: 350)
+        // The content grows with the window instead of floating at a fixed size, so a resized
+        // or restored window cannot strand blank margins around it; the scene's default size
+        // still opens it at the former fixed size.
+        .frame(minWidth: 600, minHeight: 350)
         .onAppear {
             customSampleRateText = String(format: "%.0f", customSampleRate)
             isCustomSampleRateDraftValid = AudioPlayerManager.isSupportedSampleRate(customSampleRate)
@@ -223,17 +225,16 @@ struct SettingsView: View {
         .padding(.top)
     }
 
+    /// The sidebar footer presenting the About panel. About is app-level rather than
+    /// provider-level, so it sits beside the provider list instead of under the active
+    /// provider's form. The representable is greedy, so the button takes the sidebar's width
+    /// and its title stays clear of the sidebar's edges.
     private var aboutButton: some View {
         VStack(spacing: 0) {
             Divider()
 
-            HStack {
-                SettingsActionButton(title: "About Clipboard TTS", action: showAbout)
-
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            SettingsActionButton(title: "About Clipboard TTS", action: showAbout)
+                .padding(8)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
