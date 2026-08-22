@@ -1,6 +1,6 @@
 # Xcode
 build/
-ClipboardTTSApp*
+/ClipboardTTSApp.app
 DerivedData/
 xcuserdata/
 
@@ -13,3 +13,7 @@ xcuserdata/
 
 # Package Manager
 .build/
+
+# AI Harness
+.claude/settings.*.json
+.remember/

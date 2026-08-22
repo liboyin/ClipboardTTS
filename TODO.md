@@ -12,11 +12,11 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Fourteen tasks are active in Phase 5: 37–50. Task 36 was withdrawn when voice selection left the
-  menu-bar drop-down. Phase 4's gap review has now run over its complete range and found no Phase 4
-  gap other than Task 42; the phase closes once that finding has an explicit user disposition. Phase
-  5 then addresses every outstanding review gap, and the final acceptance sweep follows its own gap
-  review.
+- Twelve tasks are active in Phase 5: 37, 38, 40–42, and 44–50. Task 36 was withdrawn when voice
+  selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
+  and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
+  user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
+  sweep follows its own gap review.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,10 +95,10 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 37–50: Tasks 37 and 38 are blocking; Tasks 39–50 are non-blocking. It begins
-only after Phase 4 closes. Within Phase 5 none of the tasks depends on another, so they may be
-executed in any order, one self-contained commit each. No final-sweep work may begin until every one
-of them has landed or been explicitly deferred by the user.
+Phase 5 contains Tasks 37, 38, 40–42, and 44–50: Tasks 37 and 38 are blocking; the rest are
+non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
+another, so they may be executed in any order, one self-contained commit each. No final-sweep work
+may begin until every one of them has landed or been explicitly deferred by the user.
 
 ---
 
@@ -321,8 +321,8 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 39–50 are non-blocking. Each
-task remains a separate commit and must follow the working rules above.
+starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42 and 44–50 are
+non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 ### 37. Align USER_STORIES.md with the dropped stateful menu-bar icon
 
@@ -411,39 +411,6 @@ response.
 
 **Done when.** An odd-length response produces one coherent outcome across player state, published
 message, and documentation, and a mutant that reverses the decision fails a test.
-
-### 39. Anchor the built-product pattern in .gitignore
-
-**Classification:** Non-blocking — silent loss of new files from version control
-
-**Depends on:** nothing
-
-**Purpose.** `.gitignore:3` is `ClipboardTTSApp*`, unanchored, so it matches any path segment with
-that prefix in any directory: `git check-ignore -v Tests/ClipboardTTSAppSmokeTests.swift` reports it
-ignored. Such a file compiles locally, because `project.yml` globs `Sources` and `Tests` wholesale,
-but never appears in `git status`, so `AGENTS.md`'s explicit-path staging rule drops it without a
-signal. Tracked files including `Sources/ClipboardTTSApp.swift` are unaffected.
-
-**Primary paths.**
-
-- `.gitignore`
-
-**Required change.** Narrow the pattern to the built product it was meant to ignore, anchored to the
-repository root. `*.xcodeproj` on line 8 already covers the generated project, so the new pattern
-must not be the only thing keeping that out.
-
-**Non-goals and invariants.**
-
-- Keep `build/`, `DerivedData/`, `xcuserdata/`, the generated project, and `.DS_Store` ignored.
-- Do not commit the generated project or any build output.
-
-**Validation and falsification.** After the change, `git check-ignore -v` must report the built
-`.app` and the generated `.xcodeproj` as ignored and must report a hypothetical
-`Tests/ClipboardTTSAppSmokeTests.swift` and `Sources/ClipboardTTSAppExtras.swift` as not ignored.
-Confirm `git status` is otherwise unchanged.
-
-**Done when.** A new source or test file whose name begins with the app's name appears in
-`git status`, and nothing that was ignored before has become visible.
 
 ### 40. Keep a provider credential from following a redirect off its origin
 
@@ -589,43 +556,6 @@ over-restriction that invalidates the scope when neither changed and so re-fetch
 
 **Done when.** Every half of `metadataScopeChanged` is either killed by a mutant or documented as
 superseded, and `README.md` describes the rule the code actually enforces.
-
-### 43. Protect the expected local harness override from staging
-
-**Classification:** Non-blocking — secret hygiene, no runtime effect
-
-**Depends on:** nothing
-
-**Purpose.** The repository has a tracked shared `.claude/settings.json`, but no repository-owned
-ignore rule for the conventional personal override `.claude/settings.local.json`. A contributor who
-uses that override in a clone without a matching global ignore can stage it accidentally. This is a
-repository-policy task only: private configuration and any credentials in a working copy are outside
-the task boundary and must be handled by their owner before staging.
-
-**Primary paths.**
-
-- `.gitignore`
-
-**Required change.**
-
-1. Ignore `.claude/settings.local.json` in the repository's `.gitignore`, so the protection belongs
-   to every clone rather than one developer's global configuration.
-2. Keep `.claude/settings.json` as shared tracked configuration. Do not copy, move, inspect, or
-   restore any user-local replacement as part of this task.
-
-**Non-goals and invariants.**
-
-- Do not commit any credential, and do not copy one into this plan, a commit message, or a test.
-- Do not touch `.claude/skills/adversarial-review`; it is the tracked symlink that points the
-  harness at the repository's review skill.
-- Do not decide the tracking policy for `.antigravity.json`; that is a separate, user-directed scope.
-
-**Validation and falsification.** `git check-ignore -v .claude/settings.local.json` names the
-repository's `.gitignore`; the tracked `.claude/settings.json` is unchanged; and a clean-clone check
-shows that the policy needs no user-local file to be present.
-
-**Done when.** The repository ignores the conventional local harness override without relying on a
-developer's global Git configuration, and the task has not touched user-local configuration.
 
 ### 44. Reject successful responses that do not declare supported audio
 
