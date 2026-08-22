@@ -10,7 +10,9 @@ import Foundation
 ///   records, and the publication-depth counter) is read and written only under `stateQueue`.
 /// - The `@Published` properties, `isPublishingMetadata`, and `migrationFailureMessage` are written
 ///   only on the main queue (every write path dispatches or already runs there) and are observed by
-///   SwiftUI on main.
+///   SwiftUI on main. Construction is the one exception: the initializer assigns
+///   `migrationFailureMessage`, and `lastError` when startup could not secure or read a saved key,
+///   on whichever thread builds the manager and before it is shared.
 /// - A recursive callback-authority lock spans delivery authorization through the complete handler
 ///   call and generation revocation; it is never the request-state lock, so direct re-entrant stops work.
 /// - A path that needs both locks acquires callback authority before `stateQueue`; fatal Gemini

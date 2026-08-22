@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Eleven tasks are active in Phase 5: 37, 38, 40–42, 44–48, and 50. Task 36 was withdrawn when voice
+- Ten tasks are active in Phase 5: 37, 38, 40–42, 44–46, 48, and 50. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,8 +95,8 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 37, 38, 40–42, 44–48, and 50: Tasks 37 and 38 are blocking; the rest are
-non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
+Phase 5 contains Tasks 37, 38, 40–42, 44–46, 48, and 50: Tasks 37 and 38 are blocking; the rest
+are non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
 
@@ -321,7 +321,7 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–48, and 50 are
+starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–46, 48, and 50 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 ### 37. Align USER_STORIES.md with the dropped stateful menu-bar icon
@@ -667,35 +667,6 @@ pasteboards. If diagnostics remain, prove a plausible regression that reintroduc
 them fails.
 
 **Done when.** Clipboard-read diagnostics have an explicit, tested release policy.
-
-### 47. Document the network manager's pre-sharing publication state
-
-**Classification:** Non-blocking — misleading concurrency documentation
-
-**Depends on:** nothing
-
-**Purpose.** The `TTSNetworkManager` confinement comment says `@Published` state and
-`migrationFailureMessage` are written only on the main queue, but its initializer assigns
-`lastError` and `migrationFailureMessage` before the instance is shared. The neighboring session
-comment already describes that same construction-time exception.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-
-**Required change.** Amend the confinement documentation so it names both construction-time writes
-and their pre-sharing constraint, without weakening the main-queue rule after initialization.
-
-**Non-goals and invariants.**
-
-- Do not change request-state ownership or add synchronization solely for initialization.
-- Do not make a claim about a constructor call site that is not verified from the source.
-
-**Validation and falsification.** Read every assignment to `lastError` and
-`migrationFailureMessage` against the revised comment; the comment must account for the initializer
-and every post-construction write.
-
-**Done when.** The concurrency documentation precisely describes the actual publication boundary.
 
 ### 48. Resolve the AudioPlayerManager file-length exception
 
