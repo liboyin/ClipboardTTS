@@ -44,7 +44,7 @@ enum EndpointTransportPolicy {
     ///
     /// Only the four-part spelling counts. `IPv4Address` also accepts the historical `inet_aton`
     /// forms — `127.1`, `2130706433`, `0x7f000001` — whose meaning depends on which parser reads
-    /// them, so the app asks for an address it and the network stack must read the same way
+    /// them, so the app asks for an address that it and the network stack must read the same way
     /// instead of resolving that disagreement on the user's behalf. An out-of-range component is
     /// no address at all and would be looked up as a name, so it fails here rather than later.
     private static func isIPv4LoopbackLiteral(_ host: String) -> Bool {

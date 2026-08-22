@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Twelve tasks are active in Phase 5: 37, 38, 40–42, and 44–50. Task 36 was withdrawn when voice
+- Eleven tasks are active in Phase 5: 37, 38, 40–42, 44–48, and 50. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 37, 38, 40–42, and 44–50: Tasks 37 and 38 are blocking; the rest are
+Phase 5 contains Tasks 37, 38, 40–42, 44–48, and 50: Tasks 37 and 38 are blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,7 +321,7 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42 and 44–50 are
+starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–48, and 50 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 ### 37. Align USER_STORIES.md with the dropped stateful menu-bar icon
@@ -727,27 +727,6 @@ assertion and prove the extracted boundary preserves the previous behavior; if r
 exception, prove the plan states its limited rationale accurately.
 
 **Done when.** The plan and the checked-in lint treatment of `AudioPlayerManager` agree.
-
-### 49. Correct the endpoint-policy grammar
-
-**Classification:** Non-blocking — documentation clarity
-
-**Depends on:** nothing
-
-**Purpose.** `EndpointTransportPolicy`'s IPv4 comment omits the relative pronoun in the phrase
-"the app asks for an address it and the network stack must read the same way," obscuring a security
-rationale that the two parsers must agree.
-
-**Primary paths.**
-
-- `Sources/Managers/EndpointTransportPolicy.swift`
-
-**Required change.** Correct the sentence without changing its security claim or implementation.
-
-**Validation and falsification.** Re-read the surrounding policy documentation and confirm it still
-states that ambiguous IPv4 spellings are refused rather than normalized.
-
-**Done when.** The comment is grammatical and preserves its original transport-policy rationale.
 
 ### 50. Name Gemini in the project overview
 
