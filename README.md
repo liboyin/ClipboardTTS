@@ -1,6 +1,6 @@
 # Clipboard TTS App
 
-Native macOS menu bar app (Swift/SwiftUI, macOS 13+) that reads clipboard text aloud via OpenAI-compatible TTS APIs. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
+Native macOS menu bar app (Swift/SwiftUI, macOS 13+) that reads clipboard text aloud through OpenAI-compatible TTS APIs or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
 ```
 Sources/

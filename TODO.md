@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Ten tasks are active in Phase 5: 37, 38, 40–42, 44–46, 48, and 50. Task 36 was withdrawn when voice
+- Nine tasks are active in Phase 5: 37, 38, 40–42, 44–46, and 48. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 37, 38, 40–42, 44–46, 48, and 50: Tasks 37 and 38 are blocking; the rest
+Phase 5 contains Tasks 37, 38, 40–42, 44–46, and 48: Tasks 37 and 38 are blocking; the rest
 are non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,7 +321,7 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–46, 48, and 50 are
+starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–46, and 48 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 ### 37. Align USER_STORIES.md with the dropped stateful menu-bar icon
@@ -698,29 +698,6 @@ assertion and prove the extracted boundary preserves the previous behavior; if r
 exception, prove the plan states its limited rationale accurately.
 
 **Done when.** The plan and the checked-in lint treatment of `AudioPlayerManager` agree.
-
-### 50. Name Gemini in the project overview
-
-**Classification:** Non-blocking — project overview omits a supported provider
-
-**Depends on:** nothing
-
-**Purpose.** `README.md` describes the app as reading through OpenAI-compatible APIs, but the app
-also has a dedicated Gemini streaming transport described throughout its architecture section. The
-opening overview should not imply that Gemini is merely OpenAI-compatible.
-
-**Primary paths.**
-
-- `README.md`
-
-**Required change.** Update the overview to name both OpenAI-compatible providers and native Gemini,
-without duplicating the provider-contract detail owned by the Design Assumptions section.
-
-**Validation and falsification.** Compare the revised overview against the architecture inventory
-and the provider behavior documented later in `README.md`.
-
-**Done when.** The first-paragraph product description names every provider transport the app
-supports.
 
 ### Phase 5 mandatory gap review
 
