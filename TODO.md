@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Nine tasks are active in Phase 5: 37, 38, 40–42, 44–46, and 48. Task 36 was withdrawn when voice
+- Eight tasks are active in Phase 5: 38, 40–42, 44–46, and 48. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,8 +95,8 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 37, 38, 40–42, 44–46, and 48: Tasks 37 and 38 are blocking; the rest
-are non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
+Phase 5 contains Tasks 38, 40–42, 44–46, and 48: Task 38 is blocking; the rest are
+non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
 
@@ -321,51 +321,8 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Tasks 37 and 38 are blocking; Tasks 40–42, 44–46, and 48 are
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, and 48 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
-
-### 37. Align USER_STORIES.md with the dropped stateful menu-bar icon
-
-**Classification:** Blocking — documentation ownership
-
-**Depends on:** nothing
-
-**Purpose.** `USER_STORIES.md` still requires that "The menu bar icon should change to reflect the
-current state (Idle, Playing, Paused)". The app renders a fixed `waveform.circle`
-(`Sources/ClipboardTTSApp.swift:104`), and that requirement was deliberately dropped on 2026-08-03 in
-`33b91a3`, which recorded the decision only in this file. `AGENTS.md` makes `USER_STORIES.md` the
-owner of product requirements and user-visible behavior, and requires documentation to be updated as
-soon as it no longer reflects the project. The owning document therefore states a requirement the
-product does not meet, and the final acceptance sweep's step 7 reconciles behavior against exactly
-that document.
-
-**Primary paths.**
-
-- `USER_STORIES.md`
-- `TODO.md`
-
-**Required change.**
-
-1. Remove the stateful menu-bar icon from `USER_STORIES.md`, or state there that it was withdrawn and
-   why, so the file describes the product as built.
-2. Record the decision where it belongs. `TODO.md` may keep its one-line note that Task 14 stays
-   removed; the reasoning belongs with the requirement it withdrew.
-3. Re-read the rest of `USER_STORIES.md` against current behavior in the same pass. The stale Voice
-   entry — "all available voices via OpenAI API" — was already replaced by the Settings-only
-   requirement when menu voice selection was removed, so verify that replacement and every remaining
-   line, naming the code that satisfies each.
-
-**Non-goals and invariants.**
-
-- Do not implement a stateful icon. Nothing in this plan reinstates it.
-- Do not move product requirements into `README.md`; it owns architecture and operating instructions,
-  not what the product must do.
-
-**Validation and falsification.** Read every line of `USER_STORIES.md` against the current sources
-and name the code that satisfies it. Documentation-only changes are exempt from adversarial review.
-
-**Done when.** `USER_STORIES.md` describes only behavior the app has, and every requirement it states
-can be pointed at a source path that implements it.
 
 ### 38. Settle what an odd-length provider response means
 
