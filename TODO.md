@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Ten tasks are active in Phase 5: 38, 40–42, 44–46, 48, and 52–53. Task 36 was withdrawn when voice
+- Eleven tasks are active in Phase 5: 38, 40–42, 44–46, 48, and 52–54. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40–42, 44–46, 48, and 52–53: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40–42, 44–46, 48, and 52–54: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,7 +321,7 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, and 52–53 are
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, and 52–54 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
@@ -844,6 +844,114 @@ regression that presents after the request generation changed.
 app-owned pop-up carrying the recorded copy, valid requests retain their fastest-start path, unrelated
 entry points are unchanged, and the selected Unicode-counting contract is documented and
 mutant-protected.
+
+### 54. Compile the test target under complete strict concurrency
+
+**Classification:** Non-blocking — the required gate set never compiles the test bundle under the
+setting the app target is held to
+
+**Depends on:** nothing. It touches no production behavior, so it may run beside any other task, but
+it edits the shared hosted-Settings and mock-network test infrastructure.
+
+**Purpose.** `project.yml` sets `SWIFT_STRICT_CONCURRENCY: complete` on the `ClipboardTTSApp` target
+alone; `ClipboardTTSAppTests` declares no such setting and so inherits the default. The gate in
+`AGENTS.md` builds only the app scheme with that flag, so no checked-in command has ever compiled the
+test bundle under complete concurrency, and `README.md` correctly scopes its claim to the app target.
+
+Building the test target with the flag fails. Verified on 2026-09-03 at `b728235`:
+
+```bash
+xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSAppTests \
+  -destination 'platform=macOS' SWIFT_STRICT_CONCURRENCY=complete \
+  CODE_SIGNING_ALLOWED=NO build-for-testing
+```
+
+It reports exactly one error, `Tests/HostedSettings.swift:198:41: call to main actor-isolated
+function in a synchronous nonisolated context`: `edit(_:to:file:line:)` calls the delegate's
+`controlTextDidChange?`, which the macOS SDK isolates to the main actor, from a nonisolated method of
+a `HostedSettings` that is not itself annotated. The compiler proposes `@MainActor` on that method.
+
+The remedy is not that one annotation, and an executor must not assume it is. Both obvious fixes were
+measured in an isolated scratch copy on 2026-09-03 and both cascade, because the compiler reports one
+file batch at a time and each fix exposes the next:
+
+- Annotating `edit(_:to:file:line:)` moves the failure to its callers at `HostedSettings.swift:133`
+  and `:147`.
+- Annotating `final class HostedSettings` instead moves it into the XCTest methods themselves, as
+  three errors in `Tests/SettingsAboutTests.swift` at lines 43, 54 and 58 — the initializer, `click`,
+  and `release` — plus main-actor warnings at lines 69 and 80 of that same file.
+
+The baseline command also emits strict-concurrency warnings before it stops. They include AppKit and
+SwiftUI accesses throughout `HostedSettings`, its separate `HostedModelVoiceFields` helper, and the
+two condition-guarded static variables in `MockURLProtocolScope.swift`. Those diagnostics are in
+scope: `AGENTS.md` requires inspecting warnings, and they would become errors in Swift 6 language
+mode. The first error prevents the compiler from revealing every later diagnostic, so the executor
+must continue until the complete test target has no project-source strict-concurrency warnings or
+errors.
+
+**Primary paths.**
+
+- `Tests/HostedSettings.swift`
+- `Tests/SettingsAboutTests.swift`
+- `Tests/SettingsMigrationRecoveryTests.swift`
+- `Tests/SettingsViewTests.swift`
+- `Tests/SettingsVoiceMetadataTests.swift`
+- `Tests/TTSNetworkManagerAuthenticationTests.swift`
+- `Tests/MockURLProtocolScope.swift`
+- `project.yml`
+- `README.md`
+
+**Required change.**
+
+1. Hold the test target to the same setting as a required gate. The user decided on 2026-09-03
+   that the gates cover both targets, so give `ClipboardTTSAppTests` `SWIFT_STRICT_CONCURRENCY:
+   complete` in `project.yml`. That is what makes `./check-coverage.sh` compile the bundle under the
+   setting on every run, rather than leaving the check to a command an agent has to remember; a fix
+   without it would rot exactly as this one did.
+2. Give both UI-host helpers — `HostedSettings` and `HostedModelVoiceFields`, plus their shared
+   hosting helpers — explicit main-actor isolation. They drive `NSHostingView`, `NSTextField`, and
+   SwiftUI coordinators, all of which the SDK confines to the main actor. Propagate that isolation to
+   every XCTest method using either helper, including the primary paths above and any compiler-found
+   user, rather than adding escapes at individual AppKit call sites.
+3. Resolve the strict-concurrency diagnostics in `MockURLProtocolScope.swift` without weakening its
+   existing `NSCondition`-guarded ownership, its off-main bounded revocation, or its teardown
+   quiescence contract. Do not use `@unchecked Sendable`, `nonisolated(unsafe)`, or a production-code
+   isolation change to silence test diagnostics; give the test infrastructure a compiler-verifiable
+   ownership boundary instead.
+4. Re-run the command above after every fix and inspect the output. A zero error count in one run
+   does not establish that the next batch compiles, because the build stops at the first failing
+   batch. Continue until it reports no project-source strict-concurrency warnings or errors.
+5. Update `README.md`'s strict-concurrency scope in the implementation commit: both targets will be
+   checked, with the test target compiled by `./check-coverage.sh` and the app target by the explicit
+   app build. Do not alter `AGENTS.md` merely because its app-build command remains app-only, and do
+   not try to update this task's entry: the working rules require removing it when the task completes.
+
+**Non-goals and invariants.**
+
+- Do not change any production isolation in `Sources/` to satisfy a test, and do not relax the app
+  target's existing complete-concurrency setting.
+- Do not reach for `@unchecked Sendable` or `nonisolated(unsafe)` where main-actor confinement is the
+  honest answer. `README.md` reserves the former for the URL-session delegate bridge.
+- Preserve every hosted-view lifecycle contract `README.md` states: the windowless host, the release
+  and main-queue drain before the mock scope closes, addressing a field by position and expected
+  text, and reaching an action by clicking its `SettingsActionButton`.
+- Do not change what any test asserts, its quiescence and teardown ownership, or the suite's coverage.
+
+**Validation and falsification.** The command above must report no project-source
+strict-concurrency warnings or errors. The required gate set must pass in its updated form:
+`./check-coverage.sh` at 198 tests with `Sources/Managers/` above its threshold, now compiling the
+test bundle under complete strict concurrency; `swiftlint --strict`; and the app's
+complete-concurrency build. The coverage test and app build together cover both targets; neither means
+that every individual gate compiles both. Prove the hosted Settings tests still exercise real AppKit
+controls rather than passing because an annotation made them skip: a mutant that breaks a hosted
+field edit, and one that breaks a hosted button click, must each still fail their test. Re-run the
+mock-network lifecycle tests after the ownership change and prove a mutant that removes condition
+protection from a scope-state access fails; the replacement isolation must not conceal an unlocked
+shared-state regression.
+
+**Done when.** The required gate set collectively compiles both targets under complete strict
+concurrency with no project-source strict-concurrency warnings or errors, the hosted Settings and
+mock-network lifecycles are unchanged, and `README.md` describes the scope the build enforces.
 
 ### Phase 5 mandatory gap review
 
