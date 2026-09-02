@@ -110,6 +110,9 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         var geminiEventParser = GeminiSSEEventParser()
         var geminiIncompletePCM = Data()
         var hasGeminiStreamFailure = false
+        /// The most recent `finishReason` a Gemini candidate declared, retained because only an
+        /// explicit non-`STOP` reason distinguishes a provider-truncated stream from a normal end.
+        var geminiDeclaredFinishReason: String?
         var providerAudioByteCount = 0
         var didRefuseInsecureRedirect = false
     }

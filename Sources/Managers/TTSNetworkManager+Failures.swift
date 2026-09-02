@@ -1,6 +1,13 @@
 import Foundation
 
 extension TTSNetworkManager {
+    /// The single owner of the message shown when Gemini reports that it stopped before finishing.
+    ///
+    /// It names the early stop rather than reusing the no-playable-audio text, because this outcome
+    /// leaves already delivered PCM playable and the user can hear the speech it describes.
+    static let truncatedGeminiResponseFailure =
+        "The TTS service stopped early. The speech that arrived is incomplete. Please try again."
+
     private struct TaskCompletionResult {
         let provider: ProviderKind?
         let requestGeneration: UInt64?
@@ -8,6 +15,7 @@ extension TTSNetworkManager {
         let providerAudioByteCount: Int
         let hasGeminiStreamFailure: Bool
         let hasIncompleteGeminiEvent: Bool
+        let geminiDeclaredFinishReason: String?
         let didRefuseInsecureRedirect: Bool
         let retryAttempt: RetryAttempt?
         let isStale: Bool
@@ -23,6 +31,7 @@ extension TTSNetworkManager {
                     providerAudioByteCount: 0,
                     hasGeminiStreamFailure: false,
                     hasIncompleteGeminiEvent: false,
+                    geminiDeclaredFinishReason: nil,
                     didRefuseInsecureRedirect: false,
                     retryAttempt: nil,
                     isStale: true
@@ -36,6 +45,7 @@ extension TTSNetworkManager {
                 providerAudioByteCount: context.providerAudioByteCount,
                 hasGeminiStreamFailure: context.hasGeminiStreamFailure,
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
+                geminiDeclaredFinishReason: context.geminiDeclaredFinishReason,
                 didRefuseInsecureRedirect: context.didRefuseInsecureRedirect,
                 retryAttempt: context.hasGeminiStreamFailure ? nil : permittedRetryAttempt(for: context, error: error),
                 isStale: false
@@ -110,6 +120,8 @@ extension TTSNetworkManager {
             return "Couldn't reach the TTS service. Check your connection and try again."
         } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
             return noPlayableAudio
+        } else if result.provider == .gemini && declaresProviderTruncation(result.geminiDeclaredFinishReason) {
+            return Self.truncatedGeminiResponseFailure
         } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
             return noPlayableAudio
         } else if (result.provider == .openAICompatible || result.provider == .custom)
@@ -122,6 +134,16 @@ extension TTSNetworkManager {
     /// Returns whether a byte count represents at least one whole 16-bit PCM frame.
     private func containsCompletePCMFrame(_ byteCount: Int) -> Bool {
         byteCount >= 2 && byteCount.isMultiple(of: 2)
+    }
+
+    /// Returns whether a Gemini candidate explicitly reported ending for a reason other than `STOP`.
+    ///
+    /// Only an explicit reason counts. A stream that declared none may simply have ended without
+    /// final metadata, so treating its absence as an early stop would fail ordinary successful
+    /// reads; the remaining completion checks continue to govern that case.
+    private func declaresProviderTruncation(_ declaredFinishReason: String?) -> Bool {
+        guard let declaredFinishReason else { return false }
+        return declaredFinishReason != "STOP"
     }
 
     /// Formats an HTTP failure without using any provider-controlled response text.

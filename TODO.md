@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Eleven tasks are active in Phase 5: 38, 40–42, 44–46, 48, and 51–53. Task 36 was withdrawn when voice
+- Ten tasks are active in Phase 5: 38, 40–42, 44–46, 48, and 52–53. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40–42, 44–46, 48, and 51–53: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40–42, 44–46, 48, and 52–53: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,8 +321,11 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, and 51–53 are
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, and 52–53 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
+
+See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
+later checks.
 
 ### 38. Settle what an odd-length provider response means
 
@@ -659,94 +662,6 @@ exception, prove the plan states its limited rationale accurately.
 
 **Done when.** The plan and the checked-in lint treatment of `AudioPlayerManager` agree.
 
-### 51. Surface a Gemini response that explicitly did not finish
-
-**Classification:** Non-blocking — an explicitly truncated provider response is reported to the user
-as success; the error copy needs a user decision before implementation
-
-**Depends on:** nothing. Task 44 owns the declared media type of an `inlineData` part and Task 38
-owns empty and odd-length PCM; neither reads a finish reason, so the three boundaries do not overlap.
-
-**Purpose.** `extractGeminiEventContent` reads only `error` and
-`candidates[0].content.parts[*].inlineData.data`; `finishReason` and `usageMetadata` are read nowhere
-in `Sources/`. A stream that carries audio and then stops early therefore reaches `userFacingFailure`
-with a 2xx status, no transport error, no `hasGeminiStreamFailure`, no incomplete SSE event, and an
-even `providerAudioByteCount` that passes `containsCompletePCMFrame`. Every branch falls through, it
-returns nil, and the completion publishes `setStreaming(false)`. The user hears speech stop
-mid-sentence with no indication anything was lost.
-
-This is not hypothetical for the shipped configuration. The app requests
-`gemini-3.1-flash-tts-preview` over `:streamGenerateContent?alt=sse`, and Google's developer forum
-carries an open defect for exactly that model and endpoint: audio truncated past roughly 60–70
-seconds with `finishReason: OTHER` under HTTP 200, while the identical body sent to non-streaming
-`:generateContent` returns `finishReason: STOP` and complete audio. A Google engineer confirmed
-reproduction on 2026-06-23 and the thread was still unresolved on 2026-08-26. A follow-up audit of
-all 30 prebuilt voices found the failure non-deterministic and time-varying (a 50–75% failure rate
-depending on the hour) rather than voice-specific.
-
-- <https://discuss.ai.google.dev/t/gemini-3-1-flash-tts-preview-streamgeneratecontent-truncates-audio-finishreason-other-past-60s-while-generatecontent-non-streaming-works/169063>
-- <https://discuss.ai.google.dev/t/gemini-3-1-flash-tts-preview-audio-truncation-finishreason-other-is-time-varying-and-not-voice-specific-two-audits-of-all-30-voices-2h-apart/176215>
-
-Separately, Google documents that speech quality and consistency drift for outputs longer than a few
-minutes and recommends splitting transcripts into smaller chunks
-(<https://ai.google.dev/gemini-api/docs/speech-generation>). That drift explains audibly rushed or
-word-dropping speech before a cut-off. It is recorded here as context only; this task does not act
-on it.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Managers/TTSNetworkManager+GeminiStreaming.swift`
-- `Sources/Managers/TTSNetworkManager+Failures.swift`
-- `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
-- `Tests/TTSNetworkManagerFailureTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. While decoding a complete SSE event, record a declared
-   `candidates[0].finishReason` on `ActiveRequestContext` beside `providerAudioByteCount` and
-   `hasGeminiStreamFailure`, without changing how audio parts are classified. Retain the most recent
-   declared reason; a candidate-free metadata event, or a candidate that omits `finishReason`, MUST
-   NOT erase one. Do not infer a reason from audio bytes, an incomplete SSE event, or task completion.
-2. At completion, treat a Gemini response as provider-truncated only when its most recently declared
-   finish reason is not `STOP`. A response with complete PCM but no declared finish reason remains
-   governed by the existing completion checks: lack of a reason is not evidence that it stopped early.
-   This narrowly covers the observed `finishReason: OTHER` failure without rejecting a legitimate
-   metadata-only final event.
-3. Place the explicit non-`STOP` check after the established refused-redirect, HTTP-status, malformed
-   stream, transport-error, and incomplete-event checks, and before the PCM-frame check. Preserve that
-   order unless a user-approved copy decision records another user-actionable precedence.
-4. Before implementation, obtain user direction on the app-owned, sanitized message: either retain
-   the existing generic no-playable-audio message or introduce a distinct early-stop message. Record
-   the exact selected wording here and in `README.md`; do not let an executor choose it. The selected
-   message must not contain provider-supplied text and must acknowledge that already delivered PCM
-   remains playable.
-
-**Non-goals and invariants.**
-
-- Do not chunk, split, or truncate the request text, and do not move Gemini to non-streaming
-  `:generateContent`. Both were considered on 2026-09-02 and deliberately not adopted.
-- Do not extend the bounded single retry, which stays limited to a Gemini HTTP 500 with no transport
-  error, to cover a non-`STOP` finish reason.
-- Do not render provider-supplied text in any user-visible message.
-- Do not discard PCM already delivered to the player, and preserve the request-generation guards and
-  the existing `hasGeminiStreamFailure` revocation path.
-
-**Validation and falsification.** Through the mock protocol, deliver valid audio followed by an event
-carrying `finishReason: OTHER` and assert a failure is published while the delivered audio stays
-playable; assert a stream ending in `finishReason: STOP` still completes silently.
-`testGeminiIgnoresValidMetadataAfterAudio` in `Tests/TTSNetworkManagerGeminiStreamingTests.swift`
-currently pins that a candidate-free metadata event is ignored; retain or strengthen it to prove that
-a trailing metadata event does not erase an earlier `STOP`. Add a separate valid-audio stream with no
-declared finish reason and prove it preserves the existing successful completion. Mutation-test the
-finish-reason check, a regression that stops recording the most recent declared finish reason, and
-the over-restriction that fails a valid stream solely because no finish reason was declared.
-
-**Done when.** A Gemini response that explicitly reports a non-`STOP` finish reason cannot be
-reported as a successful read, a missing reason alone does not cause failure, and `README.md` states
-the selected finish-reason and error-message contracts.
-
 ### 52. Resume playback after a streaming underrun
 
 **Classification:** Non-blocking — playback can stop permanently while audio is still arriving; the
@@ -896,8 +811,8 @@ step 6 before implementing the local limit.
 6. Before implementation, obtain user direction on three points, record each here and in `README.md`,
    and carry the user-visible part into `USER_STORIES.md`:
    - the Unicode counting unit named under **Purpose**;
-   - the exact dialog wording. An executor MUST NOT choose it, for the same reason Task 51 fixes its
-     message copy: the wording is the whole user-visible outcome of this task; and
+   - the exact dialog wording. An executor MUST NOT choose it, for the same reason the Gemini
+     early-stop copy was a user decision: the wording is the whole user-visible outcome; and
    - whether a provider switch between this check and the request is in scope. `streamTTS` takes its
      own `requestSettingsSnapshot()` when the request starts, and `deferRequestStartIfPublishingState`
      can defer that start to a later main-queue turn, so a Settings edit inside that window can

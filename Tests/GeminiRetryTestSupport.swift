@@ -60,10 +60,17 @@ func configureGeminiProvider(_ manager: TTSNetworkManager) {
     )
 }
 
-/// Builds one complete Server-Sent Event carrying base64 `inlineData` audio.
-func geminiAudioEvent(_ audio: Data) -> Data {
+/// Builds one complete Server-Sent Event carrying base64 `inlineData` audio, optionally declaring
+/// the finish reason its candidate reports beside that audio.
+func geminiAudioEvent(_ audio: Data, finishReason: String? = nil) -> Data {
     let prefix = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\""
-    return Data("\(prefix)\(audio.base64EncodedString())\"}}]}}]}\r\n\r\n".utf8)
+    let declaredReason = finishReason.map { ",\"finishReason\":\"\($0)\"" } ?? ""
+    return Data("\(prefix)\(audio.base64EncodedString())\"}}]}\(declaredReason)}]}\r\n\r\n".utf8)
+}
+
+/// Builds the candidate-only final event Gemini uses to declare how its stream ended.
+func geminiFinishReasonEvent(_ finishReason: String) -> Data {
+    Data("data: {\"candidates\":[{\"finishReason\":\"\(finishReason)\"}]}\r\n\r\n".utf8)
 }
 
 /// Builds the response a mock handler returns for one request.

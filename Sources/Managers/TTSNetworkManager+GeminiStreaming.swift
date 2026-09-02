@@ -50,10 +50,23 @@ struct GeminiSSEEventParser {
 }
 
 extension TTSNetworkManager {
-    private enum GeminiEventContent {
-        case audio(Data)
-        case noAudio
-        case invalid
+    /// One complete Gemini event's audio classification together with any finish reason it declared.
+    ///
+    /// The two are independent: a candidate may declare `finishReason` beside its audio parts, in a
+    /// content-free candidate, or not at all, and reading it must not change how audio is classified.
+    private struct GeminiEventContent {
+        enum Payload {
+            case audio(Data)
+            case noAudio
+            case invalid
+        }
+
+        let payload: Payload
+        /// `candidates[0].finishReason`, or nil when the event declares none as a string.
+        let declaredFinishReason: String?
+
+        static let invalid = GeminiEventContent(payload: .invalid, declaredFinishReason: nil)
+        static let noAudio = GeminiEventContent(payload: .noAudio, declaredFinishReason: nil)
     }
 
     /// Queues PCM for a request generation and invokes its handler only while that generation
@@ -137,7 +150,14 @@ extension TTSNetworkManager {
                                      into context: inout ActiveRequestContext,
                                      for task: URLSessionDataTask) -> (task: URLSessionDataTask, requestGeneration: UInt64)? {
         for event in events {
-            switch extractGeminiEventContent(from: event) {
+            let content = extractGeminiEventContent(from: event)
+            // Retain the most recently declared reason. A trailing metadata event or a candidate
+            // that omits the field declares nothing, so it must not erase what an earlier candidate
+            // reported; only a later declared reason replaces it.
+            if let declaredFinishReason = content.declaredFinishReason {
+                context.geminiDeclaredFinishReason = declaredFinishReason
+            }
+            switch content.payload {
             case let .audio(audioData):
                 guard let playableAudio = recordGeminiAudio(audioData, in: &context) else { continue }
                 let dataHandler = context.dataHandler
@@ -180,8 +200,21 @@ extension TTSNetworkManager {
         guard let candidates = rawCandidates as? [[String: Any]] else {
             return .invalid
         }
-        guard let candidate = candidates.first,
-              let rawContent = candidate["content"] else {
+        guard let candidate = candidates.first else {
+            return .noAudio
+        }
+        // A `finishReason` of another type counts as undeclared rather than as a corrupt stream, so
+        // a provider schema change leaves the remaining completion checks in charge instead of
+        // revoking speech the user can already hear.
+        return GeminiEventContent(
+            payload: audioPayload(in: candidate),
+            declaredFinishReason: candidate["finishReason"] as? String
+        )
+    }
+
+    /// Classifies the audio one Gemini candidate carries, independently of any reason it declared.
+    private func audioPayload(in candidate: [String: Any]) -> GeminiEventContent.Payload {
+        guard let rawContent = candidate["content"] else {
             return .noAudio
         }
         guard let content = rawContent as? [String: Any] else {
