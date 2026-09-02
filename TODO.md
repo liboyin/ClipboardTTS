@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Ten tasks are active in Phase 5: 38, 40–42, 44–46, 48, 51, and 52. Task 36 was withdrawn when voice
+- Eleven tasks are active in Phase 5: 38, 40–42, 44–46, 48, and 51–53. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40–42, 44–46, 48, 51, and 52: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40–42, 44–46, 48, and 51–53: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,7 +321,7 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, and 48 are
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, and 51–53 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 ### 38. Settle what an odd-length provider response means
@@ -456,6 +456,9 @@ startup regressions in `Tests/AppStartupDependenciesTests.swift` use to read pro
 3. Decide whether `isCurrentProvider(_:)` stays as a test-only observation seam or gives way to
    `metadataSettingsSnapshot().provider` in the three startup regressions that use it. A manager
    accessor kept alive only by its assertions is a claim about production that production never makes.
+   Re-read Task 53 first: its menu-bar check needs a provider accessor that returns no credential,
+   which `metadataSettingsSnapshot()` does not satisfy. If Task 53 landed first, re-check `Sources`
+   — this accessor may already have the production caller whose absence this step rests on.
 4. Move the tests that only reach these paths onto a configuration production can actually reach, or
    delete them with the code they cover. A test whose setup production cannot produce proves nothing
    about production.
@@ -817,6 +820,115 @@ genuine end of stream.
 **Done when.** A mid-stream underrun cannot permanently stop playback, a manual pause and a genuine
 end remain paused, stale terminal signals have no effect, and the selected end-of-stream contract is
 documented.
+
+### 53. Reject oversized OpenAI clipboard text at the menu-bar entry point
+
+**Classification:** Non-blocking — user-requested validation and feedback; the dialog copy, the
+Unicode counting unit, and the settings-race scope need user decisions before implementation
+
+**Depends on:** nothing. This must not wait for Gemini work: the user selected an OpenAI-only,
+local check precisely to preserve Gemini's fastest-start path. It does not depend on Task 41 either,
+but the two meet at one accessor: Task 41 proposes removing `isCurrentProvider(_:)` because nothing
+in `Sources` calls it, and step 1 below needs exactly such a credential-free provider accessor.
+Whichever lands second MUST re-read the other's entry before changing that accessor.
+
+**Purpose.** OpenAI's Speech API documents a maximum `input` length of 4,096 characters for every
+model it accepts, including `tts-1` and `tts-1-hd`
+(<https://platform.openai.com/docs/api-reference/audio/createSpeech>). The OpenAI model field is
+user-editable, so re-verify that limit against the current reference for the configured model before
+implementing it. The current menu-bar path in `Sources/Views/MenuBarView.swift` deactivates the app,
+waits 0.2 seconds, reads the clipboard, then immediately starts a stream and calls
+`TTSNetworkManager.streamTTS`. An oversize OpenAI request thus costs a speech request and reports
+only its eventual generic HTTP failure. `lastError` currently renders inline in the menu; it is not
+the user-requested pop-up.
+
+The user's selected boundary is deliberately narrow: validate only after **Speak Copied Text** was
+clicked and its deferred clipboard read has produced text. Do not put this rule in
+`TTSNetworkManager.streamTTS`, because that would also change Services and Settings' Test Voice,
+which are outside the agreed scope.
+
+OpenAI's documentation says only “characters”; it does not define the Unicode counting unit. It is
+therefore not yet sound to silently choose Swift extended grapheme clusters, Unicode scalars,
+UTF-16 code units, or UTF-8 bytes. An executor MUST obtain user direction on that contract under
+step 6 before implementing the local limit.
+
+**Primary paths.**
+
+- `Sources/Views/MenuBarView.swift`
+- `Sources/Managers/TTSNetworkManager.swift`
+- `Sources/ClipboardTTSApp.swift`
+- `Tests/MenuBarViewTests.swift`
+- `Tests/MenuBarDeferredClipboardActionTests.swift`
+- `USER_STORIES.md`
+- `README.md`
+
+**Required change.**
+
+1. At the existing deferred action's post-delay idle/generation revalidation, after the clipboard
+   returns text and before `AudioPlayerManager.startNewStream()` or `streamTTS`, ask the manager
+   whether the selected provider is the built-in OpenAI provider. Do not duplicate endpoint or
+   provider inference in the view. No existing accessor fits, so choose one deliberately:
+   `requestSettingsSnapshot()` and `metadataSettingsSnapshot()` both return `apiKey`, so a view must
+   not read either to learn a provider, and `TTSNetworkManager.ProviderKind.openAICompatible` means
+   "not Custom, and not a `generativelanguage` base URL" rather than "the built-in OpenAI provider" —
+   the two coincide only because Settings pins each built-in provider's base URL to a constant.
+   `isCurrentProvider("OpenAI")` asks the persisted-identity question directly and returns no
+   credential, but Task 41 proposes deleting it. Keep it, or add an equally credential-free provider
+   accessor, and record the choice in Task 41's entry in the same commit.
+2. For an OpenAI clipboard value over the selected 4,096-character measure, make no speech request,
+   schedule no audio, and leave the idle audio pipeline intact. Reactivate the app and present a
+   native macOS pop-up (`NSAlert` or an equivalently accessible AppKit dialog) carrying the app-owned
+   copy recorded under step 6 and naming the 4,096-character maximum. Reactivation belongs to the
+   presenter seam of step 4, not to the view: a hosted test must not activate the real test host. Do
+   not also publish this click-only outcome through `lastError`, whose inline rendering would
+   duplicate the pop-up.
+3. Keep valid OpenAI requests, Gemini requests, and Custom requests on their current one-request,
+   fastest-start path. The check must perform no provider call and must not delay a valid request
+   beyond the existing local clipboard-read flow.
+4. Introduce an injected alert-presenter seam that owns both the reactivation and the dialog, so a
+   hosted test can observe the exact contract without activating the test host or displaying a real
+   modal panel. The production presenter must be main-queue confined; the delayed action already
+   returns to the menu flow after the app was deactivated. `Sources/ClipboardTTSApp.swift` builds the
+   only production `MenuBarView`, and `makeMenu` in `Tests/MenuBarViewTests.swift` the only test one,
+   so both construction sites change with the seam.
+5. Update `USER_STORIES.md` with the resulting click-time OpenAI behavior and `README.md` with the
+   provider scope, popup ownership, chosen Unicode unit, and no-network preflight rationale.
+6. Before implementation, obtain user direction on three points, record each here and in `README.md`,
+   and carry the user-visible part into `USER_STORIES.md`:
+   - the Unicode counting unit named under **Purpose**;
+   - the exact dialog wording. An executor MUST NOT choose it, for the same reason Task 51 fixes its
+     message copy: the wording is the whole user-visible outcome of this task; and
+   - whether a provider switch between this check and the request is in scope. `streamTTS` takes its
+     own `requestSettingsSnapshot()` when the request starts, and `deferRequestStartIfPublishingState`
+     can defer that start to a later main-queue turn, so a Settings edit inside that window can
+     produce an alert for a request that would have gone to Gemini, or an oversize OpenAI request
+     with no alert. The request-generation revalidation does not cover it, because a settings edit
+     advances no generation.
+
+**Non-goals and invariants.**
+
+- Do not add Gemini token counting, a Gemini character limit, request chunking, or a second network
+  call before any speech request.
+- Do not apply this UI-only limit to Services, Settings' Test Voice, or Custom endpoints.
+- Do not expose clipboard contents, a credential, a configured endpoint, or provider response text
+  in the dialog.
+- Preserve `DeferredClipboardAction` ownership, the request-generation revalidation, and the
+  two-click Clear Buffer contract. A stale delayed action must not surface an alert or begin speech.
+
+**Validation and falsification.** Use an injected pasteboard and alert presenter to prove that a
+4,096-unit OpenAI value begins exactly one speech request, while a 4,097-unit value presents the
+fixed dialog and begins neither a request nor an audio stream. Prove that Gemini and Custom values
+over the same local size still reach their existing request paths, and that an oversize OpenAI value
+still starts exactly one request through `ServicesCoordinator` and through Settings' Test Voice,
+neither of which consults this view-owned guard. Add boundary cases for combining marks, emoji, and
+non-Latin text after the user selects the Unicode unit. Mutation-test a removed/relocated guard, an
+off-by-one limit, a provider check that accidentally blocks Custom or Gemini, and a stale-action
+regression that presents after the request generation changed.
+
+**Done when.** The button-click flow rejects only oversized OpenAI clipboard text with one accessible
+app-owned pop-up carrying the recorded copy, valid requests retain their fastest-start path, unrelated
+entry points are unchanged, and the selected Unicode-counting contract is documented and
+mutant-protected.
 
 ### Phase 5 mandatory gap review
 
