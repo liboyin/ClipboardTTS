@@ -7,9 +7,15 @@ final class TTSNetworkManagerRequestLifecycleTests: MockURLProtocolTestCase {
         // WHY: A synchronous observer can stop a request during one published mutation and retry
         // during a nested mutation. The outer failure must not later mark that replacement idle.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        manager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         manager.streamTTS(text: "Create generation one") { _ in }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let replacementStarted = expectation(description: "Nested replacement starts")
         let releaseResponse = DispatchSemaphore(value: 0)

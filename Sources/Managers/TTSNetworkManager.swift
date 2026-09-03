@@ -167,25 +167,27 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
+    ///
+    /// The caller names the provider rather than letting the manager infer one from the endpoint,
+    /// so `selectedMetadataProvider` can only ever hold an identity a surface is able to match: an
+    /// inferred name that no provider form recognizes would silently refuse every list it tags.
     func updateSettings(baseURL: String,
                         apiKey: String,
                         model: String,
                         voice: String,
-                        selectedProvider: String? = nil) {
+                        selectedProvider: String) {
         let invalidatedGeneration: UInt64? = stateQueue.sync {
-            let nextMetadataProvider = selectedProvider ?? inferredMetadataProvider(for: baseURL)
-            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != nextMetadataProvider
+            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != selectedProvider
             self.baseURL = baseURL
             self.apiKey = apiKey
             self.model = model
             self.voice = voice
-            self.selectedMetadataProvider = nextMetadataProvider
+            self.selectedMetadataProvider = selectedProvider
 
             guard metadataScopeChanged else { return nil }
 
             metadataGeneration &+= 1
             modelMetadataRequest?.task?.cancel()
-            voiceMetadataRequest?.task?.cancel()
             modelMetadataRequest = nil
             voiceMetadataRequest = nil
             return metadataGeneration

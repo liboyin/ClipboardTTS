@@ -7,7 +7,7 @@ final class TTSNetworkManagerConcurrencyTests: MockURLProtocolTestCase {
         // stay first at the audio handler, even when its handler is blocked, or distinct PCM
         // chunks would play out of order and corrupt speech.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         // The mock holds its response back so the request stays active while the test drives
         // synthetic concurrent callbacks; the mock itself delivers no data of its own.
@@ -88,7 +88,8 @@ final class TTSNetworkManagerConcurrencyTests: MockURLProtocolTestCase {
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "test",
             model: "test",
-            voice: "test"
+            voice: "test",
+            selectedProvider: "Gemini"
         )
         let requestStarted = expectation(description: "Gemini request started")
         let releaseResponse = DispatchSemaphore(value: 0)
@@ -142,7 +143,7 @@ extension TTSNetworkManagerConcurrencyTests {
         wait(for: [deliveryBlocked], timeout: 1.0)
 
         let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let requestStarted = expectation(description: "Request started")
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.installRequestHandler { request in
@@ -197,7 +198,7 @@ extension TTSNetworkManagerConcurrencyTests {
         wait(for: [deliveryBlocked], timeout: 1.0)
 
         let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let firstRequestStarted = expectation(description: "Initial request started")
         let replacementRequestStarted = expectation(description: "Replacement request started")
         let releaseFirstResponse = DispatchSemaphore(value: 0)

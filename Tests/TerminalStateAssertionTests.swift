@@ -58,7 +58,13 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         // started no request at all, so a regression in that path would ship undetected.
         let manager = TestNetworkFactory.makeManager()
         let staleFailure = "TTS configuration is invalid. Check the API endpoint and try again."
-        manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        manager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         manager.streamTTS(text: "Earlier failing attempt") { _ in }
         XCTAssertEqual(manager.lastError, staleFailure)
 
@@ -77,7 +83,13 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         // merely lands after the action would let another request's outcome verify this one.
         let manager = TestNetworkFactory.makeManager()
         let staleFailure = "TTS configuration is invalid. Check the API endpoint and try again."
-        manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        manager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         manager.streamTTS(text: "Earlier failing attempt") { _ in }
         XCTAssertEqual(manager.lastError, staleFailure)
 
@@ -139,7 +151,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager { _ in
             throw TerminalStateAssertionEncodingError.failed
         }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         assertTerminalState(
             of: manager,

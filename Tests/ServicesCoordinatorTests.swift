@@ -9,7 +9,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // a silent 24-kHz fallback.
         let audioPlayer = AudioPlayerManager(sampleRate: 48_001)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid Custom PCM rate must not start a Services request")
             return (HTTPURLResponse(), Data())
@@ -66,7 +66,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // network -> scheduled audio. hasAudio flipping true proves that whole chain ran.
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     Data(repeating: 0, count: 2048))
@@ -93,7 +93,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // background post must use the coordinator's full main-action handoff before speaking.
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let requestReceived = expectation(description: "Main action starts its speech request")
         MockURLProtocol.installRequestHandler { request in
             requestReceived.fulfill()
@@ -127,7 +127,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // handler makes that regression fail the test rather than silently hit the live API.
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { request in
             XCTFail("Malformed notification must not start a network request")
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())

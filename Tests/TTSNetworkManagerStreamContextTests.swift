@@ -6,7 +6,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         // WHY: Audio handlers may stop playback synchronously. They must run after stateQueue is
         // released, otherwise stopStreaming recursively enters the same serial queue and hangs.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let handlerStoppedStream = expectation(description: "Re-entrant handler stopped the stream")
         let requestStarted = expectation(description: "Request context is active")
@@ -87,7 +87,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         // data to the replacement handler. URLSession cancellation cannot guarantee that a queued
         // callback never arrives, so the task identifier remains the final ownership check.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let firstRequestStarted = expectation(description: "First request started")
         let replacementRequestStarted = expectation(description: "Replacement request started")
@@ -147,7 +147,8 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "original-gemini-key",
             model: "original-gemini-model",
-            voice: "Aoede"
+            voice: "Aoede",
+            selectedProvider: "Gemini"
         )
 
         let requestStarted = expectation(description: "Gemini request started")
@@ -186,7 +187,8 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             baseURL: "https://mock.api/v1/audio/speech",
             apiKey: "next-openai-key",
             model: "next-openai-model",
-            voice: "next-openai-voice"
+            voice: "next-openai-voice",
+            selectedProvider: "OpenAI"
         )
         releaseResponse.signal()
 
@@ -201,7 +203,8 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             baseURL: "https://mock.api/v1/audio/speech",
             apiKey: "original-openai-key",
             model: "original-openai-model",
-            voice: "original-openai-voice"
+            voice: "original-openai-voice",
+            selectedProvider: "OpenAI"
         )
 
         let requestStarted = expectation(description: "OpenAI request started")
@@ -232,7 +235,8 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "next-gemini-key",
             model: "next-gemini-model",
-            voice: "Puck"
+            voice: "Puck",
+            selectedProvider: "Gemini"
         )
         releaseResponse.signal()
 

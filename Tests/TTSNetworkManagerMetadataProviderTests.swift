@@ -73,7 +73,6 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
         let openAIVoicesPublished = expectation(description: "OpenAI voices published")
@@ -95,7 +94,6 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
         let openAIHDVoicesPublished = expectation(description: "OpenAI HD voices published")
@@ -117,7 +115,6 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
         let currentOpenAIVoicesPublished = expectation(description: "Current OpenAI voices published")
@@ -142,7 +139,6 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
-            apiKey: "gemini-token",
             selectedProvider: "Gemini"
         )
         let geminiVoicesPublished = expectation(description: "Gemini voices published")
@@ -157,10 +153,13 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         }
         wait(for: [geminiVoicesPublished], timeout: 1.0)
 
-        MockURLProtocol.installRequestHandler { request in
-            let data = Data("{ \"voices\": [\"custom-voice-1\", \"custom-voice-2\"] }".utf8)
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
-        }
+        // WHY: A Custom endpoint has no discovery contract, so there is no catalog to offer and no
+        // request to make for one. Publishing anything here would either invent choices the
+        // endpoint never declared or send the saved key to a path the user never configured. No
+        // handler is installed, so this scope's unhandled-request accounting fails if one is sent.
+        //
+        // `SettingsView.fetchMetadata` is what keeps Settings from asking; this arm is the
+        // manager's own answer, kept so the contract does not depend on that one caller alone.
         manager.updateSettings(
             baseURL: "https://custom.api/v1/audio/speech",
             apiKey: "custom-token",
@@ -170,15 +169,14 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://custom.api/v1/audio/speech",
-            apiKey: "custom-token",
             selectedProvider: "Custom"
         )
-        let customVoicesPublished = expectation(description: "Custom voices published")
+        let customVoicesRefused = expectation(description: "Custom publishes no voice catalog")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.voiceSuggestions.values, ["custom-voice-1", "custom-voice-2"])
-            customVoicesPublished.fulfill()
+            XCTAssertEqual(manager.voiceSuggestions, .unpublished)
+            customVoicesRefused.fulfill()
         }
-        wait(for: [customVoicesPublished], timeout: 1.0)
+        wait(for: [customVoicesRefused], timeout: 1.0)
     }
 
     func testPublishingTheGeminiCatalogLeavesAValidSavedVoiceOnTheNextRequest() {
@@ -197,7 +195,6 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         )
         manager.fetchAvailableVoices(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
-            apiKey: "gemini-token",
             selectedProvider: "Gemini"
         )
         let voicesPublished = expectation(description: "Gemini catalog published before the request")

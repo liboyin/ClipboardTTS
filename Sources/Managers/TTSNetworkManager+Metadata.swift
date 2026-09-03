@@ -38,6 +38,8 @@ extension TTSNetworkManager {
 
     struct MetadataRequest {
         let token: MetadataRequestToken
+        /// The started discovery task, which only a models request has: no supported provider
+        /// offers voice discovery, so a voice request publishes a documented constant instead.
         var task: URLSessionDataTask?
     }
 
@@ -75,15 +77,13 @@ extension TTSNetworkManager {
         let data: [Model]
     }
 
-    func inferredMetadataProvider(for baseURL: String) -> String {
-        baseURL.contains("generativelanguage.googleapis.com") ? "Gemini" : "OpenAICompatible"
-    }
-
     /// Builds a metadata endpoint, refusing one whose transport would expose the key it carries.
     ///
     /// A discovery request attaches the same `Authorization: Bearer` credential as a speech
     /// request, so it answers to the same rule as `requestEndpoint(for:)`. A refusal is silent, as
     /// every other metadata failure is: the lists stay as they were and no request is created.
+    /// Only model discovery reaches this, and only Settings' fixed OpenAI endpoint reaches that,
+    /// so the refusal is defense in depth for a caller that later derives the URL differently.
     private func metadataURL(from urlString: String) -> URL? {
         guard let url = URL(string: urlString), EndpointTransportPolicy.permitsCredentials(url) else { return nil }
         return url
@@ -94,12 +94,9 @@ extension TTSNetworkManager {
         stateQueue.sync {
             guard baseURL == source.baseURL, selectedMetadataProvider == source.provider else { return nil }
 
-            switch kind {
-            case .models:
-                modelMetadataRequest?.task?.cancel()
-            case .voices:
-                voiceMetadataRequest?.task?.cancel()
-            }
+            // Only a models request owns a URLSession task; a voice request publishes a
+            // documented constant, so replacing one needs no cancellation.
+            if case .models = kind { modelMetadataRequest?.task?.cancel() }
 
             nextMetadataRequestIdentifier &+= 1
             let token = MetadataRequestToken(
@@ -118,20 +115,12 @@ extension TTSNetworkManager {
         }
     }
 
-    private func attach(_ task: URLSessionDataTask,
-                        toMetadataRequestFor kind: MetadataKind,
-                        token: MetadataRequestToken) -> Bool {
+    /// Records a started discovery task on the model request that owns `token`, if it is still current.
+    private func attachModelMetadataTask(_ task: URLSessionDataTask, token: MetadataRequestToken) -> Bool {
         stateQueue.sync {
-            switch kind {
-            case .models:
-                guard var request = modelMetadataRequest, request.token == token else { return false }
-                request.task = task
-                modelMetadataRequest = request
-            case .voices:
-                guard var request = voiceMetadataRequest, request.token == token else { return false }
-                request.task = task
-                voiceMetadataRequest = request
-            }
+            guard var request = modelMetadataRequest, request.token == token else { return false }
+            request.task = task
+            modelMetadataRequest = request
             return true
         }
     }
@@ -196,16 +185,9 @@ extension TTSNetworkManager {
         }
     }
 
-    /// Returns the pending metadata task so tests can verify it is cancelled before teardown.
-    func metadataTaskForTesting(for kind: MetadataKind) -> URLSessionDataTask? {
-        stateQueue.sync {
-            switch kind {
-            case .models:
-                return modelMetadataRequest?.task
-            case .voices:
-                return voiceMetadataRequest?.task
-            }
-        }
+    /// Returns the pending model discovery task so tests can verify it is cancelled before teardown.
+    func modelMetadataTaskForTesting() -> URLSessionDataTask? {
+        stateQueue.sync { modelMetadataRequest?.task }
     }
 
     /// Delivers a synthetic late completion through the production publication guard.
@@ -264,55 +246,35 @@ extension TTSNetworkManager {
             }
             self.publishMetadata(response.data.map(\.id).filter { $0.contains("tts") }, for: .models, token: token)
         }
-        guard attach(task, toMetadataRequestFor: .models, token: token) else {
+        guard attachModelMetadataTask(task, token: token) else {
             task.cancel()
             return
         }
         task.resume()
     }
 
-    /// Fetches voices for the selected metadata source, replacing only an equally current voice request.
-    func fetchAvailableVoices(baseURL: String, apiKey: String, selectedProvider: String) {
+    /// Publishes the selected provider's voice catalog, replacing only an equally current voice request.
+    ///
+    /// No provider the app supports offers voice discovery, so this creates no request and needs no
+    /// credential: OpenAI and Gemini publish the documented constants above, and a Custom endpoint
+    /// has no discovery contract, which is why `SettingsView.fetchMetadata` does not ask for one.
+    /// The catalog still travels the guarded token path, because publication is asynchronous and a
+    /// provider or endpoint the user changes in that window must invalidate it.
+    func fetchAvailableVoices(baseURL: String, selectedProvider: String) {
         let source = MetadataSource(baseURL: baseURL, provider: selectedProvider)
         guard let token = beginMetadataRequest(for: .voices, source: source) else { return }
-        if selectedProvider == "OpenAI" {
+        switch selectedProvider {
+        case "OpenAI":
             publishMetadata(
                 openAIVoices(for: metadataSettingsSnapshot().model),
                 for: .voices,
                 token: token
             )
-            return
-        }
-        if selectedProvider == "Gemini" {
+        case "Gemini":
             publishMetadata(Self.geminiVoices, for: .voices, token: token)
-            return
-        }
-
-        let voicesURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/audio/voices")
-        guard let url = metadataURL(from: voicesURLString) else {
+        default:
             finishMetadataRequest(for: .voices, token: token)
-            return
         }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        let task = session.dataTask(with: request) { [weak self] data, response, error in
-            guard let self, let data, error == nil else {
-                self?.finishMetadataRequest(for: .voices, token: token)
-                return
-            }
-            guard (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) ?? true,
-                  let voices = decodeVoices(from: data) else {
-                self.finishMetadataRequest(for: .voices, token: token)
-                return
-            }
-            self.publishMetadata(voices, for: .voices, token: token)
-        }
-        guard attach(task, toMetadataRequestFor: .voices, token: token) else {
-            task.cancel()
-            return
-        }
-        task.resume()
     }
 
     private func openAIVoices(for model: String) -> [String] {
@@ -322,16 +284,5 @@ extension TTSNetworkManager {
         default:
             return Self.currentOpenAIVoices
         }
-    }
-
-    private func decodeVoices(from data: Data) -> [String]? {
-        guard let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let data = response["data"] {
-            guard let entries = data as? [[String: Any]] else { return nil }
-            let voices = entries.compactMap { $0["id"] as? String ?? $0["name"] as? String }
-            return voices.count == entries.count ? voices : nil
-        }
-        guard let voices = response["voices"] else { return nil }
-        return voices as? [String]
     }
 }

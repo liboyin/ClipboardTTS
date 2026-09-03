@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Ten tasks are active in Phase 5: 38, 40–42, 44–46, 48, 52, and 54. Task 36 was withdrawn when voice
+- Nine tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54. Task 36 was withdrawn when voice
   selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
   and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
   user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40–42, 44–46, 48, 52, and 54: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -115,8 +115,8 @@ disk-backed `UserDefaults` suite from a test. See [README.md](README.md#build--t
 A file that reaches SwiftLint's `file_length` limit is split along cohesion, never compressed with
 semicolons and never relieved by raising the limit: a group of declarations that serves a clearly
 different purpose moves to its own file, and may widen from `private` to internal only where that
-file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 383 lines under a 400-line
-limit, so a later task has 17 lines there and more in the extensions it also names;
+file genuinely owns it. `Sources/Managers/TTSNetworkManager.swift` is 390 lines under a 400-line
+limit, so a later task has 10 lines there and more in the extensions it also names;
 `TTSNetworkManager+RequestLifecycle.swift` now owns starting, retrying, replacing, and stopping a
 request. `Sources/Views/SettingsView.swift` reached the limit twice and was split the same way, to
 367 lines: `SettingsSecretState.swift` owns the form's key storage and its migration recovery, and
@@ -321,13 +321,16 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40–42, 44–46, 48, 52, and 54 are
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54 are
 non-blocking. Each task remains a separate commit and must follow the working rules above.
 
 See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
 later checks, and for the click-time OpenAI input-limit rule: a later task that adds a menu-initiated
 request or another refusal the menu must report keeps that refusal in the view, off `streamTTS`, and
 routes it through the injected `MenuAlertPresenting` that owns reactivation as well as the panel.
+See [README.md](README.md#architecture) for the metadata rules that replaced the unreachable paths:
+a caller names its provider to `updateSettings` rather than letting an endpoint imply one, and the
+app requests no voice discovery at all.
 
 ### 38. Settle what an odd-length provider response means
 
@@ -380,7 +383,7 @@ message, and documentation, and a mutant that reverses the decision fails a test
 
 **Depends on:** nothing
 
-**Purpose.** `Sources/Managers/TTSNetworkManager.swift:368` applies the transport rule to a redirect
+**Purpose.** `Sources/Managers/TTSNetworkManager.swift:375` applies the transport rule to a redirect
 target but says nothing about its origin, and the Gemini key travels in a custom header. Measured on
 this toolchain against loopback servers: `URLSession` strips `Authorization` from a redirected
 request but replays `x-goog-api-key` verbatim, so a redirect away from
@@ -422,70 +425,22 @@ permitted same-origin redirect.
 **Done when.** A credential-bearing request cannot carry its key to an origin the user never
 configured, and a redirect that strips the credential reports itself rather than blaming the key.
 
-### 41. Retire or reconnect the unreachable metadata paths
-
-**Classification:** Non-blocking — dead production code and a latent provider-identity trap
-
-**Depends on:** nothing
-
-**Purpose.** Several paths in `Sources/Managers/TTSNetworkManager+Metadata.swift` cannot run in
-production. The HTTP voice-discovery branch and its `decodeVoices` helper execute only when the
-selected provider is neither OpenAI nor Gemini, and `SettingsView.fetchMetadata` — since 2026-08-20
-the only caller of `fetchAvailableVoices` — returns early for Custom, which `README.md` states as the
-intent: a Custom endpoint has no discovery contract. Separately, `inferredMetadataProvider(for:)`
-runs only when `updateSettings` is called without a provider, which no path in `Sources` does, and
-the `"OpenAICompatible"` value it returns matches no provider identity anywhere else: that literal
-appears exactly once in the whole repository. Fourteen tests reach it and so run the manager in a
-state production cannot produce.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Tests/TTSNetworkManagerMetadataSourceTests.swift`
-- `Tests/TTSNetworkManagerMetadataTests.swift`
-- `README.md`
-
-**Required change.**
-
-1. For each path, either give it a production caller or remove it. Before removing either, identify
-   what it uniquely carries — the transport refusal for a metadata endpoint, the two response shapes
-   `decodeVoices` accepts, the cancellation and freshness guards its tests exercise — and give each
-   surviving item another home or another test.
-2. If `inferredMetadataProvider` stays, make its result a provider identity the rest of the app
-   recognizes, so a manager can never hold one that no surface will ever match.
-3. Move the tests that only reach these paths onto a configuration production can actually reach, or
-   delete them with the code they cover. A test whose setup production cannot produce proves nothing
-   about production.
-
-**Non-goals and invariants.**
-
-- Do not add voice discovery for Custom. `README.md` states it has no discovery contract.
-- Keep the metadata generation, token, provider-identity, and endpoint-transport guards intact for
-  every path that survives.
-- Do not lower `Sources/Managers/` coverage below the gate by deleting code its tests were carrying.
-
-**Validation and falsification.** After the change, prove by search that every remaining metadata
-entry point has a caller in `Sources`, and that no manager state reachable in tests is unreachable in
-production. Mutation-test the guards that survive.
-
-**Done when.** Every metadata path in the manager is reachable from the app, and no provider identity
-exists that no surface can match.
-
 ### 42. Cover or retire the provider half of the metadata scope check
 
 **Classification:** Non-blocking — Phase 4 finding, untested manager synchronization
 
 **Depends on:** nothing
 
-**Purpose.** `Sources/Managers/TTSNetworkManager.swift:172` invalidates the metadata scope when
-either the base URL or the selected provider changes. Removing the provider half passes all 189
-tests, re-verified against the suite as it stands after the menu voice-selection removal. The condition is
-reachable: OpenAI's fixed endpoint and Custom's default `apiBaseURL` are the same string, so
-switching OpenAI to Custom without editing the Base URL changes the provider alone.
+**Purpose.** `Sources/Managers/TTSNetworkManager.swift:180` invalidates the metadata scope when
+either the base URL or the selected provider changes. Removing the provider half passes all 208
+tests, re-verified against the suite as it stands after the unreachable metadata paths were
+retired. The condition is reachable: OpenAI's fixed endpoint and Custom's default `apiBaseURL`
+are the same string, so switching OpenAI to Custom without editing the Base URL changes the
+provider alone.
 After Phase 4 tagged every published list with its provider, the user-visible consequence disappeared
 — a list tagged OpenAI is refused by a Custom form regardless — and what still depends on this half
-is the cancellation of an in-flight metadata request and the prompt clearing of the published lists.
+is the cancellation of an in-flight model discovery request — the only metadata request there is —
+and the prompt clearing of the published lists.
 `README.md` states metadata source identity as including both, so the code and the documentation
 currently claim a property nothing can break.
 

@@ -343,7 +343,6 @@ struct SettingsView: View {
         )
         networkManager.fetchAvailableVoices(
             baseURL: currentBaseURL,
-            apiKey: currentAPIKey,
             selectedProvider: selectedProvider.settingsValue
         )
     }

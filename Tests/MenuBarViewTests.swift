@@ -100,7 +100,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let audioPlayer = AudioPlayerManager()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let requestStarted = expectation(description: "Clipboard text starts a TTS request")
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
@@ -123,7 +123,13 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let networkManager = TestNetworkFactory.makeManager()
         let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
 
-        networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        networkManager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         networkManager.streamTTS(text: "Create an error before clearing") { _ in }
         XCTAssertNotNil(networkManager.lastError)
 
@@ -158,7 +164,13 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         XCTAssertNil(host.descendantText(equalTo: errorMessage))
         XCTAssertNotNil(host.descendantView(of: NSSlider.self))
 
-        networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key", model: "test", voice: "test")
+        networkManager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         networkManager.streamTTS(text: "Show error") { _ in }
 
         let rendered = expectation(description: "Error message rendered")

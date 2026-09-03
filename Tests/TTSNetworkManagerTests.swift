@@ -9,7 +9,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
         let manager = TestNetworkFactory.makeManager()
 
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "secret_token", model: "tts-test", voice: "test-voice")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "secret_token", model: "tts-test", voice: "test-voice", selectedProvider: "OpenAI")
 
         let expectation = XCTestExpectation(description: "Wait for request to be formed")
 
@@ -120,7 +120,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // sends data, the network manager relays it to the completion handler properly.
 
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let expectation = XCTestExpectation(description: "Wait for data chunk")
 
@@ -142,7 +142,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // to save bandwidth and instantly transition the state.
 
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let requestStarted = XCTestExpectation(description: "Mock request started")
         let requestFinished = XCTestExpectation(description: "Mock request finished")
@@ -181,7 +181,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // active one, because URLSession suppresses callbacks for a cancelled task, so the real
         // network path can never exercise the stale-callback guard.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         var dataReceived = false
         let requestStarted = XCTestExpectation(description: "Mock request started")
@@ -221,7 +221,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
 
         let geminiKey = "test-gemini-api-key"
-        manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: geminiKey, model: "gemini-tts", voice: "Aoede")
+        manager.updateSettings(baseURL: "https://generativelanguage.googleapis.com/v1beta", apiKey: geminiKey, model: "gemini-tts", voice: "Aoede", selectedProvider: "Gemini")
 
         let expectation = XCTestExpectation(description: "Wait for Gemini request")
 
@@ -266,7 +266,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
     func testNetworkManagerHandlesAPIError() {
         let manager = TestNetworkFactory.makeManager()
 
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
         let expectation = XCTestExpectation(description: "Wait for error completion")
 

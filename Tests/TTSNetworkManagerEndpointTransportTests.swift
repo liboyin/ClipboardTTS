@@ -193,7 +193,7 @@ final class TTSNetworkManagerEndpointTransportTests: MockURLProtocolTestCase {
         )
         wait(for: [requestStarted], timeout: 2.0)
         defer { releaseResponse.signal() }
-        guard let task = manager.metadataTaskForTesting(for: .models) else {
+        guard let task = manager.modelMetadataTaskForTesting() else {
             XCTFail("The started discovery request must own a metadata task.")
             return
         }

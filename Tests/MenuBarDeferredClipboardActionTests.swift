@@ -37,7 +37,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let onlyRequest = expectation(description: "Only the Services request reaches the provider")
         MockURLProtocol.installRequestHandler { request in
             onlyRequest.fulfill()
@@ -84,7 +84,13 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "not a valid endpoint", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "test",
+            model: "test",
+            voice: "test",
+            selectedProvider: "OpenAI"
+        )
         let deferral = CapturingDeferralScheduler()
         let view = makeMenu(
             audioPlayer: audioPlayer,
@@ -116,7 +122,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader()
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let deferral = CapturingDeferralScheduler()
         let view = makeMenu(
             audioPlayer: audioPlayer,
@@ -141,7 +147,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let requestStarted = expectation(description: "The explicit second click starts a request")
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
@@ -179,7 +185,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let onlyRequest = expectation(description: "Only the intervening request reaches the provider")
         MockURLProtocol.installRequestHandler { request in
             onlyRequest.fulfill()
@@ -225,7 +231,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let deferral = CapturingDeferralScheduler()
         let view = makeMenu(
             audioPlayer: audioPlayer,
@@ -256,7 +262,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let deferral = CapturingDeferralScheduler()
         let view = makeMenu(
             audioPlayer: audioPlayer,
