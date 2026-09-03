@@ -7,6 +7,11 @@ struct MenuBarView: View {
     @ObservedObject var networkManager: TTSNetworkManager
     /// The app-lifetime owner of the deferred clipboard read; see `speakCopiedText()`.
     let deferredClipboardAction: DeferredClipboardAction
+    /// Owns reactivating the app and showing what a refused click must tell the user.
+    ///
+    /// Deliberately has no default, like `SettingsView`'s injected `UserDefaults`: a call site that
+    /// forgot it would show a real modal panel from a test.
+    let alertPresenter: MenuAlertPresenting
 
     @Environment(\.openWindow) var openWindow
 
@@ -121,12 +126,58 @@ struct MenuBarView: View {
                 guard networkManager.currentRequestGeneration() == pipelineGeneration,
                       isReadyForNewSpeech,
                       let text = textExtraction.getCopiedText() else { return }
+                guard !refusesOversizedOpenAIText(text) else { return }
                 let gen = audioPlayer.startNewStream()
                 networkManager.streamTTS(text: text) { [audioPlayer] data in
                     audioPlayer.scheduleAudio(data: data, streamGeneration: gen)
                 }
             }
         }
+    }
+
+    /// The maximum `input` length OpenAI documents for every model its Speech API accepts.
+    private static let openAICharacterLimit = 4096
+
+    /// Reports oversized OpenAI clipboard text to the user, and answers whether speech must not start.
+    ///
+    /// A longer value buys a request that can only fail, and the provider's rejection reaches the
+    /// user as the same generic HTTP failure any other error produces. Checking it here keeps the
+    /// refusal local: no request, no second network call, and no delay for a value that fits.
+    ///
+    /// Only this click path checks it. Services and Settings' Test Voice are outside the boundary
+    /// this rule was agreed for, and neither Gemini nor a Custom endpoint documents this limit.
+    /// The provider identity comes from the manager rather than a second endpoint inference beside
+    /// it, and is the one selected when the click was revalidated: a provider the user switches
+    /// inside the request's own start window is out of scope, because a Settings edit advances no
+    /// request generation for the deferred action to observe.
+    private func refusesOversizedOpenAIText(_ text: String) -> Bool {
+        guard networkManager.isCurrentProvider(APIKeyProvider.openAI.settingsValue) else { return false }
+        // OpenAI documents the maximum as "characters" without naming a Unicode unit. Scalars are
+        // the unit a code-point count reaches first: grapheme clusters would let text the provider
+        // rejects through, while UTF-16 units or UTF-8 bytes would refuse non-Latin text the
+        // provider accepts.
+        let characterCount = text.unicodeScalars.count
+        guard characterCount > Self.openAICharacterLimit else { return false }
+        alertPresenter.presentAlert(
+            title: Self.oversizedTextAlertTitle,
+            message: Self.oversizedTextAlertMessage(characterCount: characterCount)
+        )
+        return true
+    }
+
+    private static let oversizedTextAlertTitle = "Copied text is too long"
+
+    /// Builds the refusal message, which names the limit and how far past it the copied text is.
+    ///
+    /// Counts are grouped in `en_US` rather than the user's locale so the digits match the English
+    /// sentence around them, which is the only form the app ships. The message reports a length,
+    /// never any clipboard content.
+    private static func oversizedTextAlertMessage(characterCount: Int) -> String {
+        let locale = Locale(identifier: "en_US")
+        let limit = openAICharacterLimit.formatted(.number.locale(locale))
+        let count = characterCount.formatted(.number.locale(locale))
+        return "OpenAI accepts at most \(limit) characters per request. The copied text is "
+            + "\(count) characters. Copy a shorter passage and try again."
     }
 
     func togglePlayPause() {

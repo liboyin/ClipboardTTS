@@ -17,6 +17,7 @@
 - The user should be able to select text in any application and right-click -> Services -> click "Speak Selected Text with Clipboard TTS" to send to TTS engine for playback. Note that Services is not available in all applications, so there is also the next item.
 - The user should be able to copy text in any application and click "Speak Copied Text" from the menu bar app to send to TTS engine for playback. 
 - The app should start streaming audio within 2 seconds after the user clicks the button.
+- When OpenAI is the selected provider and the copied text is longer than the 4,096 characters OpenAI accepts in one request, the click starts no request and shows a pop-up naming that maximum and how long the copied text is, so the user learns what is wrong instead of waiting for a generic failure. Text within the limit, Gemini and Custom requests, the Services entry point, and Settings' Test Voice are unaffected.
 - While audio is streaming or buffered, the "Speak Copied Text" button becomes "Clear Buffer": clicking it stops playback and discards the buffer. Speaking new text is a second click of "Speak Copied Text" — the app deliberately does not interrupt-and-replace in one click.
 
 ### Control & Navigation During Playback

@@ -3,16 +3,37 @@ import AppKit
 import SwiftUI
 @testable import ClipboardTTSApp
 
-/// Builds the menu with its own deferred-action owner unless a test needs a controllable one.
+/// Records the alerts a menu action asked for, instead of activating the app and running a modal.
+///
+/// Confined to the main queue, like the menu flow whose presenter it replaces. The conformance sits
+/// in an extension so the recorder itself stays unisolated and a test can still build one from a
+/// synchronous test method, while `presentAlert` keeps the protocol's main-actor contract.
+final class RecordingMenuAlertPresenter {
+    private(set) var presentedTitles: [String] = []
+    private(set) var presentedMessages: [String] = []
+}
+
+extension RecordingMenuAlertPresenter: MenuAlertPresenting {
+    func presentAlert(title: String, message: String) {
+        presentedTitles.append(title)
+        presentedMessages.append(message)
+    }
+}
+
+/// Builds the menu with its own deferred-action owner and alert recorder unless a test needs to
+/// control either. The alert presenter never defaults to the production one, so no test can raise
+/// a modal panel that nothing would dismiss.
 func makeMenu(audioPlayer: AudioPlayerManager,
               textExtraction: TextExtractionManager,
               networkManager: TTSNetworkManager,
-              deferredClipboardAction: DeferredClipboardAction = DeferredClipboardAction()) -> MenuBarView {
+              deferredClipboardAction: DeferredClipboardAction = DeferredClipboardAction(),
+              alertPresenter: MenuAlertPresenting = RecordingMenuAlertPresenter()) -> MenuBarView {
     MenuBarView(
         audioPlayer: audioPlayer,
         textExtraction: textExtraction,
         networkManager: networkManager,
-        deferredClipboardAction: deferredClipboardAction
+        deferredClipboardAction: deferredClipboardAction,
+        alertPresenter: alertPresenter
     )
 }
 

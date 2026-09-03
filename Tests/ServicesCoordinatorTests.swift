@@ -26,6 +26,38 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         XCTAssertFalse(networkManager.isStreaming)
     }
 
+    func testOversizedOpenAISelectedTextStillReachesTheProvider() {
+        // WHY: The 4,096-character refusal belongs to the menu click the user asked it for, not to
+        // every entry point. Services carries a selection the user made in another app, where no
+        // dialog of ours is expected, so putting the rule in `streamTTS` would silently change this
+        // path too. Long selected text must still reach the provider and fail there, as it does now.
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(
+            baseURL: "https://api.openai.com/v1/audio/speech",
+            apiKey: "test",
+            model: "tts-1",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
+        )
+        let requestStarted = expectation(description: "Oversized selected text reaches the provider")
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+
+        let center = NotificationCenter()
+        let coordinator = ServicesCoordinator(audioPlayer: audioPlayer, networkManager: networkManager, notificationCenter: center)
+
+        withExtendedLifetime(coordinator) {
+            center.post(
+                name: ServicesCoordinator.speakSelectedTextNotification,
+                object: String(repeating: "a", count: 5_000)
+            )
+            wait(for: [requestStarted], timeout: 2.0)
+        }
+    }
+
     func testServiceNotificationStreamsSelectedTextToAudio() {
         // WHY: The macOS Services entry point ("Speak Selected Text with Clipboard TTS") must work
         // from app launch, before the menu bar dropdown (and thus MenuBarView) is ever built. The

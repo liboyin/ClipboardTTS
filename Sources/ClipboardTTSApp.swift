@@ -83,6 +83,8 @@ struct ClipboardTTSApp: App {
     // the same reason as the managers: SwiftUI rebuilds the MenuBarExtra content on every publish,
     // and a per-view instance could not drop an attempt an earlier view value scheduled.
     @StateObject private var deferredClipboardAction = DeferredClipboardAction()
+    /// Reactivates the app and shows a menu refusal the user must acknowledge before speech starts.
+    private let menuAlertPresenter = AppKitMenuAlertPresenter()
     private let secretStore: SecretStoring
     /// The same preferences the startup manager migrated legacy keys from, so the Settings retry
     /// works on that domain rather than whichever one `.standard` names in this process.
@@ -106,7 +108,8 @@ struct ClipboardTTSApp: App {
                 audioPlayer: audioPlayer,
                 textExtraction: textExtraction,
                 networkManager: networkManager,
-                deferredClipboardAction: deferredClipboardAction
+                deferredClipboardAction: deferredClipboardAction,
+                alertPresenter: menuAlertPresenter
             )
         }
         .menuBarExtraStyle(.window)

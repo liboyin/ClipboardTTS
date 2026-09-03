@@ -4,8 +4,9 @@ import AppKit
 
 /// Captures deferred clipboard actions so a test owns exactly when each one executes.
 ///
-/// Confined to the main queue, like the menu flow whose scheduler it replaces.
-private final class CapturingDeferralScheduler {
+/// Confined to the main queue, like the menu flow whose scheduler it replaces. Internal because
+/// `MenuBarOpenAILimitTests` drives the same deferred action; this file owns the double.
+final class CapturingDeferralScheduler {
     private(set) var deferredActions: [() -> Void] = []
     private(set) var requestedDelays: [TimeInterval] = []
 
