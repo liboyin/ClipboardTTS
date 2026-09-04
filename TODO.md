@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Eleven tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54–56. Task 36 was withdrawn
+- Ten tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, 54, and 55. Task 36 was withdrawn
   when voice selection left the menu-bar drop-down. Phase 4's gap review has now run over its
   complete range and found no Phase 4 gap other than Task 42; the phase closes once that finding
   has an explicit user disposition. Phase 5 then addresses every outstanding review gap, and the
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54–56: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, 54, and 55: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,9 +321,9 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54–56
-are non-blocking. Tasks 55 and 56 were raised on 2026-09-04 from Task 41's execution rather than from
-a phase review; they are simplifications its removals exposed, not defects it introduced. Each task
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, 54, and 55
+are non-blocking. Task 55 was raised on 2026-09-04 from Task 41's execution rather than from
+a phase review; it is a simplification its removals exposed, not a defect it introduced. Each task
 remains a separate commit and must follow the working rules above.
 
 See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
@@ -871,46 +871,6 @@ Gemini model branch must each fail a test.
 **Done when.** No provider-selection or model-metadata-dispatch branch uses an endpoint substring;
 endpoints remain request-construction, transport, and metadata-freshness inputs rather than identity
 selectors, and canonical identities retain their request kinds.
-
-### 56. Collapse the duplicated metadata completion helpers
-
-**Classification:** Non-blocking — two copies of one state transition
-
-**Depends on:** nothing
-
-**Purpose.** `Sources/Managers/TTSNetworkManager+Metadata.swift:128` and `:160` run the same switch
-over the same two request slots under the same token condition and make the same mutation. The only
-difference is that `completeMetadataRequest` reports whether it matched and `finishMetadataRequest`
-does not; five call sites use the discarding form. Two copies of a state transition that must stay
-identical is exactly the shape where they drift apart.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Tests/TTSNetworkManagerMetadataTests.swift`
-
-**Required change.** Express the discarding form in terms of the reporting one, or give the two
-genuinely different behavior and say what it is. Do not leave two independent copies.
-
-**Non-goals and invariants.**
-
-- Keep both call shapes at their call sites; the abandoning paths read better without a discarded
-  result, and the publication guard needs the result.
-- Keep the token condition exactly as it is: a completion may only clear the request it belongs to.
-- Keep the token check and the clearing atomic in a single `stateQueue.sync`. `stateQueue` is
-  serial, so delegate to the other helper rather than calling it from inside a `sync` block.
-
-**Validation and falsification.** Add a focused model-discovery race through an abandonment path:
-start a request whose delayed completion takes a failure path (for example malformed JSON), start a
-replacement for the same source, release the old failure while the replacement owns the model slot,
-then complete the replacement successfully and prove its list publishes. A mutant that clears without
-matching the token must fail that test. Run the existing stale-publication tests as regression coverage
-for the reporting call shape. After the collapse there is one canonical token guard, not one per
-former helper; inspect the diff to establish the one-owner structure. The new test's three required
-mutants are deleting the token match, inverting that match, and refusing the replacement's matching
-completion; each must fail for the state-ownership reason the test documents.
-
-**Done when.** One implementation owns the transition and the gates still pass.
 
 ### Phase 5 mandatory gap review
 

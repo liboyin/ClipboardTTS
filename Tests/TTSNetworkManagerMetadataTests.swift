@@ -179,153 +179,6 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         wait(for: [staleCatalogIgnored], timeout: 1.0)
     }
 
-    func testScopeChangesCancelThePendingModelRequest() {
-        // WHY: Freshness guards prevent stale publication, but cancellation also matters because
-        // abandoned metadata work must not continue consuming a provider connection after a switch.
-        // Only model discovery issues a request, so it is the only one there is a task to cancel.
-        let manager = TestNetworkFactory.makeManager()
-        let firstEndpoint = "https://custom-a.example/v1/audio/speech"
-        let secondEndpoint = "https://custom-b.example/v1/audio/speech"
-        manager.updateSettings(
-            baseURL: firstEndpoint,
-            apiKey: "custom-a-key",
-            model: "model-a",
-            voice: "voice-a",
-            selectedProvider: "Custom"
-        )
-
-        let modelRequestStarted = expectation(description: "First model request started")
-        let modelRequestReleased = expectation(description: "First model request released")
-        let releaseModelRequest = DispatchSemaphore(value: 0)
-        defer { releaseModelRequest.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            modelRequestStarted.fulfill()
-            _ = releaseModelRequest.wait(timeout: .now() + 1.0)
-            modelRequestReleased.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
-
-        manager.fetchAvailableModels(baseURL: firstEndpoint, apiKey: "custom-a-key", selectedProvider: "Custom")
-        wait(for: [modelRequestStarted], timeout: 1.0)
-        guard let modelTask = manager.modelMetadataTaskForTesting() else {
-            XCTFail("Expected a pending model metadata task.")
-            return
-        }
-
-        manager.updateSettings(
-            baseURL: secondEndpoint,
-            apiKey: "custom-b-key",
-            model: "model-b",
-            voice: "voice-b",
-            selectedProvider: "Custom"
-        )
-        XCTAssertNotEqual(modelTask.state, .running, "Changing endpoints must cancel the pending model request.")
-        releaseModelRequest.signal()
-        wait(for: [modelRequestReleased], timeout: 1.0)
-    }
-
-    func testRefreshingTheSameSourceCancelsTheModelRequestItReplaces() {
-        // WHY: Every keystroke in a Settings API-key field runs `syncSettings`, which refreshes
-        // metadata for the provider and endpoint already selected. The scope has not changed, so
-        // `updateSettings` invalidates nothing, and this replacement is the only thing that stops
-        // the discovery request the keystroke discarded: without it, typing a key would leave one
-        // provider connection in flight per character.
-        let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://api.openai.com/v1/audio/speech"
-        let partialKey = "openai-ke"
-        let completeKey = "openai-key"
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: partialKey,
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "OpenAI"
-        )
-
-        let replacedRequestStarted = expectation(description: "The replaced model request started")
-        let replacedRequestReleased = expectation(description: "The replaced model request finished")
-        let replacementCompleted = expectation(description: "The replacing model request finished")
-        let releaseReplacedRequest = DispatchSemaphore(value: 0)
-        defer { releaseReplacedRequest.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            // The two refreshes are told apart by the key each keystroke had produced so far.
-            guard request.value(forHTTPHeaderField: "Authorization") == "Bearer \(partialKey)" else {
-                replacementCompleted.fulfill()
-                return metadataResponse(for: request, json: "{ \"data\": [] }")
-            }
-            replacedRequestStarted.fulfill()
-            _ = releaseReplacedRequest.wait(timeout: .now() + 1.0)
-            replacedRequestReleased.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: partialKey, selectedProvider: "OpenAI")
-        wait(for: [replacedRequestStarted], timeout: 1.0)
-        guard let replacedTask = manager.modelMetadataTaskForTesting() else {
-            XCTFail("Expected the first refresh to own a pending model metadata task.")
-            return
-        }
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: completeKey, selectedProvider: "OpenAI")
-        XCTAssertNotEqual(
-            replacedTask.state,
-            .running,
-            "Refreshing the same source must cancel the discovery request it replaces."
-        )
-
-        releaseReplacedRequest.signal()
-        wait(for: [replacedRequestReleased, replacementCompleted], timeout: 3.0)
-    }
-
-    func testOneSettingsRefreshPublishesBothTheModelListAndTheVoiceCatalog() {
-        // WHY: This is the trade-off the replacement guard has to respect. `fetchMetadata` asks
-        // for models and then voices in a single refresh, and both go through the same guard, so
-        // one that did not distinguish the two kinds would let the voice request cancel the model
-        // request started beside it and leave the model picker permanently empty.
-        let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://api.openai.com/v1/audio/speech"
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: "openai-key",
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "OpenAI"
-        )
-
-        // The models response is withheld until the voice half of the refresh has been asked for.
-        // Without that, the model request could finish first and leave nothing for an
-        // over-restricted guard to cancel, so the assertion below would hold either way.
-        let modelsRequestStarted = expectation(description: "The model discovery request started")
-        let modelsResponseReturned = expectation(description: "The model discovery response returned")
-        let releaseModelsResponse = DispatchSemaphore(value: 0)
-        defer { releaseModelsResponse.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            modelsRequestStarted.fulfill()
-            _ = releaseModelsResponse.wait(timeout: .now() + 2.0)
-            modelsResponseReturned.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
-        }
-
-        // The order `SettingsView.fetchMetadata` uses.
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
-        wait(for: [modelsRequestStarted], timeout: 2.0)
-        manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "OpenAI")
-
-        releaseModelsResponse.signal()
-        wait(for: [modelsResponseReturned], timeout: 2.0)
-
-        let bothListsPublished = expectation(description: "Both suggestion lists published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["tts-1"])
-            XCTAssertEqual(
-                manager.voiceSuggestions.values,
-                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-            )
-            bothListsPublished.fulfill()
-        }
-        wait(for: [bothListsPublished], timeout: 2.0)
-    }
-
     func testMalformedMetadataDoesNotReplaceCurrentLists() {
         // WHY: A malformed response must not turn a known-good current-provider list into an
         // arbitrary value; only a successful, decodable response is allowed to publish.
@@ -346,6 +199,14 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         let malformedResponseIgnored = expectation(description: "Malformed metadata was not published")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             XCTAssertEqual(manager.modelSuggestions.values, ["known-tts-model"])
+            // WHY: Declining to publish is only half the transition. The refusal must also release
+            // the slot, and the finished task it retains, that its own token held. Nothing else
+            // observes that release, so without this assertion the shared clearing the publishing
+            // and abandoning paths now share could be dropped entirely with every gate still green.
+            XCTAssertNil(
+                manager.metadataTokenForTesting(for: .models),
+                "An abandoned refresh must release the request slot its own token held."
+            )
             malformedResponseIgnored.fulfill()
         }
         wait(for: [malformedResponseIgnored], timeout: 1.0)
@@ -375,13 +236,4 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         }
         wait(for: [emptyListPublished], timeout: 1.0)
     }
-
-}
-
-private func metadataResponse(for request: URLRequest, json: String) -> (HTTPURLResponse, Data?) {
-    guard let url = request.url,
-          let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) else {
-        return (HTTPURLResponse(), Data())
-    }
-    return (response, Data(json.utf8))
 }

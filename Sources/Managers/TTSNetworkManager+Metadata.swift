@@ -125,17 +125,13 @@ extension TTSNetworkManager {
         }
     }
 
+    /// Clears the request `token` owns on behalf of a caller that abandons it without publishing.
+    ///
+    /// Delegates to `completeMetadataRequest` rather than repeating its switch, so one token guard
+    /// owns the transition and an abandonment cannot drift from the completion the publication path
+    /// guards on. `stateQueue` is serial, so this must not wrap the call in a `sync` block of its own.
     private func finishMetadataRequest(for kind: MetadataKind, token: MetadataRequestToken) {
-        stateQueue.sync {
-            switch kind {
-            case .models where modelMetadataRequest?.token == token:
-                modelMetadataRequest = nil
-            case .voices where voiceMetadataRequest?.token == token:
-                voiceMetadataRequest = nil
-            default:
-                break
-            }
-        }
+        _ = completeMetadataRequest(for: kind, token: token)
     }
 
     private func publishMetadata(_ values: [String],
@@ -157,6 +153,10 @@ extension TTSNetworkManager {
         }
     }
 
+    /// Clears the request `token` owns, reporting whether it was still the current one.
+    ///
+    /// The single owner of this transition: a completion may only clear the request it belongs to,
+    /// so one whose request was already replaced is told `false` and must publish nothing.
     private func completeMetadataRequest(for kind: MetadataKind, token: MetadataRequestToken) -> Bool {
         stateQueue.sync {
             switch kind {
@@ -195,6 +195,14 @@ extension TTSNetworkManager {
                                    for kind: MetadataKind,
                                    token: MetadataRequestToken) {
         publishMetadata(values, for: kind, token: token)
+    }
+
+    /// Delivers a synthetic late abandonment through the production completion guard.
+    ///
+    /// The counterpart to `publishMetadataForTesting`: it makes the abandonment half of the race
+    /// deterministic, which `URLSession` completion timing alone cannot.
+    func finishMetadataRequestForTesting(for kind: MetadataKind, token: MetadataRequestToken) {
+        finishMetadataRequest(for: kind, token: token)
     }
     #endif
 
