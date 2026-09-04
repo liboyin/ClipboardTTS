@@ -12,11 +12,11 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Nine tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54. Task 36 was withdrawn when voice
-  selection left the menu-bar drop-down. Phase 4's gap review has now run over its complete range
-  and found no Phase 4 gap other than Task 42; the phase closes once that finding has an explicit
-  user disposition. Phase 5 then addresses every outstanding review gap, and the final acceptance
-  sweep follows its own gap review.
+- Twelve tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54–57. Task 36 was withdrawn
+  when voice selection left the menu-bar drop-down. Phase 4's gap review has now run over its
+  complete range and found no Phase 4 gap other than Task 42; the phase closes once that finding
+  has an explicit user disposition. Phase 5 then addresses every outstanding review gap, and the
+  final acceptance sweep follows its own gap review.
 - Each numbered task MUST be implemented in its own session and committed as one self-contained
   change after its tests, documentation, gates, and adversarial-review loop pass.
 - Execute the phases in order. Tasks within a phase may be reordered only when their declared
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54–57: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,8 +321,10 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54 are
-non-blocking. Each task remains a separate commit and must follow the working rules above.
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54–57
+are non-blocking. Tasks 55–57 were raised on 2026-09-04 from Task 41's execution rather than from a
+phase review; they are simplifications its removals exposed, not defects it introduced. Each task
+remains a separate commit and must follow the working rules above.
 
 See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
 later checks, and for the click-time OpenAI input-limit rule: a later task that adds a menu-initiated
@@ -503,6 +505,9 @@ empty bodies, malformed SSE, and PCM frame length, but no declared media type.
 - Do not reject a documented valid provider response merely because a proxy omitted a header unless
   the decided compatibility rule says to do so.
 - Keep the empty and partial-frame outcomes owned by Task 38.
+- `Tests/TTSNetworkManagerFailureTests.swift` is 392 lines against SwiftLint's 400-line limit, so
+  the cases this adds reach it. Split that file along cohesion under the Phase 1 rule rather than
+  raising the limit or suppressing `file_length`.
 
 **Validation and falsification.** Through the mock protocol, deliver a declared JSON or HTML 2xx
 response of even length and a Gemini `inlineData` payload with a non-audio MIME type; each must fail
@@ -578,25 +583,29 @@ them fails.
 
 **Done when.** Clipboard-read diagnostics have an explicit, tested release policy.
 
-### 48. Resolve the AudioPlayerManager file-length exception
+### 48. Resolve the AudioPlayerManager file-length exceptions
 
 **Classification:** Non-blocking — planning rule and lint configuration disagree
 
 **Depends on:** nothing
 
-**Purpose.** `AudioPlayerManager.swift` is 417 lines and disables SwiftLint's `file_length` rule,
-while Phase 1 says files that reach the 400-line limit are split along cohesion rather than relieved
-by an exception. The existing exception predates that rule, leaving the plan and the checked-in lint
-configuration inconsistent.
+**Purpose.** `Sources/Managers/AudioPlayerManager.swift` is 417 lines and
+`Tests/AudioPlayerManagerTests.swift` is 408, and each disables SwiftLint's `file_length` rule on its
+first line, while Phase 1 says files that reach the 400-line limit are split along cohesion rather
+than relieved by an exception. Both exceptions predate that rule, leaving the plan and the checked-in
+lint configuration inconsistent. Neither carries a rationale beside it, so the plan is the only place
+the disagreement is recorded.
 
 **Primary paths.**
 
 - `Sources/Managers/AudioPlayerManager.swift`
+- `Tests/AudioPlayerManagerTests.swift`
 - `TODO.md`
 
-**Required change.** Obtain user direction on whether the file must be split along cohesion or the
-Phase 1 rule should explicitly allow this documented exception. Implement only the selected policy
-and update the owning documentation in the same commit.
+**Required change.** Obtain user direction on whether each file must be split along cohesion or the
+Phase 1 rule should explicitly allow these documented exceptions. The production file and its test
+file may be decided differently, but neither may be left undecided. Implement only the selected
+policy and update the owning documentation in the same commit.
 
 **Non-goals and invariants.**
 
@@ -607,7 +616,8 @@ and update the owning documentation in the same commit.
 assertion and prove the extracted boundary preserves the previous behavior; if retaining the
 exception, prove the plan states its limited rationale accurately.
 
-**Done when.** The plan and the checked-in lint treatment of `AudioPlayerManager` agree.
+**Done when.** The plan and the checked-in lint treatment of both `AudioPlayerManager` files agree,
+and no `file_length` suppression remains without a rationale the plan states.
 
 ### 52. Resume playback after a streaming underrun
 
@@ -774,6 +784,9 @@ errors.
   and main-queue drain before the mock scope closes, addressing a field by position and expected
   text, and reaching an action by clicking its `SettingsActionButton`.
 - Do not change what any test asserts, its quiescence and teardown ownership, or the suite's coverage.
+- `Tests/MockURLProtocolScope.swift` is 397 lines against SwiftLint's 400-line limit, so an isolation
+  boundary written into it reaches that limit almost at once. Split it along cohesion under the
+  Phase 1 rule rather than raising the limit or suppressing `file_length`.
 
 **Validation and falsification.** The command above must report no project-source
 strict-concurrency warnings or errors. The required gate set must pass in its updated form:
@@ -790,6 +803,161 @@ shared-state regression.
 **Done when.** The required gate set collectively compiles both targets under complete strict
 concurrency with no project-source strict-concurrency warnings or errors, the hosted Settings and
 mock-network lifecycles are unchanged, and `README.md` describes the scope the build enforces.
+
+### 55. Retire the remaining base-URL provider inference
+
+**Classification:** Non-blocking — duplicated provider inference on the speech-request and model-metadata paths
+
+**Depends on:** nothing. It edits `TTSNetworkManager.swift`, which Task 40 also names, but not the
+redirect delegate that task changes.
+
+**Purpose.** Task 41 removed `inferredMetadataProvider` and made `updateSettings` require its caller
+to name the provider. Production Settings normalizes that name to one of the three persisted
+identities before it calls the manager, and manager construction normalizes a persisted value, but
+`updateSettings` still stores an arbitrary direct caller's raw string. Two places still derive a
+provider from the endpoint instead.
+`Sources/Managers/TTSNetworkManager.swift:75` decides a speech request's `ProviderKind` with
+`baseURL.contains("generativelanguage.googleapis.com")` whenever the identity is not `"Custom"`, and
+`Sources/Managers/TTSNetworkManager+Metadata.swift:220` picks Gemini's model list the same way while
+`fetchAvailableVoices` beside it switches on the identity — so one file now answers the same question
+two ways. `SettingsView.currentBaseURL` pairs `"OpenAI"` only with OpenAI's fixed endpoint and
+`"Gemini"` only with Google's, but that production pairing is not a manager API invariant. Canonical
+identity must become the manager's sole selector: Gemini gets native Gemini speech and its fixed model
+list; OpenAI and Custom get OpenAI-compatible speech and model discovery. A Custom endpoint may name
+any host, including Google's, without acquiring Gemini behavior.
+
+**Primary paths.**
+
+- `Sources/Managers/TTSNetworkManager.swift`
+- `Sources/Managers/TTSNetworkManager+Metadata.swift`
+- `Tests/TTSNetworkManagerTests.swift`
+- `Tests/TTSNetworkManagerAuthenticationTests.swift`
+- `Tests/TTSNetworkManagerMetadataProviderTests.swift`
+- `Tests/TTSNetworkManagerMetadataSourceTests.swift`
+- `README.md`
+
+**Required change.**
+
+1. Re-establish the production Settings pairing, then make it a manager-boundary invariant:
+   canonicalize `updateSettings`' `selectedProvider` with `APIKeyProvider` before storing or comparing
+   it, so a malformed direct caller follows the same safe OpenAI normalization as a malformed
+   persisted value. Do not rely on `SettingsView` as the only enforcer.
+2. Take `ProviderKind` and model-metadata dispatch from that canonical identity. Gemini alone
+   publishes the fixed Gemini model list; OpenAI and Custom use the OpenAI-compatible model-discovery
+   path. Reuse `APIKeyProvider(selectedProvider:)` rather than another hand-written string comparison.
+3. Correct the `README.md` network rule only after both branches are gone: provider identity is
+   normalized from persisted or caller-supplied input and never selected by an endpoint string. Name
+   both speech and model-metadata dispatch so a later reader does not reintroduce a sniff.
+
+**Non-goals and invariants.**
+
+- Preserve the request shapes for canonical OpenAI, Gemini, and Custom identities. In particular,
+  Custom remains OpenAI-compatible regardless of host; correcting a Custom model refresh that the
+  old host sniff misclassified as Gemini is intentional.
+- A malformed identity must normalize to OpenAI rather than recover a kind from its endpoint.
+- Keep `beginMetadataRequest`'s source guard ahead of the metadata dispatch.
+  `testMismatchedMetadataSourceCannotStartRequest` deliberately pairs each endpoint with the other
+  provider, and those calls must stay refused before any dispatch decides anything.
+
+**Validation and falsification.** Keep the existing OpenAI and Gemini endpoint, header, and payload
+assertions, including the authentication test that owns Gemini's header. Add a Custom endpoint whose
+host contains `generativelanguage.googleapis.com` and prove its speech remains OpenAI-compatible
+(Bearer authentication, no `alt=sse`, and an OpenAI-compatible body); exercise its model refresh too,
+proving it takes the Custom/OpenAI-compatible path rather than publishing Gemini's fixed list. Also
+prove a malformed direct identity normalizes to OpenAI. Mutation-test the replacement: resolving
+`"Gemini"` to `.openAICompatible`, resolving `"Custom"` from its URL, and retaining a host-based
+Gemini model branch must each fail a test.
+
+**Done when.** No provider-selection or model-metadata-dispatch branch uses an endpoint substring;
+endpoints remain request-construction, transport, and metadata-freshness inputs rather than identity
+selectors, and canonical identities retain their request kinds.
+
+### 56. Collapse the duplicated metadata completion helpers
+
+**Classification:** Non-blocking — two copies of one state transition
+
+**Depends on:** nothing
+
+**Purpose.** `Sources/Managers/TTSNetworkManager+Metadata.swift:128` and `:160` run the same switch
+over the same two request slots under the same token condition and make the same mutation. The only
+difference is that `completeMetadataRequest` reports whether it matched and `finishMetadataRequest`
+does not; five call sites use the discarding form. Two copies of a state transition that must stay
+identical is exactly the shape where they drift apart.
+
+**Primary paths.**
+
+- `Sources/Managers/TTSNetworkManager+Metadata.swift`
+- `Tests/TTSNetworkManagerMetadataTests.swift`
+
+**Required change.** Express the discarding form in terms of the reporting one, or give the two
+genuinely different behavior and say what it is. Do not leave two independent copies.
+
+**Non-goals and invariants.**
+
+- Keep both call shapes at their call sites; the abandoning paths read better without a discarded
+  result, and the publication guard needs the result.
+- Keep the token condition exactly as it is: a completion may only clear the request it belongs to.
+- Keep the token check and the clearing atomic in a single `stateQueue.sync`. `stateQueue` is
+  serial, so delegate to the other helper rather than calling it from inside a `sync` block.
+
+**Validation and falsification.** Add a focused model-discovery race through an abandonment path:
+start a request whose delayed completion takes a failure path (for example malformed JSON), start a
+replacement for the same source, release the old failure while the replacement owns the model slot,
+then complete the replacement successfully and prove its list publishes. A mutant that clears without
+matching the token must fail that test. Run the existing stale-publication tests as regression coverage
+for the reporting call shape. After the collapse there is one canonical token guard, not one per
+former helper; inspect the diff to establish the one-owner structure. The new test's three required
+mutants are deleting the token match, inverting that match, and refusing the replacement's matching
+completion; each must fail for the state-ownership reason the test documents.
+
+**Done when.** One implementation owns the transition and the gates still pass.
+
+### 57. Narrow the metadata settings snapshot to what production reads
+
+**Classification:** Non-blocking — a metadata-only accessor carries request inputs it does not need
+
+**Depends on:** nothing
+
+**Purpose.** `MetadataSettingsSnapshot` at `Sources/Managers/TTSNetworkManager.swift:90` carries
+`baseURL`, `apiKey`, `model` and `provider`, and `metadataSettingsSnapshot()` builds all four. Since
+Task 41 removed voice discovery, the only production reader is
+`metadataSettingsSnapshot().model` at `Sources/Managers/TTSNetworkManager+Metadata.swift:269`, which
+needs only the model to choose OpenAI's model-dependent voice list. The aggregate's other fields exist
+solely for three equality assertions in `Tests/AppStartupDependenciesTests.swift`. The metadata path
+therefore receives the saved API key, endpoint, and provider only to discard them. The startup tests
+also currently do not observe the configured voice: this aggregate has no voice field, despite the
+startup rule requiring the initial request inputs to be verified.
+
+**Primary paths.**
+
+- `Sources/Managers/TTSNetworkManager.swift`
+- `Sources/Managers/TTSNetworkManager+Metadata.swift`
+- `Tests/AppStartupDependenciesTests.swift`
+
+**Required change.** Remove the metadata aggregate. Give voice-catalog selection a model-only read
+guarded by `stateQueue`; it must not capture an endpoint, provider, or credential, and its documentation
+comment must state that contract. Move the startup assertions to `requestSettingsSnapshot()`, the
+production seam that captures every speech request input, and assert its base URL, API key, model,
+voice, and provider identity field-by-field. This retains proof that startup and migration feed the
+actual request inputs while removing credential exposure from a metadata-only accessor.
+
+**Non-goals and invariants.**
+
+- Do not weaken the startup regressions: default and injected graphs must prove their manager starts
+  with the persisted endpoint, API key, model, voice, and provider identity, without reading developer
+  configuration.
+- Keep every read of manager state under `stateQueue`.
+- Do not reintroduce a settings read into the voice path beyond the model it already needs; Phase 3's
+  rule forbids rebuilding a request's inputs from mutable current settings.
+
+**Validation and falsification.** Prove by search that no metadata-only read exposes the API key,
+endpoint, or provider. The startup assertions must still fail under a mutant that seeds the manager
+from the developer's real `UserDefaults`, one that starts every provider on OpenAI's endpoint, and one
+that drops the persisted voice or replaces it with a provider default.
+
+**Done when.** Metadata reads only the model it needs and never exposes a credential; startup
+regressions use the production request-input snapshot to verify every initial speech input, including
+voice.
 
 ### Phase 5 mandatory gap review
 
