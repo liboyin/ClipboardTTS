@@ -12,7 +12,7 @@ Task 14 remains intentionally removed. Nothing in this plan reinstates the state
 
 ## Current status
 
-- Twelve tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54–57. Task 36 was withdrawn
+- Eleven tasks are active in Phase 5: 38, 40, 42, 44–46, 48, 52, and 54–56. Task 36 was withdrawn
   when voice selection left the menu-bar drop-down. Phase 4's gap review has now run over its
   complete range and found no Phase 4 gap other than Task 42; the phase closes once that finding
   has an explicit user disposition. Phase 5 then addresses every outstanding review gap, and the
@@ -95,7 +95,7 @@ inside a later task.
 
 ## Work map
 
-Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54–57: Task 38 is blocking; the rest are
+Phase 5 contains Tasks 38, 40, 42, 44–46, 48, 52, and 54–56: Task 38 is blocking; the rest are
 non-blocking. It begins only after Phase 4 closes. Within Phase 5 none of the tasks depends on
 another, so they may be executed in any order, one self-contained commit each. No final-sweep work
 may begin until every one of them has landed or been explicitly deferred by the user.
@@ -321,9 +321,9 @@ finding.
 ## Phase 5 — Resolve full-project review gaps
 
 This phase contains the outstanding gaps identified after the four original remediation phases. It
-starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54–57
-are non-blocking. Tasks 55–57 were raised on 2026-09-04 from Task 41's execution rather than from a
-phase review; they are simplifications its removals exposed, not defects it introduced. Each task
+starts only after Phase 4 closes. Task 38 is blocking; Tasks 40, 42, 44–46, 48, 52, and 54–56
+are non-blocking. Tasks 55 and 56 were raised on 2026-09-04 from Task 41's execution rather than from
+a phase review; they are simplifications its removals exposed, not defects it introduced. Each task
 remains a separate commit and must follow the working rules above.
 
 See [README.md](README.md#design-assumptions) for the Gemini early-stop completion rule that binds
@@ -385,7 +385,7 @@ message, and documentation, and a mutant that reverses the decision fails a test
 
 **Depends on:** nothing
 
-**Purpose.** `Sources/Managers/TTSNetworkManager.swift:375` applies the transport rule to a redirect
+**Purpose.** `Sources/Managers/TTSNetworkManager.swift:365` applies the transport rule to a redirect
 target but says nothing about its origin, and the Gemini key travels in a custom header. Measured on
 this toolchain against loopback servers: `URLSession` strips `Authorization` from a redirected
 request but replays `x-goog-api-key` verbatim, so a redirect away from
@@ -433,7 +433,7 @@ configured, and a redirect that strips the credential reports itself rather than
 
 **Depends on:** nothing
 
-**Purpose.** `Sources/Managers/TTSNetworkManager.swift:180` invalidates the metadata scope when
+**Purpose.** `Sources/Managers/TTSNetworkManager.swift:172` invalidates the metadata scope when
 either the base URL or the selected provider changes. Removing the provider half passes all 208
 tests, re-verified against the suite as it stands after the unreachable metadata paths were
 retired. The condition is reachable: OpenAI's fixed endpoint and Custom's default `apiBaseURL`
@@ -911,53 +911,6 @@ mutants are deleting the token match, inverting that match, and refusing the rep
 completion; each must fail for the state-ownership reason the test documents.
 
 **Done when.** One implementation owns the transition and the gates still pass.
-
-### 57. Narrow the metadata settings snapshot to what production reads
-
-**Classification:** Non-blocking — a metadata-only accessor carries request inputs it does not need
-
-**Depends on:** nothing
-
-**Purpose.** `MetadataSettingsSnapshot` at `Sources/Managers/TTSNetworkManager.swift:90` carries
-`baseURL`, `apiKey`, `model` and `provider`, and `metadataSettingsSnapshot()` builds all four. Since
-Task 41 removed voice discovery, the only production reader is
-`metadataSettingsSnapshot().model` at `Sources/Managers/TTSNetworkManager+Metadata.swift:269`, which
-needs only the model to choose OpenAI's model-dependent voice list. The aggregate's other fields exist
-solely for three equality assertions in `Tests/AppStartupDependenciesTests.swift`. The metadata path
-therefore receives the saved API key, endpoint, and provider only to discard them. The startup tests
-also currently do not observe the configured voice: this aggregate has no voice field, despite the
-startup rule requiring the initial request inputs to be verified.
-
-**Primary paths.**
-
-- `Sources/Managers/TTSNetworkManager.swift`
-- `Sources/Managers/TTSNetworkManager+Metadata.swift`
-- `Tests/AppStartupDependenciesTests.swift`
-
-**Required change.** Remove the metadata aggregate. Give voice-catalog selection a model-only read
-guarded by `stateQueue`; it must not capture an endpoint, provider, or credential, and its documentation
-comment must state that contract. Move the startup assertions to `requestSettingsSnapshot()`, the
-production seam that captures every speech request input, and assert its base URL, API key, model,
-voice, and provider identity field-by-field. This retains proof that startup and migration feed the
-actual request inputs while removing credential exposure from a metadata-only accessor.
-
-**Non-goals and invariants.**
-
-- Do not weaken the startup regressions: default and injected graphs must prove their manager starts
-  with the persisted endpoint, API key, model, voice, and provider identity, without reading developer
-  configuration.
-- Keep every read of manager state under `stateQueue`.
-- Do not reintroduce a settings read into the voice path beyond the model it already needs; Phase 3's
-  rule forbids rebuilding a request's inputs from mutable current settings.
-
-**Validation and falsification.** Prove by search that no metadata-only read exposes the API key,
-endpoint, or provider. The startup assertions must still fail under a mutant that seeds the manager
-from the developer's real `UserDefaults`, one that starts every provider on OpenAI's endpoint, and one
-that drops the persisted voice or replaces it with a provider default.
-
-**Done when.** Metadata reads only the model it needs and never exposes a credential; startup
-regressions use the production request-input snapshot to verify every initial speech input, including
-voice.
 
 ### Phase 5 mandatory gap review
 

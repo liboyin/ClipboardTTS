@@ -266,7 +266,7 @@ extension TTSNetworkManager {
         switch selectedProvider {
         case "OpenAI":
             publishMetadata(
-                openAIVoices(for: metadataSettingsSnapshot().model),
+                openAIVoices(for: currentModel()),
                 for: .voices,
                 token: token
             )

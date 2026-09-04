@@ -86,14 +86,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         let provider: ProviderKind
     }
 
-    /// The selected source and credentials needed to refresh provider metadata.
-    struct MetadataSettingsSnapshot: Equatable {
-        let baseURL: String
-        let apiKey: String
-        let model: String
-        let provider: String
-    }
-
     /// State that belongs exclusively to the active URL session task and is guarded by `stateQueue`.
     struct ActiveRequestContext {
         let task: URLSessionDataTask
@@ -217,16 +209,14 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
-    /// Captures the selected source and credentials required to refresh metadata without changing request settings.
-    func metadataSettingsSnapshot() -> MetadataSettingsSnapshot {
-        stateQueue.sync {
-            MetadataSettingsSnapshot(
-                baseURL: baseURL,
-                apiKey: apiKey,
-                model: model,
-                provider: selectedMetadataProvider
-            )
-        }
+    /// Returns the model that future requests will use.
+    ///
+    /// Deliberately reads the model alone: the OpenAI voice catalog is the only caller, and its
+    /// choice depends on nothing else. Handing it an aggregate would deliver the saved API key,
+    /// endpoint, and provider identity to a metadata-only path that would discard all three, so a
+    /// credential must not be added back here.
+    func currentModel() -> String {
+        stateQueue.sync { model }
     }
 
     /// Captures the immutable settings one request attempt owns from start to finish.

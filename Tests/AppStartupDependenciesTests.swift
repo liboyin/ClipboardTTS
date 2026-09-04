@@ -57,13 +57,14 @@ final class AppStartupDependenciesTests: XCTestCase {
         XCTAssertFalse(defaultDependencies.defaults === developerDefaults)
         XCTAssertTrue(defaultDependencies.secretStore is InMemorySecretStore)
         XCTAssertTrue(defaultDependencies.networkManager.isCurrentProvider("OpenAI"))
-        XCTAssertEqual(
-            defaultDependencies.networkManager.metadataSettingsSnapshot(),
-            .init(
+        assertRequestInputs(
+            defaultDependencies.networkManager,
+            match: .init(
                 baseURL: "https://api.openai.com/v1/audio/speech",
                 apiKey: "",
                 model: "tts-1",
-                provider: "OpenAI"
+                voice: "alloy",
+                provider: .openAICompatible
             )
         )
         XCTAssertEqual(defaultDependencies.audioPlayer.sampleRate, AudioPlayerManager.defaultSampleRate)
@@ -80,13 +81,14 @@ final class AppStartupDependenciesTests: XCTestCase {
         )
         XCTAssertEqual(hostedSecretStore.storedSecrets, [.custom: "hosted-legacy-credential"])
         XCTAssertTrue(dependencies.networkManager.isCurrentProvider("Custom"))
-        XCTAssertEqual(
-            dependencies.networkManager.metadataSettingsSnapshot(),
-            .init(
+        assertRequestInputs(
+            dependencies.networkManager,
+            match: .init(
                 baseURL: "https://hosted.example/v1/audio/speech",
                 apiKey: "hosted-legacy-credential",
                 model: "hosted-model",
-                provider: "Custom"
+                voice: "hosted-voice",
+                provider: .custom
             )
         )
         XCTAssertEqual(dependencies.audioPlayer.sampleRate, 16_000)
@@ -143,13 +145,14 @@ final class AppStartupDependenciesTests: XCTestCase {
         )
         XCTAssertEqual(productionSecretStore.storedSecrets, [.custom: "production-legacy-credential"])
         XCTAssertTrue(dependencies.networkManager.isCurrentProvider("Custom"))
-        XCTAssertEqual(
-            dependencies.networkManager.metadataSettingsSnapshot(),
-            .init(
+        assertRequestInputs(
+            dependencies.networkManager,
+            match: .init(
                 baseURL: "https://production.example/v1/audio/speech",
                 apiKey: "production-legacy-credential",
                 model: "production-model",
-                provider: "Custom"
+                voice: "production-voice",
+                provider: .custom
             )
         )
         XCTAssertEqual(dependencies.audioPlayer.sampleRate, 12_000)
@@ -192,6 +195,25 @@ final class AppStartupDependenciesTests: XCTestCase {
                 "Seeded startup value for \(key) must not reach the app's own defaults domain."
             )
         }
+    }
+
+    /// Asserts every input the manager would put into its first speech request.
+    ///
+    /// WHY: startup decides which endpoint, credential, model, voice, and provider kind the user's
+    /// first Speak actually sends, so these regressions read the production request seam rather
+    /// than a narrower accessor. The expectation is a `RequestSettings` so a later input added to
+    /// that seam cannot compile until startup proves it too, and the fields are compared one at a
+    /// time so a failure names the input that regressed.
+    private func assertRequestInputs(_ manager: TTSNetworkManager,
+                                     match expected: TTSNetworkManager.RequestSettings,
+                                     file: StaticString = #filePath,
+                                     line: UInt = #line) {
+        let settings = manager.requestSettingsSnapshot()
+        XCTAssertEqual(settings.baseURL, expected.baseURL, "Startup must request the persisted endpoint.", file: file, line: line)
+        XCTAssertEqual(settings.apiKey, expected.apiKey, "Startup must request with the secured key.", file: file, line: line)
+        XCTAssertEqual(settings.model, expected.model, "Startup must request the persisted model.", file: file, line: line)
+        XCTAssertEqual(settings.voice, expected.voice, "Startup must request the persisted voice.", file: file, line: line)
+        XCTAssertEqual(settings.provider, expected.provider, "Startup must request as the persisted provider.", file: file, line: line)
     }
 
     /// Creates test-owned settings storage that outlives no test and reaches no shared domain.
