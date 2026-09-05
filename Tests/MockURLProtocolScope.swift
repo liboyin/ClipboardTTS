@@ -1,32 +1,5 @@
 import Foundation
-
-/// Everything one test scope owns while it is open, plus the accounting its shutdown reads.
-private struct TestState {
-    var requestHandler: MockURLProtocol.RequestHandler?
-    var expectedUnhandledRequestCount = 0
-    var unhandledRequestCount = 0
-    var activeLoadCount = 0
-    var activeManagerConstructionCount = 0
-    var audioDeliveryScopes: [AudioDeliveryScope] = []
-    var hasStartedAudioDeliveryRelease = false
-    var hasReleasedAudioDelivery = false
-    var hasRevokedAudioDelivery = false
-    var pendingAudioDeliveryDrainCount = 0
-    var hasScheduledAudioDeliveryDrains = false
-    var isClosing = false
-    var sessionRegistrations: [SessionRegistration] = []
-}
-
-private struct SessionRegistration {
-    let session: URLSession
-    let delegate: AnyObject?
-}
-
-private struct AudioDeliveryScope {
-    let queue: DispatchQueue
-    let releasePendingDelivery: () -> Void
-    let finishRevocation: () -> Void
-}
+import os
 
 /// The shared scope registry, private to this file so the URL-protocol half can reach it only
 /// through the claim and finish seam and can never mutate scope accounting directly.
@@ -40,8 +13,45 @@ private enum ScopeStorage {
         label: "com.clipboardtts.tests.mockurlprotocol.revocation",
         attributes: .concurrent
     )
-    static var testStates: [String: TestState] = [:]
-    static var activeTestIdentifier: String?
+    /// Confinement invariant: `condition` remains the sole mutual-exclusion and wait/broadcast
+    /// primitive for scope state, so every `registry` access below is made while it is held. The
+    /// box exists because `NSCondition` is a manual lock the compiler cannot see: it gives the
+    /// storage a checked `Sendable` boundary without an unchecked conformance, and because it is
+    /// only ever entered under `condition` it is uncontended and adds no second ordering to reason
+    /// about. Swift offers no checked-`Sendable` condition variable at this deployment target, so
+    /// the wait/broadcast half of the contract stays with `NSCondition`.
+    static let registry = OSAllocatedUnfairLock(initialState: ScopeRegistry())
+
+    /// Reads a value out of the scope registry. The caller must already hold `condition`.
+    static func readRegistry<Value: Sendable>(_ body: @Sendable (ScopeRegistry) -> Value) -> Value {
+        registry.withLock { body($0) }
+    }
+
+    /// Updates the scope registry in place. The caller must already hold `condition`.
+    static func updateRegistry(_ body: @Sendable (inout ScopeRegistry) -> Void) {
+        registry.withLock(body)
+    }
+
+    /// The scope new work joins when a caller names none. The caller must already hold `condition`.
+    static var activeTestIdentifier: String? {
+        get { readRegistry(\.activeTestIdentifier) }
+        set { updateRegistry { $0.activeTestIdentifier = newValue } }
+    }
+
+    /// Reads one scope's state, or `nil` when the scope is not registered.
+    static func state(for testIdentifier: String) -> TestState? {
+        readRegistry { $0.testStates[testIdentifier] }
+    }
+
+    /// Replaces one scope's state.
+    static func setState(_ state: TestState, for testIdentifier: String) {
+        updateRegistry { $0.testStates[testIdentifier] = state }
+    }
+
+    /// Deregisters a scope that has finished every shutdown step it owed.
+    static func removeState(for testIdentifier: String) {
+        updateRegistry { $0.testStates.removeValue(forKey: testIdentifier) }
+    }
 }
 
 extension MockURLProtocol {
@@ -64,7 +74,7 @@ extension MockURLProtocol {
 
         let testIdentifier = UUID().uuidString
         ScopeStorage.activeTestIdentifier = testIdentifier
-        ScopeStorage.testStates[testIdentifier] = TestState()
+        ScopeStorage.setState(TestState(), for: testIdentifier)
         return testIdentifier
     }
 
@@ -85,11 +95,11 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         guard let activeTestIdentifier = ScopeStorage.activeTestIdentifier,
-              var state = ScopeStorage.testStates[activeTestIdentifier] else {
+              var state = ScopeStorage.state(for: activeTestIdentifier) else {
             preconditionFailure("MockURLProtocol test scope has not been started.")
         }
         state.requestHandler = handler
-        ScopeStorage.testStates[activeTestIdentifier] = state
+        ScopeStorage.setState(state, for: activeTestIdentifier)
     }
 
     /// Removes the response handler so a request without an explicit mock fails locally.
@@ -98,9 +108,9 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         guard let activeTestIdentifier = ScopeStorage.activeTestIdentifier,
-              var state = ScopeStorage.testStates[activeTestIdentifier] else { return }
+              var state = ScopeStorage.state(for: activeTestIdentifier) else { return }
         state.requestHandler = nil
-        ScopeStorage.testStates[activeTestIdentifier] = state
+        ScopeStorage.setState(state, for: activeTestIdentifier)
     }
 
     /// Declares the number of deliberately unhandled requests expected by the current test.
@@ -109,27 +119,29 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         guard let activeTestIdentifier = ScopeStorage.activeTestIdentifier,
-              var state = ScopeStorage.testStates[activeTestIdentifier] else {
+              var state = ScopeStorage.state(for: activeTestIdentifier) else {
             preconditionFailure("MockURLProtocol test scope has not been started.")
         }
         state.expectedUnhandledRequestCount += count
-        ScopeStorage.testStates[activeTestIdentifier] = state
+        ScopeStorage.setState(state, for: activeTestIdentifier)
     }
 
     /// Registers a session so teardown can invalidate it before releasing the test scope.
-    static func register(session: URLSession, delegate: AnyObject? = nil, forTestIdentifier testIdentifier: String) {
+    static func register(session: URLSession,
+                         delegate: (any Sendable)? = nil,
+                         forTestIdentifier testIdentifier: String) {
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var state = ScopeStorage.state(for: testIdentifier) else { return }
         guard !state.isClosing else {
             state.unhandledRequestCount += 1
-            ScopeStorage.testStates[testIdentifier] = state
+            ScopeStorage.setState(state, for: testIdentifier)
             session.invalidateAndCancel()
             return
         }
         state.sessionRegistrations.append(SessionRegistration(session: session, delegate: delegate))
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
     }
 
     /// Records that a registered session can no longer begin new protocol loads.
@@ -137,9 +149,9 @@ extension MockURLProtocol {
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var state = ScopeStorage.state(for: testIdentifier) else { return }
         state.sessionRegistrations.removeAll { $0.session === session }
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
         ScopeStorage.condition.broadcast()
     }
 
@@ -149,12 +161,12 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         guard let testIdentifier = ScopeStorage.activeTestIdentifier,
-              var state = ScopeStorage.testStates[testIdentifier],
+              var state = ScopeStorage.state(for: testIdentifier),
               !state.isClosing else {
             preconditionFailure("MockURLProtocol test scope has not been started.")
         }
         state.activeManagerConstructionCount += 1
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
         return testIdentifier
     }
 
@@ -163,9 +175,9 @@ extension MockURLProtocol {
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var state = ScopeStorage.state(for: testIdentifier) else { return }
         state.activeManagerConstructionCount -= 1
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
         ScopeStorage.condition.broadcast()
     }
 
@@ -175,13 +187,13 @@ extension MockURLProtocol {
     /// waits for an in-flight client handler. `finishRevocation` runs on the tearing-down thread
     /// afterwards, where the owner's terminal state can be read and restored without a hop.
     static func register(audioDeliveryQueue: DispatchQueue,
-                         releasePendingDelivery: @escaping () -> Void,
-                         finishRevocation: @escaping () -> Void,
+                         releasePendingDelivery: @escaping @Sendable () -> Void,
+                         finishRevocation: @escaping @Sendable () -> Void,
                          forTestIdentifier testIdentifier: String) {
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var state = ScopeStorage.state(for: testIdentifier) else { return }
         state.audioDeliveryScopes.append(
             AudioDeliveryScope(
                 queue: audioDeliveryQueue,
@@ -189,7 +201,7 @@ extension MockURLProtocol {
                 finishRevocation: finishRevocation
             )
         )
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
     }
 
     /// Claims one protocol load for the scope that owns it, returning the handler that load may use.
@@ -201,14 +213,14 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         let testIdentifier = requestedTestIdentifier ?? ScopeStorage.activeTestIdentifier
-        guard let testIdentifier, var state = ScopeStorage.testStates[testIdentifier] else { return nil }
+        guard let testIdentifier, var state = ScopeStorage.state(for: testIdentifier) else { return nil }
 
         state.activeLoadCount += 1
         let requestHandler = state.isClosing ? nil : state.requestHandler
         if requestHandler == nil {
             state.unhandledRequestCount += 1
         }
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
         return ClaimedLoad(testIdentifier: testIdentifier, requestHandler: requestHandler)
     }
 
@@ -217,23 +229,23 @@ extension MockURLProtocol {
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var state = ScopeStorage.state(for: testIdentifier) else { return }
         state.activeLoadCount -= 1
-        ScopeStorage.testStates[testIdentifier] = state
+        ScopeStorage.setState(state, for: testIdentifier)
         ScopeStorage.condition.broadcast()
     }
 
     /// Invalidates a test's sessions, revokes pending delivery, drains owned queues, and closes the scope.
     static func endTest(identifier: String, timeout: TimeInterval = 2.0) -> TestEndResult {
         ScopeStorage.condition.lock()
-        guard var state = ScopeStorage.testStates[identifier] else {
+        guard var state = ScopeStorage.state(for: identifier) else {
             ScopeStorage.condition.unlock()
             return TestEndResult(expectedUnhandledRequestCount: 0, observedUnhandledRequestCount: 0, didQuiesce: true)
         }
         state.requestHandler = nil
         state.isClosing = true
         let sessions = state.sessionRegistrations.map(\.session)
-        ScopeStorage.testStates[identifier] = state
+        ScopeStorage.setState(state, for: identifier)
         ScopeStorage.condition.unlock()
 
         sessions.forEach { $0.invalidateAndCancel() }
@@ -241,13 +253,13 @@ extension MockURLProtocol {
         ScopeStorage.condition.lock()
         advanceClosingScope(identifier: identifier, deadline: Date().addingTimeInterval(timeout))
 
-        guard let completedState = ScopeStorage.testStates[identifier] else {
+        guard let completedState = ScopeStorage.state(for: identifier) else {
             ScopeStorage.condition.unlock()
             return TestEndResult(expectedUnhandledRequestCount: 0, observedUnhandledRequestCount: 0, didQuiesce: true)
         }
         let didQuiesce = isQuiescent(completedState)
         if didQuiesce {
-            ScopeStorage.testStates.removeValue(forKey: identifier)
+            ScopeStorage.removeState(for: identifier)
         }
         if ScopeStorage.activeTestIdentifier == identifier {
             ScopeStorage.activeTestIdentifier = nil
@@ -273,8 +285,8 @@ extension MockURLProtocol {
         defer { ScopeStorage.condition.unlock() }
 
         advanceClosingScope(identifier: identifier, deadline: Date().addingTimeInterval(timeout))
-        if let state = ScopeStorage.testStates[identifier], !isQuiescent(state) { return false }
-        ScopeStorage.testStates.removeValue(forKey: identifier)
+        if let state = ScopeStorage.state(for: identifier), !isQuiescent(state) { return false }
+        ScopeStorage.removeState(for: identifier)
         if ScopeStorage.activeTestIdentifier == identifier {
             ScopeStorage.activeTestIdentifier = nil
         }
@@ -289,7 +301,7 @@ extension MockURLProtocol {
 /// caller indefinitely on an owner that never releases. Steps that call into an owner unlock
 /// around the call.
 private func advanceClosingScope(identifier: String, deadline: Date) {
-    while Date() < deadline, let state = ScopeStorage.testStates[identifier] {
+    while Date() < deadline, let state = ScopeStorage.state(for: identifier) {
         if hasUndrainedSessionWork(state) {
             waitForScopeChange(until: deadline)
         } else if !state.hasStartedAudioDeliveryRelease {
@@ -313,21 +325,6 @@ private func waitForScopeChange(until deadline: Date) {
     ScopeStorage.condition.wait(until: deadline)
 }
 
-/// Returns whether a closing scope has finished every shutdown step it owes.
-private func isQuiescent(_ state: TestState) -> Bool {
-    !hasUndrainedSessionWork(state) &&
-        state.hasRevokedAudioDelivery &&
-        state.hasScheduledAudioDeliveryDrains &&
-        state.pendingAudioDeliveryDrainCount == 0
-}
-
-/// Returns whether session, protocol-load, or manager-initialization work can still enqueue delivery.
-private func hasUndrainedSessionWork(_ state: TestState) -> Bool {
-    state.activeLoadCount > 0 ||
-        state.activeManagerConstructionCount > 0 ||
-        !state.sessionRegistrations.isEmpty
-}
-
 /// Starts revoking all manager-owned delivery generations, off the thread that is tearing down.
 ///
 /// This half waits for any in-flight client handler to return, so the caller must be free to stop
@@ -338,15 +335,15 @@ private func startAudioDeliveryRelease(for testIdentifier: String, state: TestSt
     var updatedState = state
     updatedState.hasStartedAudioDeliveryRelease = true
     let releases = state.audioDeliveryScopes.map(\.releasePendingDelivery)
-    ScopeStorage.testStates[testIdentifier] = updatedState
+    ScopeStorage.setState(updatedState, for: testIdentifier)
     ScopeStorage.revocationQueue.async {
         releases.forEach { $0() }
         ScopeStorage.condition.lock()
         defer { ScopeStorage.condition.unlock() }
 
-        guard var releasedState = ScopeStorage.testStates[testIdentifier] else { return }
+        guard var releasedState = ScopeStorage.state(for: testIdentifier) else { return }
         releasedState.hasReleasedAudioDelivery = true
-        ScopeStorage.testStates[testIdentifier] = releasedState
+        ScopeStorage.setState(releasedState, for: testIdentifier)
         ScopeStorage.condition.broadcast()
     }
 }
@@ -362,7 +359,7 @@ private func finishAudioDeliveryRevocation(for testIdentifier: String, state: Te
     var updatedState = state
     updatedState.hasRevokedAudioDelivery = true
     let revocations = state.audioDeliveryScopes.map(\.finishRevocation)
-    ScopeStorage.testStates[testIdentifier] = updatedState
+    ScopeStorage.setState(updatedState, for: testIdentifier)
     ScopeStorage.condition.unlock()
     revocations.forEach { $0() }
     ScopeStorage.condition.lock()
@@ -375,7 +372,7 @@ private func scheduleAudioDeliveryDrains(for testIdentifier: String, state: Test
     updatedState.hasScheduledAudioDeliveryDrains = true
     updatedState.pendingAudioDeliveryDrainCount = state.audioDeliveryScopes.count
     let queues = state.audioDeliveryScopes.map(\.queue)
-    ScopeStorage.testStates[testIdentifier] = updatedState
+    ScopeStorage.setState(updatedState, for: testIdentifier)
     ScopeStorage.condition.unlock()
     queues.forEach { queue in
         queue.async {
@@ -390,8 +387,8 @@ private func audioDeliveryQueueDidDrain(forTestIdentifier testIdentifier: String
     ScopeStorage.condition.lock()
     defer { ScopeStorage.condition.unlock() }
 
-    guard var state = ScopeStorage.testStates[testIdentifier] else { return }
+    guard var state = ScopeStorage.state(for: testIdentifier) else { return }
     state.pendingAudioDeliveryDrainCount -= 1
-    ScopeStorage.testStates[testIdentifier] = state
+    ScopeStorage.setState(state, for: testIdentifier)
     ScopeStorage.condition.broadcast()
 }

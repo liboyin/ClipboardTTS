@@ -42,5 +42,9 @@ targets:
     sources: [Tests]
     dependencies:
       - target: ClipboardTTSApp
+    # The same complete concurrency checking the app target is held to, so `./check-coverage.sh`
+    # compiles the test bundle under it on every run rather than leaving the check to a command
+    # someone has to remember.
     settings:
       GENERATE_INFOPLIST_FILE: YES
+      SWIFT_STRICT_CONCURRENCY: complete

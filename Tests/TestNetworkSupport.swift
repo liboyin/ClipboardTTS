@@ -97,7 +97,7 @@ enum TestNetworkFactory {
 }
 
 /// Signals when a factory-created session has invalidated, completing its test scope's barrier.
-private final class TestSessionDelegate: NSObject, URLSessionDelegate {
+private final class TestSessionDelegate: NSObject, URLSessionDelegate, Sendable {
     private let testIdentifier: String
 
     init(testIdentifier: String) {
@@ -345,32 +345,25 @@ final class MockURLProtocolConstructionTests: XCTestCase {
         let endResult = MockURLProtocol.endTest(identifier: testIdentifier, timeout: 0)
         XCTAssertFalse(endResult.didQuiesce)
 
-        let stepLock = NSLock()
-        var revocationSteps: [String] = []
+        let revocationSteps = LockedValue<[String]>([])
         MockURLProtocol.register(
             audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.late-delivery-owner"),
             releasePendingDelivery: {
-                stepLock.lock()
-                revocationSteps.append("release")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("release") }
             },
             finishRevocation: {
-                stepLock.lock()
-                revocationSteps.append("finish")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("finish") }
             },
             forTestIdentifier: testIdentifier
         )
         MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier)
         MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
 
-        stepLock.lock()
         XCTAssertEqual(
-            revocationSteps,
+            revocationSteps.value,
             ["release", "finish"],
             "A late-registered owner must be released before teardown finishes its revocation."
         )
-        stepLock.unlock()
     }
 }
 

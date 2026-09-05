@@ -58,12 +58,12 @@ final class MockURLProtocolTests: MockURLProtocolTestCase {
     func testTearDownWaitsForAnInFlightHandlerBeforeReleasingTheTestScope() {
         let requestStarted = expectation(description: "Mock request started")
         let releaseHandler = DispatchSemaphore(value: 0)
-        let handlerFinished = LockedFlag()
+        let handlerFinished = LockedValue(false)
 
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseHandler.wait(timeout: .now() + 1.0)
-            handlerFinished.set()
+            handlerFinished.withValue { $0 = true }
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
 
@@ -81,12 +81,12 @@ final class MockURLProtocolTests: MockURLProtocolTestCase {
     }
 
     func testTearDownInvalidatesSessionsBeforeADeferredTaskCanStartLoading() {
-        let handlerWasCalled = LockedFlag()
+        let handlerWasCalled = LockedValue(false)
         let resumeTask = DispatchSemaphore(value: 0)
         let resumeAttempted = DispatchSemaphore(value: 0)
 
         MockURLProtocol.installRequestHandler { request in
-            handlerWasCalled.set()
+            handlerWasCalled.withValue { $0 = true }
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
         }
 
@@ -104,22 +104,5 @@ final class MockURLProtocolTests: MockURLProtocolTestCase {
             Thread.sleep(forTimeInterval: 0.1)
             XCTAssertFalse(handlerWasCalled.value)
         }
-    }
-}
-
-private final class LockedFlag {
-    private let lock = NSLock()
-    private var storedValue = false
-
-    var value: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedValue
-    }
-
-    func set() {
-        lock.lock()
-        storedValue = true
-        lock.unlock()
     }
 }

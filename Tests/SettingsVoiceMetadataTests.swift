@@ -2,6 +2,10 @@ import XCTest
 @testable import ClipboardTTSApp
 
 /// Covers which suggestions a provider's Settings form may offer and how its selection stays valid.
+///
+/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
+/// runs on the main actor.
+@MainActor
 final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
     func testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog() {
         // WHY: Settings is where a user types a voice, and since the menu stopped offering one it is

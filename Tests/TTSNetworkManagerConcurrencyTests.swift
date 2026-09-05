@@ -30,12 +30,9 @@ final class TTSNetworkManagerConcurrencyTests: MockURLProtocolTestCase {
         completedDeliveries.expectedFulfillmentCount = 2
         let releaseFirstDelivery = DispatchSemaphore(value: 0)
         let secondDeliveryFinished = DispatchSemaphore(value: 0)
-        let deliveryLock = NSLock()
-        var deliveredChunks: [Data] = []
+        let deliveredChunks = LockedValue<[Data]>([])
         manager.streamTTS(text: "concurrent entry") { data in
-            deliveryLock.lock()
-            deliveredChunks.append(data)
-            deliveryLock.unlock()
+            deliveredChunks.withValue { $0.append(data) }
             if data == Data([1]) {
                 firstDeliveryStarted.fulfill()
                 _ = releaseFirstDelivery.wait(timeout: .now() + 2.0)
@@ -65,9 +62,7 @@ final class TTSNetworkManagerConcurrencyTests: MockURLProtocolTestCase {
             releaseResponse.signal()
         }
 
-        deliveryLock.lock()
-        XCTAssertEqual(deliveredChunks, [Data([1]), Data([2])])
-        deliveryLock.unlock()
+        XCTAssertEqual(deliveredChunks.value, [Data([1]), Data([2])])
     }
 
     func testGeminiCompletionKeepsAnAcceptedFinalEventWhenAudioDeliveryIsBlocked() {
@@ -155,14 +150,11 @@ extension TTSNetworkManagerConcurrencyTests {
 
         let firstDelivery = expectation(description: "First handoff stops the stream")
         let deliveryQueueDrained = expectation(description: "Queued handoffs have been considered")
-        let deliveryLock = NSLock()
-        var delivered: [Data] = []
+        let delivered = LockedValue<[Data]>([])
         let firstChunk = Data([0, 1])
         let secondChunk = Data([2, 3])
         manager.streamTTS(text: "stop queued handoffs") { data in
-            deliveryLock.lock()
-            delivered.append(data)
-            deliveryLock.unlock()
+            delivered.withValue { $0.append(data) }
             if data == firstChunk {
                 manager.stopStreaming()
                 firstDelivery.fulfill()
@@ -180,9 +172,7 @@ extension TTSNetworkManagerConcurrencyTests {
         audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
         wait(for: [firstDelivery, deliveryQueueDrained], timeout: 1.0)
 
-        deliveryLock.lock()
-        XCTAssertEqual(delivered, [firstChunk])
-        deliveryLock.unlock()
+        XCTAssertEqual(delivered.value, [firstChunk])
     }
 
     func testQueuedPCMHandoffsAfterAReentrantReplacementAreRevokedBeforeDelivery() {
@@ -202,13 +192,12 @@ extension TTSNetworkManagerConcurrencyTests {
         let firstRequestStarted = expectation(description: "Initial request started")
         let replacementRequestStarted = expectation(description: "Replacement request started")
         let releaseFirstResponse = DispatchSemaphore(value: 0)
-        let requestLock = NSLock()
-        var requestCount = 0
+        let requestCount = LockedValue(0)
         MockURLProtocol.installRequestHandler { request in
-            requestLock.lock()
-            requestCount += 1
-            let isInitialRequest = requestCount == 1
-            requestLock.unlock()
+            let isInitialRequest = requestCount.withValue { count -> Bool in
+                count += 1
+                return count == 1
+            }
             if isInitialRequest {
                 firstRequestStarted.fulfill()
                 _ = releaseFirstResponse.wait(timeout: .now() + 2.0)
@@ -221,14 +210,11 @@ extension TTSNetworkManagerConcurrencyTests {
 
         let firstDelivery = expectation(description: "First handoff starts replacement")
         let deliveryQueueDrained = expectation(description: "Queued handoffs have been considered")
-        let deliveryLock = NSLock()
-        var delivered: [Data] = []
+        let delivered = LockedValue<[Data]>([])
         let firstChunk = Data([4, 5])
         let secondChunk = Data([6, 7])
         manager.streamTTS(text: "initial stream") { data in
-            deliveryLock.lock()
-            delivered.append(data)
-            deliveryLock.unlock()
+            delivered.withValue { $0.append(data) }
             if data == firstChunk {
                 manager.streamTTS(text: "replacement stream") { _ in
                     XCTFail("The replacement response supplies no PCM and must not invoke its handler.")
@@ -250,9 +236,7 @@ extension TTSNetworkManagerConcurrencyTests {
         releaseFirstResponse.signal()
         wait(for: [replacementRequestStarted], timeout: 1.0)
 
-        deliveryLock.lock()
-        XCTAssertEqual(delivered, [firstChunk])
-        deliveryLock.unlock()
+        XCTAssertEqual(delivered.value, [firstChunk])
     }
 
     func testQueuedGeminiEventsAfterAReentrantStopAreRevokedBeforeDelivery() {
@@ -286,14 +270,11 @@ extension TTSNetworkManagerConcurrencyTests {
 
         let firstDelivery = expectation(description: "First Gemini event stops the stream")
         let deliveryQueueDrained = expectation(description: "Queued Gemini events have been considered")
-        let deliveryLock = NSLock()
-        var delivered: [Data] = []
+        let delivered = LockedValue<[Data]>([])
         let firstChunk = Data([8, 9])
         let secondChunk = Data([10, 11])
         manager.streamTTS(text: "stop queued Gemini events") { data in
-            deliveryLock.lock()
-            delivered.append(data)
-            deliveryLock.unlock()
+            delivered.withValue { $0.append(data) }
             if data == firstChunk {
                 manager.stopStreaming()
                 firstDelivery.fulfill()
@@ -312,9 +293,7 @@ extension TTSNetworkManagerConcurrencyTests {
         audioDeliveryQueue.async { deliveryQueueDrained.fulfill() }
         wait(for: [firstDelivery, deliveryQueueDrained], timeout: 1.0)
 
-        deliveryLock.lock()
-        XCTAssertEqual(delivered, [firstChunk])
-        deliveryLock.unlock()
+        XCTAssertEqual(delivered.value, [firstChunk])
     }
 
     func testFatalGeminiCancellationRevokesQueuedAudioBeforeDelivery() {

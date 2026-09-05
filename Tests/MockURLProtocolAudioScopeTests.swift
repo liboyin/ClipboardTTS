@@ -58,12 +58,9 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, nil)
         }
 
-        let callbackLock = NSLock()
-        var callbackRan = false
+        let callbackRan = LockedValue(false)
         manager.streamTTS(text: "scope-owned queued audio") { _ in
-            callbackLock.lock()
-            callbackRan = true
-            callbackLock.unlock()
+            callbackRan.withValue { $0 = true }
         }
         wait(for: [requestStarted], timeout: 1.0)
         guard let task = manager.activeTaskForTesting else {
@@ -87,9 +84,12 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         XCTAssertNil(UserDefaults.standard.object(forKey: SettingsKeys.openAIModel))
 
         let settingsRestored = expectation(description: "Settings restore after owned delivery drains")
+        // Capture the snapshot itself rather than the `var` the deferred block also reads, so the
+        // recovery below shares an immutable value instead of that variable.
+        let capturedScopeSettings = scopeSettings
         DispatchQueue.global(qos: .userInitiated).async {
             MockURLProtocolTestCase.finishClosingScopeOrEndRun(identifier: testIdentifier)
-            scopeSettings?.restore()
+            capturedScopeSettings?.restore()
             settingsRestored.fulfill()
         }
         releaseDelivery.signal()
@@ -98,9 +98,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
 
         activeTestIdentifier = MockURLProtocol.beginTest()
         audioDeliveryQueue.sync {}
-        callbackLock.lock()
-        XCTAssertFalse(callbackRan, "A revoked handler must not run after settings restoration or in the next test scope.")
-        callbackLock.unlock()
+        XCTAssertFalse(callbackRan.value, "A revoked handler must not run after settings restoration or in the next test scope.")
         let nextScopeEndResult = MockURLProtocol.endTest(identifier: activeTestIdentifier!, timeout: 1.0)
         XCTAssertTrue(nextScopeEndResult.didQuiesce)
         activeTestIdentifier = nil
@@ -129,21 +127,16 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         let testIdentifier = MockURLProtocol.beginTest()
         activeTestIdentifier = testIdentifier
         let revocationStarted = expectation(description: "Blocked revocation started")
-        let stepLock = NSLock()
-        var revocationSteps: [String] = []
+        let revocationSteps = LockedValue<[String]>([])
         MockURLProtocol.register(
             audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.blocked-revocation"),
             releasePendingDelivery: {
-                stepLock.lock()
-                revocationSteps.append("release")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("release") }
                 revocationStarted.fulfill()
                 _ = releaseRevocation.wait(timeout: .now() + 5.0)
             },
             finishRevocation: {
-                stepLock.lock()
-                revocationSteps.append("finish")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("finish") }
             },
             forTestIdentifier: testIdentifier
         )
@@ -158,13 +151,11 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             2.0,
             "Teardown must stop waiting for a blocked revocation at the scope deadline, not for the handler."
         )
-        stepLock.lock()
         XCTAssertEqual(
-            revocationSteps,
+            revocationSteps.value,
             ["release"],
             "Teardown must not run the tearing-down-thread half while the blocking half still owns the manager."
         )
-        stepLock.unlock()
 
         releaseRevocation.signal()
         let scopeClosed = expectation(description: "Scope closes once the revocation returns")
@@ -174,9 +165,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
         }
         wait(for: [scopeClosed], timeout: 5.0)
         activeTestIdentifier = nil
-        stepLock.lock()
-        XCTAssertEqual(revocationSteps, ["release", "finish"], "Recovery must finish the revocation it could not bound.")
-        stepLock.unlock()
+        XCTAssertEqual(revocationSteps.value, ["release", "finish"], "Recovery must finish the revocation it could not bound.")
     }
 
     func testQuiescedScopeKeepsTheOwnerTerminalStateAheadOfItsOwnRevocationPublications() {

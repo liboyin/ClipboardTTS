@@ -13,6 +13,7 @@ import AppKit
 ///
 /// Every member must be used from the main thread: `NSHostingView`, the AppKit controls it builds,
 /// and the main-queue turns that order SwiftUI's updates all require it.
+@MainActor
 final class HostedSettings {
     /// A plain (non-secure) text field, addressed by its position among the fields its form renders.
     enum PlainTextField {
@@ -221,6 +222,7 @@ final class HostedSettings {
 /// manager, and SwiftUI commits no AppKit state for that render: by the time a hosted form can be
 /// inspected, the manager has already been resynchronized and its stale lists cleared. Rendering
 /// these fields directly is therefore the only way a test can hold that configuration still.
+@MainActor
 final class HostedModelVoiceFields {
     private var host: NSHostingView<ModelVoiceConfigurationView>?
 
@@ -269,6 +271,7 @@ final class HostedModelVoiceFields {
 /// One turn delivers the observation a change produced; the next runs the work its updated body
 /// scheduled. Laying out around them forces the controls a later lookup addresses to exist now
 /// rather than at some arbitrary later moment, which is what replaces a timing delay here.
+@MainActor
 private func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
     for _ in 0..<2 {
         host?.layoutSubtreeIfNeeded()
@@ -277,6 +280,7 @@ private func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
     host?.layoutSubtreeIfNeeded()
 }
 
+@MainActor
 private func drainHostedMainQueue(file: StaticString, line: UInt) {
     let drained = XCTestExpectation(description: "Hosted view completed a main-queue turn")
     DispatchQueue.main.async { drained.fulfill() }
@@ -286,6 +290,7 @@ private func drainHostedMainQueue(file: StaticString, line: UInt) {
     }
 }
 
+@MainActor
 private extension NSView {
     func descendantButton(titled title: String) -> NSButton? {
         if let button = self as? NSButton, button.title == title {

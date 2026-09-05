@@ -1,7 +1,11 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class TerminalStateAssertionTests: MockURLProtocolTestCase {
+/// Confinement invariant, which is why the `@unchecked Sendable` conformance is sound: the single
+/// off-main call below is dispatched to a serial queue this test owns, and the test joins that queue
+/// with a trailing `sync {}` before reading anything the call wrote. XCTest shares no test case
+/// across threads by itself.
+final class TerminalStateAssertionTests: MockURLProtocolTestCase, @unchecked Sendable {
     func testSuccessfulTerminalStateRequiresAnObservedActiveRequest() {
         // WHY: A manager is initially idle with no error, which has the same fields as a successful
         // terminal state. Accepting it would let a test pass even when its request never began.
@@ -122,7 +126,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         }
         XCTExpectFailure("An off-main call site must be reported as a failure, not raced.", options: guardFailureOnly)
         let manager = TestNetworkFactory.makeManager()
-        var didSettle = true
+        let didSettle = LockedValue(true)
 
         // The call needs its own queue: a `sync` hop can keep running on this thread and would
         // satisfy the guard it is meant to trip. `wait(for:)` keeps pumping the main queue, so
@@ -131,7 +135,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         let offMainCallSite = DispatchQueue(label: "com.clipboardtts.tests.off-main-call-site")
         let finished = expectation(description: "The off-main call returned")
         offMainCallSite.async { [self] in
-            didSettle = awaitTerminalState(of: manager, expectedError: nil, timeout: 0.2) {}
+            didSettle.withValue { $0 = awaitTerminalState(of: manager, expectedError: nil, timeout: 0.2) {} }
             finished.fulfill()
         }
         wait(for: [finished], timeout: 1.0)
@@ -141,7 +145,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase {
         // window closed, and to write `didSettle` while the assertion below reads it.
         offMainCallSite.sync {}
 
-        XCTAssertFalse(didSettle, "A rejected call site must not report a terminal state.")
+        XCTAssertFalse(didSettle.value, "A rejected call site must not report a terminal state.")
     }
 
     func testTerminalFailureAssertionAcceptsASynchronousFailurePublishedByItsAction() {

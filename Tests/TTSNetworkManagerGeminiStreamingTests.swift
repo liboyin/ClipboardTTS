@@ -12,7 +12,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
 
         let expectedAudio = Data([0, 1, 2, 3])
@@ -46,16 +46,19 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
 
         let firstAudio = Data([0, 1])
         let secondAudio = Data([2, 3])
         let allAudioDelivered = expectation(description: "Both complete events deliver audio")
-        var delivered: [Data] = []
+        let delivered = LockedValue<[Data]>([])
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { data in
-            delivered.append(data)
-            if delivered.count == 2 {
+            let deliveredCount = delivered.withValue { chunks -> Int in
+                chunks.append(data)
+                return chunks.count
+            }
+            if deliveredCount == 2 {
                 allAudioDelivered.fulfill()
             }
         }
@@ -68,7 +71,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         manager.urlSession(manager.session, dataTask: task, didReceive: events.dropFirst(paddingOffset).prefix(2))
         manager.urlSession(manager.session, dataTask: task, didReceive: events.dropFirst(paddingOffset + 2))
         wait(for: [allAudioDelivered], timeout: 1.0)
-        XCTAssertEqual(delivered, [firstAudio, secondAudio])
+        XCTAssertEqual(delivered.value, [firstAudio, secondAudio])
 
         assertTerminalState(of: manager, expectedError: nil) {
             manager.urlSession(manager.session, task: task, didCompleteWithError: nil)
@@ -86,7 +89,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
 
         let audioDelivered = expectation(description: "Complete leading event delivers audio")
@@ -128,7 +131,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
 
         let audioDelivered = expectation(description: "Audio event delivers before metadata")
@@ -157,7 +160,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
 
         let audioDelivered = expectation(description: "Leading audio event delivers")
@@ -189,7 +192,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { _ in
             XCTFail("An HTTP error stream must not deliver audio.")
@@ -219,7 +222,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { _ in
             XCTFail("Cancelled Gemini events must not deliver audio.")
@@ -242,7 +245,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { _ in
             XCTFail("Invalid Gemini events must not deliver audio.")
@@ -267,7 +270,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            return (self.successResponse(for: request), nil)
+            return (successResponse(for: request), nil)
         }
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { _ in
             XCTFail("A Gemini stream without audio must not deliver data.")
@@ -293,7 +296,7 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
 
     private func startGeminiRequest(_ manager: TTSNetworkManager,
                                     requestStarted: XCTestExpectation,
-                                    dataHandler: @escaping (Data) -> Void) -> URLSessionDataTask {
+                                    dataHandler: @escaping @Sendable (Data) -> Void) -> URLSessionDataTask {
         manager.streamTTS(text: "Gemini streaming test", dataHandler: dataHandler)
         wait(for: [requestStarted], timeout: 1.0)
         guard let task = manager.activeTaskForTesting else {
@@ -311,17 +314,19 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         }
     }
 
-    private func successResponse(for request: URLRequest) -> HTTPURLResponse {
-        HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-    }
-
-    private func successResponse(for task: URLSessionDataTask) -> HTTPURLResponse {
-        HTTPURLResponse(url: task.currentRequest!.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-    }
-
     private func sseEvent(audio: Data, lineEnding: String) -> Data {
         let prefix = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\""
         let suffix = "\"}}]}}]}"
         return Data("\(prefix)\(audio.base64EncodedString())\(suffix)\(lineEnding)\(lineEnding)".utf8)
     }
+}
+
+/// File scope rather than a method, so a `@Sendable` mock handler builds a response without
+/// capturing the test case.
+private func successResponse(for request: URLRequest) -> HTTPURLResponse {
+    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+}
+
+private func successResponse(for task: URLSessionDataTask) -> HTTPURLResponse {
+    HTTPURLResponse(url: task.currentRequest!.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
 }

@@ -24,6 +24,9 @@ final class CapturingDeferralScheduler {
     }
 }
 
+/// `MenuBarView` and the AppKit controls a hosted menu builds are main-actor isolated, so every
+/// test here runs on the main actor.
+@MainActor
 final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
     func testDeferredClipboardActionDropsAfterAServicesRequestClaimsThePipeline() {
         // WHY: The menu checks readiness before its 0.2-second clipboard delay, and a Services

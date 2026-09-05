@@ -11,11 +11,9 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         let handlerStoppedStream = expectation(description: "Re-entrant handler stopped the stream")
         let requestStarted = expectation(description: "Request context is active")
         let allowRequestCompletion = DispatchSemaphore(value: 0)
-        let deliveryLock = NSLock()
-        let taskLock = NSLock()
         let mockSession = TestNetworkFactory.makeSession()
-        var deliveryCount = 0
-        var taskForHandler: URLSessionDataTask?
+        let deliveryCount = LockedValue(0)
+        let taskForHandler = LockedValue<URLSessionDataTask?>(nil)
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
             _ = allowRequestCompletion.wait(timeout: .now() + 1.0)
@@ -29,17 +27,14 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         }
 
         manager.streamTTS(text: "Stop from handler") { _ in
-            deliveryLock.lock()
-            deliveryCount += 1
-            let isFirstDelivery = deliveryCount == 1
-            deliveryLock.unlock()
+            let isFirstDelivery = deliveryCount.withValue { count -> Bool in
+                count += 1
+                return count == 1
+            }
 
             guard isFirstDelivery else { return }
             manager.stopStreaming()
-            taskLock.lock()
-            let task = taskForHandler
-            taskLock.unlock()
-            guard let task else {
+            guard let task = taskForHandler.value else {
                 XCTFail("Expected the first callback to retain its task for stale-delivery testing.")
                 return
             }
@@ -53,9 +48,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             return
         }
 
-        taskLock.lock()
-        taskForHandler = activeTask
-        taskLock.unlock()
+        taskForHandler.withValue { $0 = activeTask }
         let delegateCallbackReturned = expectation(description: "Delegate callback returned")
         DispatchQueue.global(qos: .userInitiated).async {
             manager.urlSession(mockSession, dataTask: activeTask, didReceive: Data("first audio chunk".utf8))
@@ -72,13 +65,9 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         }
         allowRequestCompletion.signal()
 
-        deliveryLock.lock()
-        XCTAssertEqual(deliveryCount, 1)
-        deliveryLock.unlock()
+        XCTAssertEqual(deliveryCount.value, 1)
         assertAfterMockQuiescence {
-            deliveryLock.lock()
-            XCTAssertEqual(deliveryCount, 1)
-            deliveryLock.unlock()
+            XCTAssertEqual(deliveryCount.value, 1)
         }
     }
 
@@ -93,7 +82,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         let replacementRequestStarted = expectation(description: "Replacement request started")
         let replacementDataDelivered = expectation(description: "Replacement data delivered")
         let releaseReplacementResponse = DispatchSemaphore(value: 0)
-        var requestCount = 0
+        let requestCount = LockedValue(0)
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -101,8 +90,12 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            if requestCount == 0 {
-                requestCount += 1
+            let isFirstRequest = requestCount.withValue { count -> Bool in
+                guard count == 0 else { return false }
+                count += 1
+                return true
+            }
+            if isFirstRequest {
                 firstRequestStarted.fulfill()
                 return (response, Data())
             }

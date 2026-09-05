@@ -26,6 +26,9 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
         wait(for: [requestEmitted], timeout: 2.0)
     }
 
+    // Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so this test runs
+    // on the main actor; the rest of this class does not use it.
+    @MainActor
     func testSettingsNormalizesUnknownProviderBeforeTestingVoice() throws {
         // WHY: Opening Settings must preserve the same safe provider normalization as startup;
         // otherwise Test Voice could disclose a provider key to a corrupted Custom endpoint.

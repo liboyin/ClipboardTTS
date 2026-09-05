@@ -3,6 +3,10 @@ import AppKit
 @testable import ClipboardTTSApp
 
 /// Covers the About panel's metadata and the Settings control that presents it.
+///
+/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
+/// runs on the main actor.
+@MainActor
 final class SettingsAboutTests: MockURLProtocolTestCase {
 
     func testDefaultBundleAboutMetadataReadsHostedApplicationInfoDictionary() throws {

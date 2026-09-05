@@ -3,7 +3,14 @@ import XCTest
 @testable import ClipboardTTSApp
 
 /// Restores a set of `UserDefaults` keys to the exact state they were in when captured.
-struct UserDefaultsSnapshot {
+///
+/// Immutability invariant, which is why the `@unchecked Sendable` conformance below is sound: every
+/// stored property is a `let`, and the property-list values `UserDefaults` hands back are only read.
+/// Nothing can observe a snapshot changing, so the off-main timeout-recovery path in
+/// `MockURLProtocolTestCase` may restore one. The compiler cannot prove this itself because `Any`
+/// erases the values' own `Sendable` conformance, and `Sendable` is a marker protocol that cannot be
+/// recovered by a conditional cast.
+struct UserDefaultsSnapshot: @unchecked Sendable {
     private let defaults: UserDefaults
     private let present: [String: Any]
     private let absent: [String]

@@ -2,6 +2,10 @@ import XCTest
 @testable import ClipboardTTSApp
 
 /// Covers how the Settings form configures audio format, credentials, and the next speech request.
+///
+/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
+/// runs on the main actor.
+@MainActor
 final class SettingsViewTests: MockURLProtocolTestCase {
 
     func testCustomSampleRatePersistsAndOtherProvidersResetTo24KHz() {

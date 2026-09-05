@@ -183,7 +183,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
 
-        var dataReceived = false
+        let dataReceived = LockedValue(false)
         let requestStarted = XCTestExpectation(description: "Mock request started")
         let releaseResponse = DispatchSemaphore(value: 0)
         let responseFinished = XCTestExpectation(description: "Mock response finished")
@@ -194,7 +194,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
             return (HTTPURLResponse(), Data("audiochunk".utf8))
         }
         manager.streamTTS(text: "Test cancel data") { _ in
-            dataReceived = true
+            dataReceived.withValue { $0 = true }
         }
         wait(for: [requestStarted], timeout: 1.0)
 
@@ -211,7 +211,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
         let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertFalse(dataReceived)
+            XCTAssertFalse(dataReceived.value)
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)

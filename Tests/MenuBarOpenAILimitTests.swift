@@ -3,6 +3,9 @@ import AppKit
 @testable import ClipboardTTSApp
 
 /// Covers the click-time refusal of clipboard text longer than OpenAI's documented `input` maximum.
+/// `MenuBarView` and the AppKit controls a hosted menu builds are main-actor isolated, so every
+/// test here runs on the main actor.
+@MainActor
 final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
     private static let alertTitle = "Copied text is too long"
 

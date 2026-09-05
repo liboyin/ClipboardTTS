@@ -90,9 +90,9 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
         }
         defer { releaseResponse.signal() }
 
-        var deliveredAudioCount = 0
+        let deliveredAudioCount = LockedValue(0)
         manager.streamTTS(text: "malformed Gemini batch") { _ in
-            deliveredAudioCount += 1
+            deliveredAudioCount.withValue { $0 += 1 }
         }
         wait(for: [requestStarted], timeout: 1.0)
         guard let task = manager.activeTaskForTesting else {
@@ -104,7 +104,7 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
         manager.urlSession(manager.session, dataTask: task, didReceive: malformedBatch)
         audioDeliveryQueue.sync {}
         XCTAssertEqual(
-            deliveredAudioCount,
+            deliveredAudioCount.value,
             0,
             "A malformed Gemini event must invalidate earlier queued audio from the same delegate callback."
         )

@@ -2,6 +2,10 @@ import XCTest
 @testable import ClipboardTTSApp
 
 /// Covers recovering in Settings from a legacy API key that migration could not secure.
+///
+/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
+/// runs on the main actor.
+@MainActor
 final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
 
     func testFailedMigrationOffersARetryThatSecuresTheKeyForTheNextRequest() throws {

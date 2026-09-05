@@ -5,7 +5,7 @@ import Foundation
 /// The per-test scope registry lives in `MockURLProtocolScope.swift`, which owns the scope state
 /// and shutdown; this half reaches it only through `beginLoad` and `finishLoad`.
 class MockURLProtocol: URLProtocol {
-    typealias RequestHandler = (URLRequest) throws -> (HTTPURLResponse, Data?)
+    typealias RequestHandler = @Sendable (URLRequest) throws -> (HTTPURLResponse, Data?)
 
     static let testIdentifierHeader = "X-ClipboardTTS-Mock-Test-Identifier"
 

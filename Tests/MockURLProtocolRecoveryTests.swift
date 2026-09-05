@@ -30,21 +30,16 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
         let testIdentifier = MockURLProtocol.beginTest()
         activeTestIdentifier = testIdentifier
         let revocationStarted = expectation(description: "Blocked revocation started")
-        let stepLock = NSLock()
-        var revocationSteps: [String] = []
+        let revocationSteps = LockedValue<[String]>([])
         MockURLProtocol.register(
             audioDeliveryQueue: DispatchQueue(label: "com.clipboardtts.tests.unbounded-revocation"),
             releasePendingDelivery: {
-                stepLock.lock()
-                revocationSteps.append("release")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("release") }
                 revocationStarted.fulfill()
                 _ = releaseRevocation.wait(timeout: .now() + 5.0)
             },
             finishRevocation: {
-                stepLock.lock()
-                revocationSteps.append("finish")
-                stepLock.unlock()
+                revocationSteps.withValue { $0.append("finish") }
             },
             forTestIdentifier: testIdentifier
         )
@@ -70,13 +65,11 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
         }
         wait(for: [scopeClosed], timeout: 5.0)
         activeTestIdentifier = nil
-        stepLock.lock()
         XCTAssertEqual(
-            revocationSteps,
+            revocationSteps.value,
             ["release", "finish"],
             "A scope the bound gave up on must keep its owner, so its finishing half still runs."
         )
-        stepLock.unlock()
     }
 
     func testBackgroundDeliveryRevocationQueuesNoPublicationIntoALaterTest() {
@@ -106,12 +99,9 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
         let terminalError = "The TTS service returned no playable audio. Please try again."
         manager.publishFailure(terminalError)
 
-        let publicationLock = NSLock()
-        var publicationCount = 0
+        let publicationCount = LockedValue(0)
         let subscription = manager.objectWillChange.sink { _ in
-            publicationLock.lock()
-            publicationCount += 1
-            publicationLock.unlock()
+            publicationCount.withValue { $0 += 1 }
         }
         defer { subscription.cancel() }
 
@@ -130,9 +120,7 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
         DispatchQueue.main.async { mainQueueDrained.fulfill() }
         wait(for: [mainQueueDrained], timeout: 1.0)
 
-        publicationLock.lock()
-        let observedPublications = publicationCount
-        publicationLock.unlock()
+        let observedPublications = publicationCount.value
         XCTAssertEqual(
             observedPublications,
             0,
@@ -193,12 +181,9 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, nil)
         }
 
-        let callbackLock = NSLock()
-        var callbackRan = false
+        let callbackRan = LockedValue(false)
         manager.streamTTS(text: "background teardown") { _ in
-            callbackLock.lock()
-            callbackRan = true
-            callbackLock.unlock()
+            callbackRan.withValue { $0 = true }
         }
         wait(for: [requestStarted], timeout: 1.0)
         guard let task = manager.activeTaskForTesting else {
@@ -220,9 +205,7 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
 
         releaseDelivery.signal()
         audioDeliveryQueue.sync {}
-        callbackLock.lock()
-        XCTAssertFalse(callbackRan, "Background revocation must invalidate queued delivery before it runs.")
-        callbackLock.unlock()
+        XCTAssertFalse(callbackRan.value, "Background revocation must invalidate queued delivery before it runs.")
         releaseResponse.signal()
     }
 }

@@ -23,6 +23,7 @@ extension RecordingMenuAlertPresenter: MenuAlertPresenting {
 /// Builds the menu with its own deferred-action owner and alert recorder unless a test needs to
 /// control either. The alert presenter never defaults to the production one, so no test can raise
 /// a modal panel that nothing would dismiss.
+@MainActor
 func makeMenu(audioPlayer: AudioPlayerManager,
               textExtraction: TextExtractionManager,
               networkManager: TTSNetworkManager,
@@ -37,6 +38,9 @@ func makeMenu(audioPlayer: AudioPlayerManager,
     )
 }
 
+/// `MenuBarView` and the AppKit controls a hosted menu builds are main-actor isolated, so every
+/// test here runs on the main actor.
+@MainActor
 final class MenuBarViewTests: MockURLProtocolTestCase {
     func testMenuNeitherShowsAVoiceControlNorFetchesTheCatalogItWouldNeed() {
         // WHY: Voice belongs to Settings alone, so the menu must not become a second place the same
