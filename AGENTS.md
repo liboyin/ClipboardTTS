@@ -1,105 +1,57 @@
-This file states principles that hold for every change. All agents MUST follow this file.
+This file owns the working principles for this repository. All agents MUST follow it and explicit user instructions. CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and RFC 8174).
 
-CAPITALIZED requirement words have the meanings defined by BCP 14 (RFC 2119 and RFC 8174).
+# Document Boundaries
 
-# Meta Guidelines
+- **AGENTS.md:** concise working principles and required standards.
+- **[Adversarial review skill](.agents/skills/adversarial-review/SKILL.md):** how to conduct review, including dispatch, snapshots, investigation, triage, and reporting.
+- **[TODO.md](TODO.md):** future work, accepted decisions, dependencies, execution boundaries, and its own maintenance rules.
+- **[README.md](README.md):** current architecture, design assumptions, and operating procedures.
+- **[USER_STORIES.md](USER_STORIES.md):** product requirements and user-visible behavior.
 
-- Before editing, you MUST read the relevant code and documentation and plan your actions carefully.
-- State assumptions explicitly. When you notice multiple reasonable approaches with trade-offs, or ambiguities that materially affect scope, architecture, dataflow, correctness, or security, you MUST stop and confirm with the user.
-- Isolated subtasks (tasks that require little or no additional context from the main conversation and produce a small, well-bounded result for follow-up work) SHOULD be executed in subagents to keep the main context window clean.
-- Clean up any background process you start. Resolve PIDs beforehand and use `kill`; NEVER use `pkill -f` as it matches your own tool execution and will terminate your agent.
-- Claims that an action succeeded MUST use a check whose output would differ on failures. Treat non-zero exit codes as failures until explained. Verify absence directly instead of inferring it.
-- Before considering a task done, you MUST re-check compliance with this file.
+Link to the owning document instead of duplicating its procedure. Operational instructions do not override the safety and ownership principles here.
 
-# Workflow Guidelines
+# Scope and Decisions
 
-- Each change MUST have a stated boundary: intent, dependencies, non-goals, validation strategy, and done criteria. Each change MUST remain a self-contained commit.
-- The executor MUST re-read the boundary and the affected code before implementation. A written task is a contract to validate against the repository, not permission to apply it mechanically.
-- The executor MUST confirm the gates pass at `HEAD` before editing. A gate already failing at `HEAD` SHOULD be fixed in a self-contained commit that lands first.
-- When execution exposes an ambiguity or trade-off that materially affects scope, architecture, dataflow, correctness, security, or user-visible behavior, the executor MUST stop and ask the user for direction. It MUST NOT broaden or rewrite the boundary unilaterally.
-- The executor MAY make a non-material assumption only when it is supported by repository evidence and does not alter the requested outcome. Its final hand-over MUST name the assumption, supporting evidence, and effect on the change.
-- If user direction changes a planned change's material boundary, update relevant records before committing so the remaining execution plan stays authoritative.
-- The adversarial reviewer independently evaluates the complete in-scope change, including staged, unstaged, and in-scope untracked files. Explicitly identify unrelated dirty paths as out of scope; review findings re-enter the executor's test and review loop.
+- Read relevant code and documentation and inspect repository status before editing. Preserve unrelated work.
+- Each change MUST have a boundary: intent, dependencies, non-goals, validation strategy, and done criteria. Revalidate written tasks against the affected code; do not implement them mechanically or broaden their material scope unilaterally.
+- State assumptions. Confirm unresolved choices that materially affect scope, architecture, dataflow, correctness, security, or user-visible behavior before dependent work; continue independent work where possible.
+- Accepted decisions and user authorization persist. Do not ask again about settled choices. Document superseding decisions and their reasoning before committing the affected change.
+- Non-material assumptions MAY be made when repository evidence supports them and they preserve the requested outcome. Name the assumption, evidence, and effect in the handoff.
+- Isolated subtasks with small, bounded results SHOULD use subagents. The main agent remains accountable for integration and verification.
 
-# Documentation Guidelines
+# Design and Documentation
 
-- Each document SHOULD be the unique owner of its assigned topic. Other docs SHOULD link or summarize without becoming competing sources of truth.
-- Documentation MUST be updated as soon as its content no longer reflects the latest state of the project.
-- Design decisions & assumptions MUST be documented, and SHOULD record the reasoning behind them. Once documented they bind later changes.
-- Every empirical claim in a document, status block, documentation comment, or other code comment MUST be verified immediately before writing down.
-- Document ownership:
-    - `USER_STORIES.md` owns product requirements and user-visible behavior.
-    - `TODO.md` is the phased execution plan and hand-over log. It records work still to do and decisions already made.
-    - `README.md` is the project overview and operating guide. It owns the current architecture, design assumptions, and build, test, and distribution procedures.
-- Completed-task handling:
-    - Remove a completed task's full active entry from `TODO.md` in that task's implementation commit.
-    - Record detailed implementation history in the commit and current operating behavior in `README.md`; do not duplicate either in `TODO.md`.
-    - `TODO.md` MAY retain a one-line pointer to the governing `README.md` rule when the completion materially constrains remaining work. Never restate the rule there.
-    - Update task counts, work-map references, and every remaining dependency that references the completed task in the same commit.
-- New or changed non-test types, functions, and methods MUST use Swift documentation comments (`///`) when their purpose, contract, side effects, or constraints are not obvious from the declaration. Test method names MUST describe the behavior under test; add a comment only when the reason or trade-off is not clear from the test.
-
-# Implementation Guidelines
-
-- Implement only what was asked with small, surgical changes. Do not add features or unrelated refactors unless explicitly asked to.
-- Prefer the simplest implementation. Each function/class/module MUST have a single responsibility and a well-defined interface; other SOLID principles MAY be relaxed in favor of simplicity.
-- Code MUST be testable with minimal mocking; prefer pure logic and isolated side effects.
-- Code SHOULD use up-to-date features from languages, libraries, frameworks, and external services. Because these change quickly, you SHOULD verify behavior empirically or against the version-appropriate documentation before planning or building on them.
-- Before deleting a seemingly redundant layer, identify everything unique it carries (copy, error shape, ordering, timing, diagnostics) and give each item another home.
+- Prefer the simplest cohesive implementation within the assigned scope. Give each function, type, and module a clear responsibility; prefer pure logic, isolated side effects, and minimal mocking over unnecessary abstractions.
+- Respect lint limits without splitting cohesive code solely for length. A narrow exception MUST explain the responsibility or invariant it preserves; avoid blanket disables.
+- Before removing a layer, identify all unique behavior it carries, including copy, errors, ordering, timing, diagnostics, and UI/accessibility behavior. Give retained behavior an explicit owner and preserve its verification.
+- Verify changing language, framework, library, and service assumptions empirically or against version-appropriate documentation.
+- Update documentation when the change makes it stale. Distinguish current behavior, accepted future decisions, proposals, and unverified hypotheses.
+- Verify current empirical claims before recording them. Historical evidence MUST identify its revision, relevant environment, provenance, and limitations; it does not certify current validation.
+- Use Swift documentation comments (`///`) for non-obvious purposes, contracts, side effects, or constraints of new or changed non-test declarations. Test names MUST describe the protected behavior; comments should explain non-obvious reasons or trade-offs.
 
 # Test Guidelines
 
-- Tests MUST encode WHY behavior matters, not just WHAT it does. A test that does not fail when business logic changes is wrong.
-- An assertion is worth only what can break it; establish that with mutants in an isolated scratch copy.
-- Adding one MUST be earned by three mutants that each fail a test: a revert, a plausible future regression, and an over-restriction that tests the constraint's trade-off.
-- Removing one MUST meet the same standard: a mutant that breaks the property it protected still fails another test. An assertion no mutant can break is itself a defect; prove the property is covered elsewhere rather than dropping the coverage.
-- `check-coverage.sh` is the source of truth for coverage measurement and thresholds. It uses XCTest coverage from `xccov` and requires at least 85% aggregate line coverage for `Sources/Managers/`.
-- `Sources/Views/` is exempt from the line-coverage gate because declarative SwiftUI bodies are exercised through construction smoke tests. Other exclusions MUST have a documented rationale and an end-to-end smoke test.
-- XCTest test cases MUST import the app with `@testable import ClipboardTTSApp`, and MUST NOT reach state they do not own: no external service, no `NSPasteboard.general`, no developer Keychain, and no lasting change to the app's real `UserDefaults` domain. Prefer injected dependencies and test doubles over modifying process-wide macOS state.
-- A process-global test double or shared asynchronous resource MUST define a per-test lifecycle: isolated ownership, synchronized access, teardown cancellation or invalidation, a quiescence check, and local accounting for unexpected late work. Assertions about asynchronous behavior MUST verify that work cannot escape its owning test's teardown boundary.
-- Tests that touch persisted app settings MUST call `isolateAppSettingsDefaults()` so the hosted test bundle neither reads nor overwrites the developer's configuration.
-- Generate `ClipboardTTSApp.xcodeproj` with `xcodegen generate` before building or testing when it is absent or `project.yml` changed. The generated project MUST NOT be committed.
-- After every code change, all gates below MUST pass. Inspect the per-file coverage report and the build output for warnings; a zero exit code alone is not a pass:
+- Tests MUST protect behavior or an invariant and fail when it breaks. Prefer controlled inputs, schedulers, and explicit completion over elapsed-time waits.
+- For each added or changed invariant, mutation evidence MUST cover a revert, a plausible regression, and an over-restriction where applicable. Each applicable mutant MUST fail a relevant test in an isolated scratch copy. Explain inapplicable categories; evidence belongs to the invariant and MAY be shared across assertions.
+- Before removing or weakening coverage, demonstrate that a mutant breaking the protected property still fails another test. A surviving mutant requires investigation, not automatic removal of coverage.
+- XCTest cases MUST use `@testable import ClipboardTTSApp`. Automated tests MUST NOT access external services, `NSPasteboard.general`, the developer's Keychain, or real developer preferences, even temporarily.
+- Use test-owned state throughout hosted startup, managers, and SwiftUI persistence. Snapshot/restore is permitted only for owned state. Do not seed real preferences to prove non-access or leave seeded disk-backed suites behind. A scratch checkout alone does not isolate macOS state.
+- Shared asynchronous resources and process-global doubles MUST have per-test ownership, synchronized access, cancellation/invalidation, quiescence, and local accounting for late work. These guarantees MUST hold after timeouts and failures; fulfilment alone is not quiescence.
+- `check-coverage.sh` owns the executable coverage policy; planned changes belong in TODO. Exclusions MUST have a narrow platform UI/integration rationale and an end-to-end smoke check validated when the exclusion changes. Directory location alone does not justify excluding application logic; record unperformed manual checks as limitations.
 
-```bash
-./check-coverage.sh
-swiftlint --strict
-xcodebuild \
-  -project ClipboardTTSApp.xcodeproj \
-  -scheme ClipboardTTSApp \
-  -configuration Debug \
-  SWIFT_STRICT_CONCURRENCY=complete \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
+# Validation and Review
 
-# Review Guidelines
+- Establish a passing baseline at HEAD before implementation. Reuse baseline evidence only for the same unchanged revision and relevant environment, with provenance. Run tests only in an environment satisfying the ownership rules above. A failing baseline SHOULD be fixed in a separate, authorized change first.
+- Use focused checks during development. The final code, test, or configuration candidate MUST pass the coverage gate (`./check-coverage.sh`), strict SwiftLint, and a Debug app build with complete strict concurrency and signing disabled. Inspect per-file coverage and warnings; resolve new source warnings and explain accepted tooling warnings.
+- Every non-trivial code, test, or configuration change MUST pass the review skill's complete procedure before commit. A change is non-trivial if it could affect runtime behavior, test guarantees, build/configuration output, security, concurrency, state/data flow, or user-visible behavior. When uncertain, run the review.
+- The reviewer owns classification and verdict; the main agent owns independent investigation, implementation, and required user dispositions. After fixes or rollback, repeat full gates and obtain a fresh review. Finish only when no Blocking finding remains and every surfaced finding has its required disposition. Never silently discard or reclassify a finding.
+- Documentation-only changes and read-only assessments are exempt from application gates and formal adversarial review. Verify their claims, references, completeness, and diff instead. Report what was actually checked.
+- Verify success with checks that distinguish failure. Explain non-zero exits, verify absence directly, and verify rollback against the recorded pre-change state.
+- Keep the generated Xcode project consistent with its configuration and source/test inputs, following README's regeneration procedure. Do not commit generated project files.
+- Clean up processes and artifacts you create. Identify owned PIDs before using `kill`; NEVER use `pkill -f`. Re-check this file and the task boundary before finishing.
 
-Every non-trivial code, test, or configuration change MUST pass the adversarial review (`.agents/skills/adversarial-review/SKILL.md`) procedure before commit. The main agent determines whether a change is non-trivial. Treat a change as non-trivial when it could affect runtime behavior, test guarantees, build or configuration output, security, concurrency, state or data flow, or user-visible behavior. When uncertain, run the review. Documentation-only changes and review tasks themselves (code review, `TODO.md` gap review, etc.) are exempt.
+# Version Control
 
-The adversarial review skill owns the operational procedure: the caller context it requires, the questions it scrutinizes with, and its report format. Call it as a function on the current dirty tree and expect a reviewer-triaged findings report without code change. The reviewer owns the triage and verdict; the main agent owns the required investigation, disposition hand-off, and implementation.
-
-The main agent remains accountable for the execute-review loop:
-
-1. Confirm that all gates required by this file pass on the exact target state, then run the review skill on the dirty tree or the specified revision.
-2. Independently investigate every Blocking finding. Validate its claim and the premise and expected effect of any proposed remedy before accepting or implementing it.
-3. Create an execution plan that fixes every validated Blocking finding. The main agent SHOULD also independently validate and fix each Nit, but MAY instead leave a Nit unfixed when its remedy is non-trivial and surface it to the user. Before implementing any Nit remedy, validate the claim and the remedy's premise and expected effect.
-4. Implement the plan step-by-step.
-5. Repeat step 1 - 4 until no Blocking findings remain and no further Nits will be fixed automatically. Do not shorten the loop.
-6. Surface every Non-blocking finding directly to the user without requiring independent investigation or validation. Also surface every Nit not fixed automatically. Mark each finding as **Validated**, **Could not validate**, or **Not independently validated**, with supporting evidence when validation was attempted.
-7. Ask the user whether to fix, defer, or accept without change each surfaced finding. Before implementing a user-selected remedy, independently validate the finding and the remedy's premise and expected effect, then re-enter the loop at step 1 after the change.
-
-The main agent MUST NOT silently discard or reclassify a reviewer finding. If a materially equivalent Blocking finding appears in two consecutive fresh reviews and the main agent still cannot validate it, stop and ask the user for direction.
-
-Undoing a code change re-enters the loop at step 1. Verify a rollback against the recorded pre-change state using `git status`, the unstaged diff, and the staged diff for affected paths; do not rely on your recollection of the delta.
-
-# Version Control Guidelines
-
-- Commit each functionally independent change once fully implemented, tested, and documented.
-- Stage explicit paths and inspect `git status` immediately before committing. NEVER use `git add -A` or `git commit -a`.
-- Use the template below for commit messages. Do not add a `Co-Authored-By` line:
-
-```text
-<Claude/Codex/Antigravity/...>: <one-line summary>
-
-<One or more paragraphs describing the change in detail.>
-```
+- Keep functionally independent changes in separate, self-contained commits once implemented, validated, and documented. Honor requests to leave drafts uncommitted.
+- Stage explicit paths, inspect the staged diff and repository status immediately before committing, and exclude unrelated work. NEVER use `git add -A` or `git commit -a`.
+- Commit messages MUST start with `<Claude/Codex/Antigravity/...>: <one-line summary>`, followed by a blank line and explanatory paragraphs. Do not add a `Co-Authored-By` line.
