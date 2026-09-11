@@ -59,6 +59,13 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     private var scheduleGeneration: Int = 0
     private var automaticPlaybackGeneration: Int?
     private var automaticPlaybackSuppressedGeneration: Int?
+    /// The stream whose playback stopped because its buffered PCM ran out while its request was
+    /// still open, or nil when nothing is waiting on more PCM.
+    ///
+    /// It is what separates an underrun from the three other ways playback stops: a Pause the user
+    /// asked for, a seek they chose, and the end of a request that has already terminated. Only an
+    /// underrun is resumed by the PCM that arrives behind it, and only for the stream that stopped.
+    private var underrunSuspendedGeneration: Int?
     private let scheduledBufferObserver: (AVAudioPCMBuffer) -> Void
     private let engineStarter: (AVAudioEngine) throws -> Void
     /// Defers the automatic-playback start; the action it is given crosses to the main queue.
@@ -198,13 +205,6 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         hasValidSampleRateConfiguration && engine.isRunning
     }
 
-    /// Converts a player-node sample time to elapsed seconds using the active PCM format.
-    func progress(forRenderedSampleTime sampleTime: AVAudioFramePosition) -> Double? {
-        let sampleRate = bufferQueue.sync { audioFormat?.sampleRate }
-        guard let sampleRate else { return nil }
-        return baseProgressOffset + Double(sampleTime) / sampleRate
-    }
-
     func startNewStream() -> Int {
         stop()
         return bufferQueue.sync {
@@ -248,37 +248,27 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             }
 
             DispatchQueue.main.async {
-                guard self.bufferQueue.sync(execute: { self.scheduleGeneration == streamGeneration }) else { return }
+                let stream = self.bufferQueue.sync { () -> (isCurrent: Bool, endsUnderrun: Bool) in
+                    guard self.scheduleGeneration == streamGeneration else { return (false, false) }
+                    let endsUnderrun = self.underrunSuspendedGeneration == streamGeneration
+                    self.underrunSuspendedGeneration = nil
+                    return (true, endsUnderrun)
+                }
+                guard stream.isCurrent else { return }
                 self.bufferDuration = Double(bufferedFrameCount) / format.sampleRate
                 self.hasAudio = true
+                if stream.endsUnderrun { self.resumeAfterUnderrun() }
                 self.audioObservers.statePublished()
             }
         }
     }
 
-    /// Records how the request feeding `streamGeneration` ended, behind that stream's own PCM.
+    /// Starts or resumes playback, replaying from zero when it sits at the end of the buffered PCM.
     ///
-    /// It joins `bufferQueue` exactly as `scheduleAudio` does, so a terminal event the network
-    /// manager released after a chunk of PCM cannot be applied before that chunk is buffered: both
-    /// reach the main queue from the same serial queue, in the order they arrived on it.
-    ///
-    /// Ownership is checked once, where the value is published. Checking it again on `bufferQueue`
-    /// beforehand would decide nothing: `scheduleGeneration` only advances, so an ending that queue
-    /// would already reject is rejected by the publication check as well, while an ending it would
-    /// accept can still be replaced before that publication runs. Rejecting is what keeps the
-    /// session that replaced this one from being told that somebody else's request ended.
-    func finishStream(streamGeneration: Int, termination: SpeechStreamTermination) {
-        bufferQueue.async {
-            defer { self.audioObservers.processed() }
-
-            DispatchQueue.main.async {
-                guard self.bufferQueue.sync(execute: { self.scheduleGeneration == streamGeneration }) else { return }
-                self.streamTermination = termination
-                self.audioObservers.statePublished()
-            }
-        }
-    }
-
+    /// Pressing Play during an underrun suspension always takes that replay path, because a stream
+    /// suspends exactly where its published position reached the buffered end, and the seek it
+    /// performs releases the suspension. Later PCM therefore extends the replay the user asked for
+    /// rather than jumping playback back to where the buffer had run out.
     func play() {
         if !engine.isRunning {
             do {
@@ -299,19 +289,6 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         startProgressTimer()
     }
 
-    /// Pauses playback and revokes the current stream's pending automatic start.
-    ///
-    /// The deferred start only observes `isPlaying`, which pausing clears, so without recording the
-    /// intent against the paused generation the prebuffer deadline would undo an explicit Pause.
-    /// Binding it to `scheduleGeneration` keeps the revocation to the stream that was paused: a
-    /// later stream begins from a new generation, and `play()` still resumes this one on demand.
-    func pause() {
-        bufferQueue.sync { automaticPlaybackSuppressedGeneration = scheduleGeneration }
-        playerNode.pause()
-        isPlaying = false
-        stopProgressTimer()
-    }
-
     func stop() {
         // Bump the generation and clear buffers first, then stop the node. bufferQueue is a serial
         // FIFO: any scheduleAudio block already queued runs before this sync block and may still call
@@ -322,6 +299,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             scheduleGeneration += 1
             automaticPlaybackGeneration = nil
             automaticPlaybackSuppressedGeneration = nil
+            underrunSuspendedGeneration = nil
             pcmData.accumulated.removeAll()
             pcmData.unprocessed.removeAll()
             bufferedPCMFrameCount = 0
@@ -356,6 +334,9 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         // those operations on bufferQueue means a seek runs after all earlier scheduling work, then
         // prevents it from surviving playerNode.stop() and being replayed alongside the seek buffer.
         bufferQueue.sync {
+            // Seeking is the user choosing where playback sits, so it ends any underrun suspension:
+            // PCM arriving behind the chosen position must not restart what they left paused.
+            underrunSuspendedGeneration = nil
             guard let format = audioFormat else { return }
             let bytesPerNetworkFrame = 2
             let bufferedDuration = Double(bufferedPCMFrameCount) / format.sampleRate
@@ -424,15 +405,22 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
 /// Progress reporting: the repeating tick that turns the node's rendered position into the
 /// published playback position, and the timer that drives it while a stream plays.
 extension AudioPlayerManager {
+    /// Converts a player-node sample time to elapsed seconds using the active PCM format.
+    func progress(forRenderedSampleTime sampleTime: AVAudioFramePosition) -> Double? {
+        let sampleRate = bufferQueue.sync { audioFormat?.sampleRate }
+        guard let sampleRate else { return nil }
+        return baseProgressOffset + Double(sampleTime) / sampleRate
+    }
+
     /// Publishes the position one progress tick has reached, reading the rendered sample time and
     /// applying it within a single main-queue turn.
     ///
     /// The read and the publication must stay in one turn. `seek` installs a new
     /// `baseProgressOffset` on the main queue, so a tick that deferred its update would add a
     /// position rendered before the seek to the offset that seek installed. That sum reports
-    /// playback ahead of the position the user chose, and pauses the stream once it reaches the
-    /// buffered end. Reaching that end on a tick of its own still pauses, which is how playback
-    /// stops when the buffer runs out.
+    /// playback ahead of the position the user chose, and stops the stream once it reaches the
+    /// buffered end. Reaching that end on a tick of its own still stops playback, which is how it
+    /// halts when the buffer runs out; `stopAtBufferedEnd` decides whether that halt is final.
     func applyProgressTick() {
         guard let sampleTime = renderedSampleTime(playerNode),
               let newProgress = progress(forRenderedSampleTime: sampleTime) else { return }
@@ -441,8 +429,22 @@ extension AudioPlayerManager {
         } else if newProgress > bufferDuration {
             playbackProgress = bufferDuration
         }
-        if isPlaying && playbackProgress >= bufferDuration && bufferDuration > 0 {
-            pause()
+        guard isPlaying, let bufferedEnd = serializedBufferedDuration, bufferedEnd > 0,
+              newProgress >= bufferedEnd else { return }
+        stopAtBufferedEnd(renderedProgress: newProgress, bufferedEnd: bufferedEnd)
+    }
+
+    /// The end of the PCM the player node actually holds, in seconds of the active format.
+    ///
+    /// Published `bufferDuration` is what the menu shows, and it lands a main-queue turn behind the
+    /// frames `scheduleAudio` has already handed the node. Deciding that playback ran out of audio
+    /// against that lagging value would suspend a stream whose next chunk is already rendering and
+    /// discount the frames it had heard of that chunk as dry silence, so the decision and the offset
+    /// it re-anchors read the serialized frame count scheduling itself maintains.
+    private var serializedBufferedDuration: Double? {
+        bufferQueue.sync {
+            guard let format = audioFormat else { return nil }
+            return Double(bufferedPCMFrameCount) / format.sampleRate
         }
     }
 
@@ -458,6 +460,108 @@ extension AudioPlayerManager {
     private func stopProgressTimer() {
         progressTimer?.invalidate()
         progressTimer = nil
+    }
+}
+
+/// How a stream ends: the terminal event its request delivered, the stop playback makes when the
+/// buffered PCM runs out, and whether later PCM may undo that stop. The four ways playback can come
+/// to rest — a Pause the user asked for, a seek they chose, an underrun of a still-open request, and
+/// the end of a request that has terminated — are told apart here, because only the underrun is
+/// resumed by the audio that arrives behind it.
+extension AudioPlayerManager {
+    /// Whether the player node is itself running, as distinct from the `isPlaying` state published
+    /// for the menu.
+    ///
+    /// The two must agree: telling the menu that a stream resumed without restarting the node
+    /// reports playback that is not happening. Nothing in the app reads this — the node's own state
+    /// is never the app's source of truth for what is playing — but the invariant is worth stating
+    /// where it can be checked.
+    var isNodePlaying: Bool {
+        playerNode.isPlaying
+    }
+
+    /// Records how the request feeding `streamGeneration` ended, behind that stream's own PCM.
+    ///
+    /// It joins `bufferQueue` exactly as `scheduleAudio` does, so a terminal event the network
+    /// manager released after a chunk of PCM cannot be applied before that chunk is buffered: both
+    /// reach the main queue from the same serial queue, in the order they arrived on it.
+    ///
+    /// Ownership is checked once, where the value is published. Checking it again on `bufferQueue`
+    /// beforehand would decide nothing: `scheduleGeneration` only advances, so an ending that queue
+    /// would already reject is rejected by the publication check as well, while an ending it would
+    /// accept can still be replaced before that publication runs. Rejecting is what keeps the
+    /// session that replaced this one from being told that somebody else's request ended.
+    func finishStream(streamGeneration: Int, termination: SpeechStreamTermination) {
+        bufferQueue.async {
+            defer { self.audioObservers.processed() }
+
+            DispatchQueue.main.async {
+                guard self.bufferQueue.sync(execute: { self.scheduleGeneration == streamGeneration }) else { return }
+                self.streamTermination = termination
+                self.audioObservers.statePublished()
+            }
+        }
+    }
+
+    /// Pauses playback and revokes the current stream's pending automatic start.
+    ///
+    /// The deferred start only observes `isPlaying`, which pausing clears, so without recording the
+    /// intent against the paused generation the prebuffer deadline would undo an explicit Pause.
+    /// Binding it to `scheduleGeneration` keeps the revocation to the stream that was paused: a
+    /// later stream begins from a new generation, and `play()` still resumes this one on demand.
+    ///
+    /// A Pause the user asked for is not resumable: it releases any underrun suspension, so PCM
+    /// arriving behind it keeps buffering for Resume instead of starting playback again.
+    func pause() {
+        suspendPlayback(resumableAfterUnderrun: false)
+    }
+
+    /// Stops the node and its progress timer, revoking the current stream's pending automatic start.
+    ///
+    /// `resumableAfterUnderrun` says whether the current stream's next PCM may resume playback where
+    /// it stopped. It is false for every stop that reflects a decision — the user's Pause, or the end
+    /// of a request that has already terminated — which later PCM must not reverse. Recording both
+    /// revocations in one `bufferQueue` visit keeps a stop from being classified as one kind of stop
+    /// and then read as the other.
+    private func suspendPlayback(resumableAfterUnderrun: Bool) {
+        bufferQueue.sync {
+            automaticPlaybackSuppressedGeneration = scheduleGeneration
+            underrunSuspendedGeneration = resumableAfterUnderrun ? scheduleGeneration : nil
+        }
+        playerNode.pause()
+        isPlaying = false
+        stopProgressTimer()
+    }
+
+    /// Stops playback where the buffered PCM ran out, recording whether more of it may still arrive.
+    ///
+    /// A stream whose request has already published a terminal event has been heard to its end, so
+    /// it stops for good and only Play restarts it. A stream still open ran out early — the provider
+    /// has not sent its next chunk, or a bounded retry is filling the gap — and stopping such a
+    /// stream for good is what left the rest of a slow response unplayed, so its suspension names
+    /// the generation later PCM resumes.
+    ///
+    /// The offset is re-anchored to that buffered end either way, by discounting however far
+    /// `renderedProgress` overshot it. The node goes on advancing its sample time between
+    /// exhausting its last buffer and this tick, and that silence is not audio anyone heard;
+    /// carried forward, it would put each resumed position a further tick ahead of the sound and
+    /// stop the next underrun early. Anchoring makes the rendered position read as the buffered
+    /// end, which is exactly where the PCM that resumes the stream begins.
+    private func stopAtBufferedEnd(renderedProgress: Double, bufferedEnd: Double) {
+        suspendPlayback(resumableAfterUnderrun: streamTermination == nil)
+        baseProgressOffset -= renderedProgress - bufferedEnd
+    }
+
+    /// Restarts the node on the PCM that ended an underrun, from the position playback stopped at.
+    ///
+    /// The node was paused rather than stopped, so it kept its sample time and its place in the
+    /// output timeline: playing it again renders the buffer `scheduleAudio` has just queued behind
+    /// what the user already heard. Nothing is re-scheduled and no prebuffer window is opened,
+    /// because neither the audio nor the reason to wait for more of it has changed.
+    private func resumeAfterUnderrun() {
+        playerNode.play()
+        isPlaying = true
+        startProgressTimer()
     }
 }
 

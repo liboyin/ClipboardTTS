@@ -388,10 +388,10 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         XCTAssertTrue(player.hasAudio)
     }
 
-    func testProgressTickPastTheBufferedEndClampsProgressAndPausesTheStreamForGood() {
+    func testProgressTickPastTheBufferedEndClampsProgressAndStopsPlaybackAndItsTimer() {
         // WHY: The tick is what stops playback once rendering reaches the end of the buffered PCM.
         // It must publish the buffered end rather than a position beyond it, keep the audio for
-        // replay, stop its own timer, and pause the stream in the way that revokes the prebuffer
+        // replay, stop its own timer, and stop the stream in the way that revokes the prebuffer
         // start still pending behind it, which would otherwise resume what the tick just ended.
         let renderedPosition = RenderedPositionSource(sampleTime: 60_000) // 2.5 seconds at 24 kHz
         let heldAutomaticStart = ManualAutomaticPlaybackScheduler()
@@ -493,46 +493,6 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         let drained = expectation(description: "Main queue drained")
         DispatchQueue.main.async { drained.fulfill() }
         wait(for: [drained], timeout: 2.0)
-    }
-}
-
-/// States the rendered position a progress tick reads, so a test can drive the tick from a position
-/// it chose instead of from whatever the live audio graph has rendered by then.
-private final class RenderedPositionSource {
-    var sampleTime: AVAudioFramePosition?
-
-    init(sampleTime: AVAudioFramePosition?) {
-        self.sampleTime = sampleTime
-    }
-
-    func read(_: AVAudioPlayerNode) -> AVAudioFramePosition? {
-        sampleTime
-    }
-}
-
-/// Keeps the manager's progress timer out of every run loop, so the only ticks are the ones a test
-/// fires, and each one runs the callback the manager gave that timer.
-private final class ProgressTimerSpy {
-    private(set) var timer: Timer?
-
-    var isRunning: Bool {
-        timer?.isValid ?? false
-    }
-
-    var requestedInterval: TimeInterval? {
-        timer?.timeInterval
-    }
-
-    func schedule(_ timer: Timer) {
-        self.timer = timer
-    }
-
-    func fireTick(file: StaticString = #filePath, line: UInt = #line) {
-        guard let timer, timer.isValid else {
-            XCTFail("No progress timer is running, so it cannot tick.", file: file, line: line)
-            return
-        }
-        timer.fire()
     }
 }
 

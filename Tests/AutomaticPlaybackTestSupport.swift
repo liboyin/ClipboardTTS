@@ -3,9 +3,11 @@ import AVFoundation
 @testable import ClipboardTTSApp
 
 // Test doubles shared by the audio-manager suites. They live here rather than beside one suite so
-// either can drive the 0.1-second automatic-playback prebuffer deterministically: the scheduler
-// hands the deferred start back to the test, and the recorders turn the manager's processing and
-// publication hooks into explicit completion instead of an elapsed-time wait.
+// any of them can drive the 0.1-second automatic-playback prebuffer, the progress timer, and the
+// rendered position deterministically: the schedulers hand the deferred start and the timer back to
+// the test, the position source states what the node has rendered, and the recorders turn the
+// manager's processing and publication hooks into explicit completion instead of an elapsed-time
+// wait.
 
 final class AudioDataProcessingRecorder {
     private let lock = NSLock()
@@ -114,5 +116,45 @@ final class AudioStateUpdateRecorder {
         let expectation = pendingExpectations.isEmpty ? nil : pendingExpectations.removeFirst()
         lock.unlock()
         expectation?.fulfill()
+    }
+}
+
+/// States the rendered position a progress tick reads, so a test can drive the tick from a position
+/// it chose instead of from whatever the live audio graph has rendered by then.
+final class RenderedPositionSource {
+    var sampleTime: AVAudioFramePosition?
+
+    init(sampleTime: AVAudioFramePosition?) {
+        self.sampleTime = sampleTime
+    }
+
+    func read(_: AVAudioPlayerNode) -> AVAudioFramePosition? {
+        sampleTime
+    }
+}
+
+/// Keeps the manager's progress timer out of every run loop, so the only ticks are the ones a test
+/// fires, and each one runs the callback the manager gave that timer.
+final class ProgressTimerSpy {
+    private(set) var timer: Timer?
+
+    var isRunning: Bool {
+        timer?.isValid ?? false
+    }
+
+    var requestedInterval: TimeInterval? {
+        timer?.timeInterval
+    }
+
+    func schedule(_ timer: Timer) {
+        self.timer = timer
+    }
+
+    func fireTick(file: StaticString = #filePath, line: UInt = #line) {
+        guard let timer, timer.isValid else {
+            XCTFail("No progress timer is running, so it cannot tick.", file: file, line: line)
+            return
+        }
+        timer.fire()
     }
 }
