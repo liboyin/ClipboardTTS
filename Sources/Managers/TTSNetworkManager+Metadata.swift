@@ -237,7 +237,7 @@ extension TTSNetworkManager {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: CredentialHeaderField.authorization)
         let task = session.dataTask(with: request) { [weak self] data, response, error in
             guard let self, let data, error == nil else {
                 self?.finishMetadataRequest(for: .models, token: token)

@@ -133,9 +133,9 @@ extension TTSNetworkManager {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         if settings.provider == .gemini {
-            request.setValue(settings.apiKey, forHTTPHeaderField: "x-goog-api-key")
+            request.setValue(settings.apiKey, forHTTPHeaderField: CredentialHeaderField.googleAPIKey)
         } else {
-            request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: CredentialHeaderField.authorization)
         }
 
         do {

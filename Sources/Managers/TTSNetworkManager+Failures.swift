@@ -16,7 +16,7 @@ extension TTSNetworkManager {
         let hasGeminiStreamFailure: Bool
         let hasIncompleteGeminiEvent: Bool
         let geminiDeclaredFinishReason: String?
-        let didRefuseInsecureRedirect: Bool
+        let refusedRedirect: RefusedRedirect?
         let retryAttempt: RetryAttempt?
         /// The client to terminate. A stale completion carries an inert one: its task is not the
         /// active request, so it owns no session and returns before this is read.
@@ -35,7 +35,7 @@ extension TTSNetworkManager {
                     hasGeminiStreamFailure: false,
                     hasIncompleteGeminiEvent: false,
                     geminiDeclaredFinishReason: nil,
-                    didRefuseInsecureRedirect: false,
+                    refusedRedirect: nil,
                     retryAttempt: nil,
                     client: SpeechStreamClient(didReceiveAudio: { _ in }, didTerminate: { _ in }),
                     isStale: true
@@ -50,7 +50,7 @@ extension TTSNetworkManager {
                 hasGeminiStreamFailure: context.hasGeminiStreamFailure,
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
                 geminiDeclaredFinishReason: context.geminiDeclaredFinishReason,
-                didRefuseInsecureRedirect: context.didRefuseInsecureRedirect,
+                refusedRedirect: context.refusedRedirect,
                 retryAttempt: context.hasGeminiStreamFailure ? nil : permittedRetryAttempt(for: context, error: error),
                 client: context.client,
                 isStale: false
@@ -126,8 +126,8 @@ extension TTSNetworkManager {
     /// itself before the transport error that may accompany it.
     private func userFacingFailure(for result: TaskCompletionResult, error: Error?) -> String? {
         let noPlayableAudio = "The TTS service returned no playable audio. Please try again."
-        if result.didRefuseInsecureRedirect {
-            return Self.insecureTransportFailure
+        if let refusedRedirect = result.refusedRedirect {
+            return refusedRedirect.failureMessage
         } else if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
             return userFacingHTTPError(statusCode: statusCode)
         } else if result.provider == .gemini && result.hasGeminiStreamFailure {

@@ -100,4 +100,65 @@ final class EndpointTransportPolicyTests: XCTestCase {
             )
         }
     }
+
+    func testOnlySchemeHostAndEffectivePortDecideThatTwoURLsShareAnOrigin() throws {
+        // WHY: A provider that moves its speech endpoint within its own deployment must keep
+        // working, so the comparison has to ignore everything that is not the origin — path, query,
+        // userinfo — and read the spellings the same address can take: a default port written out,
+        // and the case-insensitive scheme and host DNS and URL syntax both define.
+        let sameOrigin = [
+            ("https://custom.api/v1/audio/speech", "https://custom.api/v2/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "https://custom.api/v1/audio/speech?retry=1"),
+            ("https://custom.api/v1/audio/speech", "https://custom.api:443/v1/audio/speech"),
+            ("http://localhost:80/v1/audio/speech", "http://localhost/v1/audio/speech"),
+            ("https://Custom.API/v1/audio/speech", "https://custom.api/v1/audio/speech"),
+            ("HTTPS://custom.api/v1/audio/speech", "https://custom.api/v1/audio/speech"),
+            ("https://user@custom.api/v1/audio/speech", "https://custom.api/v1/audio/speech")
+        ]
+
+        for (endpoint, target) in sameOrigin {
+            let url = try XCTUnwrap(URL(string: endpoint))
+            let other = try XCTUnwrap(URL(string: target))
+            XCTAssertTrue(
+                EndpointTransportPolicy.isSameOrigin(other, as: url),
+                "\(target) is the same origin as \(endpoint) and must stay reachable."
+            )
+        }
+    }
+
+    func testADifferentScheme_Host_OrPortIsADifferentOrigin() throws {
+        // WHY: Each of these sends the saved key somewhere its own endpoint never authorized — a
+        // sibling host, another port on the same host, or the cleartext spelling of the same
+        // address. The loopback pair differs in scheme alone, on a port both spellings state, which
+        // is the one shape where the scheme has to be compared in its own right: everywhere else
+        // the default port a scheme implies already separates the two. The last entries are forms
+        // whose meaning depends on a second reading: a trailing-dot name, a scheme the app never
+        // sends over — which matches nothing, its own repetition included, and states its own port
+        // in the second spelling precisely because a URL that carries one must not thereby answer
+        // for a scheme this rule does not know — and a hostless URL are refused rather than
+        // resolved on the user's behalf, as the transport rule refuses their equivalents.
+        let differentOrigin = [
+            ("https://custom.api/v1/audio/speech", "https://other.api/v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "https://sub.custom.api/v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "https://custom.api:8443/v1/audio/speech"),
+            ("https://custom.api:8443/v1/audio/speech", "https://custom.api/v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "http://custom.api/v1/audio/speech"),
+            ("http://127.0.0.1:8080/v1/audio/speech", "https://127.0.0.1:8080/v1/audio/speech"),
+            ("http://127.0.0.1:8080/v1/audio/speech", "http://localhost:8080/v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "https://custom.api./v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "ftp://custom.api/v1/audio/speech"),
+            ("ftp://custom.api/v1/audio/speech", "ftp://custom.api/v1/audio/speech"),
+            ("ftp://custom.api:21/v1/audio/speech", "ftp://custom.api:21/v1/audio/speech"),
+            ("https://custom.api/v1/audio/speech", "https:///v1/audio/speech")
+        ]
+
+        for (endpoint, target) in differentOrigin {
+            let url = try XCTUnwrap(URL(string: endpoint))
+            let other = try XCTUnwrap(URL(string: target))
+            XCTAssertFalse(
+                EndpointTransportPolicy.isSameOrigin(other, as: url),
+                "\(target) is not the origin \(endpoint) authorized to carry the key."
+            )
+        }
+    }
 }

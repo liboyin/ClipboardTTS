@@ -1,12 +1,15 @@
 import Foundation
 import Network
 
-/// Decides whether an endpoint may carry a saved API key and the user's clipboard text.
+/// Decides whether an endpoint may carry a saved API key and the user's clipboard text, and whether
+/// a redirect target is still the origin that was given them.
 ///
 /// Application Transport Security is a platform layer this app neither configures nor controls, so
 /// the rule below is the app's own contract: a request leaves the process only over HTTPS, or over
 /// plain HTTP to a loopback literal. Loopback is the one case where the traffic never reaches a
-/// network, which is why a local engine that cannot present a certificate stays usable.
+/// network, which is why a local engine that cannot present a certificate stays usable. Transport
+/// protects that traffic in flight and says nothing about who receives it, which is what the origin
+/// rule below decides.
 enum EndpointTransportPolicy {
     /// Returns whether an endpoint's transport protects the credentials and content it will carry.
     static func permitsCredentials(_ url: URL) -> Bool {
@@ -20,6 +23,57 @@ enum EndpointTransportPolicy {
             return isLoopbackLiteral(host)
         default:
             return false
+        }
+    }
+
+    /// Returns whether a URL names the same origin as the one a request was already built for.
+    ///
+    /// Origin is scheme, host, and effective port. A redirect that keeps all three reaches the
+    /// deployment the user configured; anything else is a recipient the saved key was never given
+    /// to, however well the transport to it is protected. Each part is read the way its own syntax
+    /// defines it — scheme and host case-insensitively, an omitted port as the scheme's default —
+    /// and a URL this cannot read an origin from matches nothing, which is the same fail-closed
+    /// answer `permitsCredentials` gives an ambiguous host.
+    static func isSameOrigin(_ url: URL, as other: URL) -> Bool {
+        guard let target = origin(of: url) else { return false }
+        return target == origin(of: other)
+    }
+
+    /// The three parts that decide whether two URLs address the same deployment.
+    private struct Origin: Equatable {
+        let scheme: String
+        let host: String
+        let port: Int
+    }
+
+    /// Returns a URL's origin, or nil when it does not name one this rule can compare.
+    private static func origin(of url: URL) -> Origin? {
+        // The scheme's default port is resolved first because it is also the test of whether this
+        // app sends over that scheme at all. Reading `url.port` first would let an unsupported
+        // scheme supply its own port and pass, which is the reading the guard below refuses.
+        // The raw host is deliberate here for the reason it is above: an origin decided by a
+        // decoder's reading of the host would let two spellings of one string name each other.
+        guard let scheme = url.scheme?.lowercased(),
+              let defaultPort = defaultPort(for: scheme),
+              let host = url.host(percentEncoded: true)?.lowercased(),
+              !host.isEmpty else {
+            return nil
+        }
+        return Origin(scheme: scheme, host: host, port: url.port ?? defaultPort)
+    }
+
+    /// Returns the port a scheme reaches when a URL omits one, for the schemes this app sends over.
+    ///
+    /// A scheme absent here has no origin at all, whether or not its URL states a port, so a
+    /// redirect to one is refused rather than compared against a port the app never authorized.
+    private static func defaultPort(for scheme: String) -> Int? {
+        switch scheme {
+        case "https":
+            return 443
+        case "http":
+            return 80
+        default:
+            return nil
         }
     }
 

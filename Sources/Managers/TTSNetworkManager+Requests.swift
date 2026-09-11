@@ -29,6 +29,27 @@ extension TTSNetworkManager {
     static let insecureTransportFailure =
         "The TTS endpoint must use HTTPS unless it runs on localhost. Update Settings and try again."
 
+    /// The single owner of the refusal shown when a redirect would hand the key to another origin.
+    ///
+    /// It names neither the configured endpoint nor the target, which is provider-controlled text,
+    /// and says what did not happen: the user can otherwise only guess whether the key travelled.
+    static let foreignOriginRedirectFailure =
+        "The TTS service redirected to a different address, so your key was not sent. Check the API endpoint in Settings and try again."
+
+    /// The header fields this app carries the saved API key in, and the single owner of that list.
+    ///
+    /// A request sets exactly one of them, and a redirect the app follows is given exactly these
+    /// back from the request that authorized it, so a credential introduced at a request-building
+    /// call site has to be named here too or a redirect would silently drop it.
+    enum CredentialHeaderField {
+        /// The bearer field OpenAI-compatible speech and model discovery authenticate with.
+        static let authorization = "Authorization"
+        /// The field Gemini's own endpoint authenticates with.
+        static let googleAPIKey = "x-goog-api-key"
+        /// Every field above, so a followed redirect carries the credentials its request did.
+        static let all = [authorization, googleAPIKey]
+    }
+
     /// Builds a valid provider endpoint from a settings snapshot, refusing unprotected transport.
     ///
     /// Every speech request resolves its endpoint here, so the transport rule cannot be skipped by
