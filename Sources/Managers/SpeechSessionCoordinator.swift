@@ -77,6 +77,36 @@ final class SpeechSessionCoordinator: ObservableObject {
         ))
     }
 
+    /// Applies a PCM sample rate to the audio graph, ending the session a changed format invalidates.
+    ///
+    /// The format decides how a session's PCM is decoded, so audio buffered under the rate being
+    /// replaced is unplayable and the player discards it. Its request is unplayable for the same
+    /// reason and has to go with it: left running, it would stream PCM the player's retired audio
+    /// generation drops byte by byte, spending the provider call and the user's quota on speech
+    /// nobody can hear, and holding `isStreaming` true so the menu offers to clear a buffer that is
+    /// already empty. Each manager still revokes its own half, as when a session is replaced: the
+    /// request is cancelled here and `setSampleRate` clears the audio, so one change advances each
+    /// generation once.
+    ///
+    /// The request is released before the graph is touched, as `cancel()` releases it before the
+    /// audio, so a session's two halves always end in that order. That order is load-bearing rather
+    /// than tidy: rebuilding the graph takes long enough for the request to complete inside it, and
+    /// a cancellation arriving afterwards would find nothing to cancel and leave the finished
+    /// request publishing the failure of a session this change had already retired.
+    ///
+    /// Only a rate that genuinely replaces the active format reaches the cancellation, and
+    /// `stopActiveSpeechRequest` cancels only while a logical request owns the pipeline — its one
+    /// permitted retry included. An unsupported rate applies no format, an unchanged one keeps the
+    /// session speaking, and a change with nothing paired to it leaves the request generation where
+    /// it was — which is what a menu click waiting out its deferred clipboard read, and a failure
+    /// still on screen from the request before it, both depend on.
+    func applyAudioFormat(sampleRate: Double) -> AudioPlayerManager.SampleRateUpdateResult {
+        if audioPlayer.changesAudioFormat(to: sampleRate) {
+            networkManager.stopActiveSpeechRequest()
+        }
+        return audioPlayer.setSampleRate(sampleRate)
+    }
+
     /// Ends the session that owns the pipeline, cancelling its request and clearing its audio.
     func cancel() {
         networkManager.stopStreaming()

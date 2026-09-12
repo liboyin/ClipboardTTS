@@ -35,7 +35,9 @@ enum TestNetworkFactory {
         defaults: UserDefaults = InMemoryDefaults(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
         audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.tests.audiodelivery"),
-        callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority()
+        callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
+        revocationTransactionObserver: @escaping @Sendable () -> Void = {},
+        retryInstallationObserver: @escaping @Sendable () -> Void = {}
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
@@ -47,7 +49,9 @@ enum TestNetworkFactory {
             defaults: defaults,
             requestBodyEncoder: requestBodyEncoder,
             audioDeliveryQueue: audioDeliveryQueue,
-            callbackAuthority: callbackAuthority
+            callbackAuthority: callbackAuthority,
+            revocationTransactionObserver: revocationTransactionObserver,
+            retryInstallationObserver: retryInstallationObserver
         )
         MockURLProtocol.register(
             audioDeliveryQueue: audioDeliveryQueue,

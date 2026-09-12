@@ -55,7 +55,14 @@ extension TTSNetworkManager {
                 client: context.client,
                 isStale: false
             )
-            if !context.hasGeminiStreamFailure {
+            // Ownership is released only when this logical request is finished, and a completion
+            // that earned a retry is not: the retry continues this same request, inheriting its
+            // generation and client. Releasing it here would leave a window in which nothing owns
+            // the pipeline while a request is about to resume on it, so a stop or a format change
+            // arriving in that window would find nothing to cancel and let the retry stream into a
+            // session already torn down. `startRetryAttempt` replaces this context; a generation
+            // that moved in the meantime has already cleared or replaced it, and refuses the retry.
+            if !context.hasGeminiStreamFailure && result.retryAttempt == nil {
                 activeRequest = nil
             }
             return result

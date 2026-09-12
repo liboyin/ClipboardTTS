@@ -95,10 +95,11 @@ final class TTSNetworkManagerRetryBoundaryTests: MockURLProtocolTestCase {
     }
 
     func testARetryCannotStartOnceItsRequestGenerationWasRevoked() {
-        // WHY: A failed attempt releases the active request before its retry installs one. A stop or
-        // a replacement landing in that window already owns the pipeline, so starting the retry
-        // there would speak text the user cancelled or fight the request that replaced it. No mock
-        // handler is installed, so a request that did escape also fails this test's scope teardown.
+        // WHY: A retry inherits the generation of the request it continues rather than taking one,
+        // so a stop or a replacement that landed since that request began already owns the pipeline.
+        // Starting the retry there would speak text the user cancelled or fight the request that
+        // replaced it. No mock handler is installed, so a request that did escape also fails this
+        // test's scope teardown.
         let manager = TestNetworkFactory.makeManager()
         configureGeminiProvider(manager)
         let revokedGeneration = manager.currentRequestGeneration()

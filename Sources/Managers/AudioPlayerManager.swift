@@ -149,8 +149,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             return .invalid
         }
         hasValidSampleRateInput = true
-        let currentSampleRate = bufferQueue.sync { audioFormat?.sampleRate }
-        guard currentSampleRate != sampleRate else {
+        guard changesAudioFormat(to: sampleRate) else {
             guard !engine.isRunning else {
                 hasValidSampleRateConfiguration = true
                 sampleRateError = nil
@@ -193,6 +192,19 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             sampleRateError = "Couldn't start audio playback. Try again."
             return .engineStartFailed
         }
+    }
+
+    /// Returns whether applying `sampleRate` would replace the format the buffered PCM was decoded
+    /// with, which is exactly when `setSampleRate` discards that PCM.
+    ///
+    /// The session owner asks before it applies a rate, because the request feeding that PCM has to
+    /// end with it: a format change that cleared the buffer alone would leave its request streaming
+    /// audio the player is now certain to drop. `setSampleRate` decides with this same answer, so
+    /// the prediction and the change cannot disagree. Only the main queue writes `audioFormat`, so
+    /// a caller that asks and then applies within one main-queue turn is told what it will do.
+    func changesAudioFormat(to sampleRate: Double) -> Bool {
+        guard Self.isSupportedSampleRate(sampleRate) else { return false }
+        return bufferQueue.sync { audioFormat?.sampleRate } != sampleRate
     }
 
     /// Returns whether a PCM sample rate can be represented by the app's mono Int16 graph.

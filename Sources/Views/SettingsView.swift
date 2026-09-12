@@ -333,12 +333,12 @@ struct SettingsView: View {
     @discardableResult
     func syncAudioFormat() -> Bool {
         guard selectedProvider != .custom || (isCustomSampleRateDraftValid && audioPlayer.hasValidSampleRateInput) else {
-            _ = audioPlayer.setSampleRate(.nan)
+            _ = speechSession.applyAudioFormat(sampleRate: .nan)
             return false
         }
         let customDraftSampleRate = Double(customSampleRateText) ?? customSampleRate
         let targetSampleRate = selectedProvider == .custom ? customDraftSampleRate : AudioPlayerManager.defaultSampleRate
-        switch audioPlayer.setSampleRate(targetSampleRate) {
+        switch speechSession.applyAudioFormat(sampleRate: targetSampleRate) {
         case .updated, .unchanged:
             if selectedProvider == .custom {
                 customSampleRate = customDraftSampleRate
@@ -353,10 +353,10 @@ struct SettingsView: View {
     func updateCustomSampleRate(from text: String) {
         guard let sampleRate = Double(text) else {
             isCustomSampleRateDraftValid = false
-            _ = audioPlayer.setSampleRate(.nan)
+            _ = speechSession.applyAudioFormat(sampleRate: .nan)
             return
         }
-        switch audioPlayer.setSampleRate(sampleRate) {
+        switch speechSession.applyAudioFormat(sampleRate: sampleRate) {
         case .updated, .unchanged:
             isCustomSampleRateDraftValid = true
             customSampleRate = sampleRate

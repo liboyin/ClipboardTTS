@@ -35,6 +35,16 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Session-lifecycle and request-body seams used by production setup and focused tests.
     private let sessionInvalidated: ((URLSession) -> Void)?
     let requestBodyEncoder: (Data) throws -> Data
+    /// The two points on the request-state path whose invariant is about what may interleave there.
+    /// Production does nothing at either; both exist because such an invariant can only be stated
+    /// from inside the window it protects.
+    ///
+    /// `revocationTransaction` runs inside the transaction a conditional revocation opens, after it
+    /// has read ownership and before it releases it: nothing may land between those two steps and
+    /// leave the revocation advancing a generation nothing owns any more. `retryInstallation` runs
+    /// after a retry's task is created and before that retry owns the pipeline, which is the window
+    /// in which the attempt it continues has ended and it has not yet begun.
+    let requestObservers: (revocationTransaction: @Sendable () -> Void, retryInstallation: @Sendable () -> Void)
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     /// Delivers request-owned PCM in the same order that `stateQueue` accepts delegate callbacks.
@@ -112,7 +122,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         var refusedRedirect: RefusedRedirect?
     }
 
-    /// Creates a manager and optionally observes the lifecycle of its underlying URL session.
+    /// Creates a manager, optionally observing the lifecycle of its underlying URL session, the
+    /// request-state transaction a conditional revocation opens, and a retry's installation.
     init(configuration: URLSessionConfiguration = .default,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
@@ -120,7 +131,9 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          defaults: UserDefaults,
          requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
          audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery"),
-         callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority()) {
+         callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
+         revocationTransactionObserver: @escaping @Sendable () -> Void = {},
+         retryInstallationObserver: @escaping @Sendable () -> Void = {}) {
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         self.selectedMetadataProvider = provider.settingsValue
@@ -145,6 +158,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             self.voice = defaults.string(forKey: SettingsKeys.customVoice) ?? ""
         }
         self.requestBodyEncoder = requestBodyEncoder
+        self.requestObservers = (revocationTransaction: revocationTransactionObserver,
+                                 retryInstallation: retryInstallationObserver)
         self.sessionInvalidated = sessionInvalidated
         self.audioDeliveryQueue = audioDeliveryQueue
         self.callbackAuthority = callbackAuthority

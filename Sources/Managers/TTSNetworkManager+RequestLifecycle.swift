@@ -58,6 +58,7 @@ extension TTSNetworkManager {
     /// authority because it neither revokes a generation nor authorizes a delivery.
     func startRetryAttempt(_ attempt: RetryAttempt) -> Bool {
         let task = session.dataTask(with: attempt.request)
+        requestObservers.retryInstallation()
         guard replaceActiveRequest(
             with: task,
             request: attempt.request,
@@ -178,5 +179,46 @@ extension TTSNetworkManager {
         let requestGeneration = revokeActiveRequest()
         clearLastError(requestGeneration: requestGeneration)
         setStreaming(false, requestGeneration: requestGeneration)
+    }
+
+    /// Cancels the request that owns the pipeline, and does nothing when none does.
+    ///
+    /// This is what a caller with nothing of its own to start uses — a format change that
+    /// invalidates the session a request is speaking into. The decision and the revocation are one
+    /// visit to `stateQueue`, because split apart a request that completed in between would be
+    /// "cancelled" by advancing a generation it no longer owns, which every waiting menu action
+    /// reads as somebody else claiming the pipeline. `stopStreaming` keeps advancing
+    /// unconditionally: the menu's Clear Buffer click revokes what a finished request may still
+    /// have in flight, which is a generation move the user asked for.
+    func stopActiveSpeechRequest() {
+        guard let cancelledGeneration = revokeRequestIfActive() else { return }
+        clearLastError(requestGeneration: cancelledGeneration)
+        setStreaming(false, requestGeneration: cancelledGeneration)
+    }
+
+    /// Cancels the request that owns the pipeline and returns its new generation, or nil when the
+    /// pipeline is unowned.
+    ///
+    /// A logical request owns the pipeline until it is finished, its one permitted retry included,
+    /// so the completion that earned a retry is still cancellable here and the retry it was about
+    /// to start is refused by `replaceActiveRequest`'s generation guard.
+    ///
+    /// Ownership is the context's own generation matching the current one, which every installed
+    /// request satisfies. The exception is the one context deliberately outlived by its generation:
+    /// a fatally malformed Gemini stream advances the generation first and leaves its context in
+    /// place until the revocation waiting at callback authority collects it. That request is
+    /// already revoked and is about to publish the failure the user must see, so cancelling it here
+    /// would advance a generation nothing owns and suppress that message.
+    private func revokeRequestIfActive() -> UInt64? {
+        callbackAuthority.lock()
+        defer { callbackAuthority.unlock() }
+        return stateQueue.sync {
+            guard let context = activeRequest, context.requestGeneration == requestGeneration else { return nil }
+            requestObservers.revocationTransaction()
+            context.task.cancel()
+            activeRequest = nil
+            requestGeneration &+= 1
+            return requestGeneration
+        }
     }
 }
