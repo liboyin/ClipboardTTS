@@ -323,10 +323,19 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
 
 /// File scope rather than a method, so a `@Sendable` mock handler builds a response without
 /// capturing the test case.
+///
+/// It declares the event-stream content type Gemini's own streaming endpoint sends, so these tests
+/// hold the response rule to skipping this provider: applied here, it would refuse a declaration
+/// that is correct for a transport whose audio is declared inside each event instead.
 private func successResponse(for request: URLRequest) -> HTTPURLResponse {
-    HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+    HTTPURLResponse(
+        url: request.url!,
+        statusCode: 200,
+        httpVersion: nil,
+        headerFields: ["Content-Type": "text/event-stream"]
+    )!
 }
 
 private func successResponse(for task: URLSessionDataTask) -> HTTPURLResponse {
-    HTTPURLResponse(url: task.currentRequest!.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+    successResponse(for: task.currentRequest!)
 }

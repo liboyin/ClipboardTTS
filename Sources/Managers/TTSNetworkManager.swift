@@ -110,6 +110,10 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         let isRetryAttempt: Bool
         var isErrorResponse = false
         var responseStatusCode: Int?
+        /// Whether this response declared a body that cannot be read as PCM, which is a separate
+        /// reason to discard it from the non-2xx status `isErrorResponse` records: a success this
+        /// request must not play still succeeded, and says so with its own message.
+        var refusedResponseFormat = false
         var geminiEventParser = GeminiSSEEventParser()
         var geminiIncompletePCM = Data()
         var hasGeminiStreamFailure = false
@@ -347,6 +351,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         update()
     }
 
+    /// Records what a response says about itself before any of its body arrives.
+    ///
+    /// A refused format is allowed and then dropped rather than cancelled here, which is how a
+    /// non-2xx response is already handled. Cancelling would end the task with a URL error, and
+    /// this request would then have two reasons to fail — the one it chose and the cancellation it
+    /// caused — where the second is the app's own doing and describes nothing the user can act on.
     func urlSession(_ session: URLSession,
                     dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
@@ -359,12 +369,26 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                     context.responseStatusCode = httpResponse.statusCode
                     if !(200...299).contains(httpResponse.statusCode) {
                         context.isErrorResponse = true
+                    } else if declaresUnplayableBody(httpResponse, for: context.provider) {
+                        context.refusedResponseFormat = true
                     }
                 }
                 activeRequest = context
             }
         }
         completionHandler(shouldAllow ? .allow : .cancel)
+    }
+
+    /// Returns whether a successful response declares a body this request cannot read as PCM.
+    ///
+    /// Gemini is exempt because its body is a Server-Sent Event stream rather than the audio
+    /// itself: `text/event-stream` is the correct declaration there, and what has to be checked is
+    /// each event's own inline payload, which `TTSNetworkManager+GeminiStreaming` does.
+    private func declaresUnplayableBody(_ response: HTTPURLResponse, for provider: ProviderKind) -> Bool {
+        guard provider != .gemini else { return false }
+        return !SpeechResponseFormatPolicy.permitsPCMBody(
+            declaredContentType: response.value(forHTTPHeaderField: "Content-Type")
+        )
     }
 
     func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {

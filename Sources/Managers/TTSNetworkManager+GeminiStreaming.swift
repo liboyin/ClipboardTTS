@@ -137,7 +137,7 @@ extension TTSNetworkManager {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         let failedGeminiTask = stateQueue.sync { () -> URLSessionDataTask? in
             guard var context = activeRequest, dataTask.taskIdentifier == context.taskIdentifier,
-                  !context.isErrorResponse else { return nil }
+                  !context.isErrorResponse, !context.refusedResponseFormat else { return nil }
             if context.provider == .gemini {
                 guard !context.hasGeminiStreamFailure else { return nil }
                 let events = context.geminiEventParser.append(data)
@@ -248,6 +248,13 @@ extension TTSNetworkManager {
     }
 
     /// Classifies the audio one Gemini candidate carries, independently of any reason it declared.
+    ///
+    /// A part that declares a media type this app cannot play is invalid rather than ignored. The
+    /// blob it arrived in is the same one that carries images, video, and documents elsewhere in
+    /// this API, so treating an unreadable declaration as absent would hand those bytes to the
+    /// player; treating the part as absent instead would let a stream that delivered nothing
+    /// playable end as though it had simply said nothing. `SpeechResponseFormatPolicy` owns which
+    /// declarations qualify, and accepts a part that declares none.
     private func audioPayload(in candidate: [String: Any]) -> GeminiEventContent.Payload {
         guard let rawContent = candidate["content"] else {
             return .noAudio
@@ -264,6 +271,7 @@ extension TTSNetworkManager {
         for part in parts {
             guard let rawInlineData = part["inlineData"] else { continue }
             guard let inlineData = rawInlineData as? [String: Any],
+                  SpeechResponseFormatPolicy.permitsInlinePCM(declaredMediaType: inlineData["mimeType"] as? String),
                   let base64String = inlineData["data"] as? String,
                   let audioData = Data(base64Encoded: base64String) else {
                 return .invalid

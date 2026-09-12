@@ -8,11 +8,21 @@ extension TTSNetworkManager {
     static let truncatedGeminiResponseFailure =
         "The TTS service stopped early. The speech that arrived is incomplete. Please try again."
 
+    /// The single owner of the message shown when a success response declared a body that is not audio.
+    ///
+    /// It points at the endpoint rather than inviting a retry, because a request that succeeded and
+    /// returned something other than audio is answering correctly for whatever is at that address —
+    /// most often one that is not a speech endpoint at all — and repeating it changes nothing. The
+    /// declaration it refused is provider-controlled text and is not quoted.
+    static let unplayableResponseFormatFailure =
+        "The TTS endpoint returned a response that is not audio. Check the API endpoint in Settings and try again."
+
     private struct TaskCompletionResult {
         let provider: ProviderKind?
         let requestGeneration: UInt64?
         let responseStatusCode: Int?
         let providerAudioByteCount: Int
+        let refusedResponseFormat: Bool
         let hasGeminiStreamFailure: Bool
         let hasIncompleteGeminiEvent: Bool
         let geminiDeclaredFinishReason: String?
@@ -32,6 +42,7 @@ extension TTSNetworkManager {
                     requestGeneration: nil,
                     responseStatusCode: nil,
                     providerAudioByteCount: 0,
+                    refusedResponseFormat: false,
                     hasGeminiStreamFailure: false,
                     hasIncompleteGeminiEvent: false,
                     geminiDeclaredFinishReason: nil,
@@ -47,6 +58,7 @@ extension TTSNetworkManager {
                 requestGeneration: context.requestGeneration,
                 responseStatusCode: context.responseStatusCode,
                 providerAudioByteCount: context.providerAudioByteCount,
+                refusedResponseFormat: context.refusedResponseFormat,
                 hasGeminiStreamFailure: context.hasGeminiStreamFailure,
                 hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
                 geminiDeclaredFinishReason: context.geminiDeclaredFinishReason,
@@ -129,14 +141,19 @@ extension TTSNetworkManager {
     /// Returns the app-owned message a finished request must publish, or nil when it succeeded.
     ///
     /// The order is the order of what the user can act on: a refused redirect explains itself
-    /// before the redirect status the provider happened to send, and an HTTP status explains
-    /// itself before the transport error that may accompany it.
+    /// before the redirect status the provider happened to send, an HTTP status explains itself
+    /// before the body that status was sent with, and both explain themselves before the transport
+    /// error that may accompany them. A refused response format sits between the two: it is the
+    /// definite reason this request delivered nothing, where a transport error that arrived
+    /// afterwards only says the body the app had already decided to discard stopped arriving.
     private func userFacingFailure(for result: TaskCompletionResult, error: Error?) -> String? {
         let noPlayableAudio = "The TTS service returned no playable audio. Please try again."
         if let refusedRedirect = result.refusedRedirect {
             return refusedRedirect.failureMessage
         } else if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
             return userFacingHTTPError(statusCode: statusCode)
+        } else if result.refusedResponseFormat {
+            return Self.unplayableResponseFormatFailure
         } else if result.provider == .gemini && result.hasGeminiStreamFailure {
             return noPlayableAudio
         } else if error != nil {
