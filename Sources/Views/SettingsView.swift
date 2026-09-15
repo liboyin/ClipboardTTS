@@ -120,8 +120,8 @@ struct SettingsView: View {
                     Text("Custom").tag("Custom")
                 }
                 .listStyle(.sidebar)
-                .onChange(of: ttsProvider) { newValue in
-                    providerDidChange(to: newValue)
+                .onChange(of: ttsProvider) { _ in
+                    syncSettings()
                 }
 
                 aboutButton
@@ -305,10 +305,6 @@ struct SettingsView: View {
         guard syncAudioFormat() else { return }
         applyCredentialsToFutureRequests()
         speechSession.start(text: "Hello! This is a test of your text to speech configuration.")
-    }
-
-    func providerDidChange(to newValue: String) {
-        syncSettings()
     }
 
     func syncSettings() {
