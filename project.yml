@@ -38,7 +38,9 @@ targets:
   ClipboardTTSAppTests:
     type: bundle.unit-test
     platform: macOS
-    deploymentTarget: "13.0"
+    # Xcode 26.6's XCTest libraries have a macOS 14 minimum. This constrains only the
+    # test runner; ClipboardTTSApp continues to support macOS 13.
+    deploymentTarget: "14.0"
     sources: [Tests]
     dependencies:
       - target: ClipboardTTSApp

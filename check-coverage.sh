@@ -18,13 +18,14 @@ MANAGERS_MIN=85
 cd "$(dirname "$0")"
 
 RESULT="${1:-build/TestResults.xcresult}"
+TEST_ARCH="$(uname -m)"
 
 if [ -z "${1:-}" ]; then
   rm -rf "$RESULT"
   xcodebuild \
     -project ClipboardTTSApp.xcodeproj \
-    -scheme ClipboardTTSAppTests \
-    -destination 'platform=macOS' \
+    -scheme ClipboardTTSApp \
+    -destination "platform=macOS,arch=${TEST_ARCH}" \
     -enableCodeCoverage YES \
     -resultBundlePath "$RESULT" \
     test
