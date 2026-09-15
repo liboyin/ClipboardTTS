@@ -15,7 +15,7 @@ let documentedGeminiTTSVoices = [
 ]
 
 final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
-    func testFetchAvailableModels() {
+    func testModelCatalogsReflectProviderCapabilities() {
         let manager = TestNetworkFactory.makeManager()
 
         // Provider-defined lists use the same guarded publication path as network-backed metadata.
@@ -62,7 +62,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         wait(for: [openAIModelsPublished], timeout: 1.0)
     }
 
-    func testFetchAvailableVoices() {
+    func testVoiceCatalogsReflectProviderAndModelCapabilities() {
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(
             baseURL: "https://api.openai.com/v1/audio/speech",
@@ -179,7 +179,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         wait(for: [customVoicesRefused], timeout: 1.0)
     }
 
-    func testPublishingTheGeminiCatalogLeavesAValidSavedVoiceOnTheNextRequest() {
+    func testGeminiVoiceCatalogRefreshPreservesSavedVoiceInSpeechRequest() {
         // WHY: The catalog is provider metadata, not a selection. A refresh that also wrote a voice
         // would speak in a voice the user never chose while Settings still displays theirs, and the
         // saved choice's position in the published order is no reason to replace it. The saved voice
