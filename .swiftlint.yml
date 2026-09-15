@@ -17,7 +17,7 @@ line_length:
   ignores_urls: true
   ignores_comments: true
 
-# streamTTS builds two provider-specific request bodies inline; a little longer than default.
+# streamTTS owns coherent request startup, including validation, authorization, and lifecycle setup.
 function_body_length:
   warning: 60
 
