@@ -153,7 +153,7 @@ struct SettingsView: View {
         // still opens it at the former fixed size.
         .frame(minWidth: 600, minHeight: 350)
         .onAppear {
-            customSampleRateText = String(format: "%.0f", customSampleRate)
+            customSampleRateText = displayedCustomSampleRate(customSampleRate)
             isCustomSampleRateDraftValid = AudioPlayerManager.isSupportedSampleRate(customSampleRate)
             syncSettings()
         }
@@ -362,7 +362,11 @@ struct SettingsView: View {
             isCustomSampleRateDraftValid = true
         }
     }
-
+    /// Renders a persisted rate losslessly while keeping whole-number display compact.
+    private func displayedCustomSampleRate(_ sampleRate: Double) -> String {
+        let description = String(sampleRate)
+        return description.hasSuffix(".0") ? String(description.dropLast(2)) : description
+    }
     func fetchMetadata() {
         guard selectedProvider != .custom else { return }
         networkManager.fetchAvailableModels(

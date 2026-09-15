@@ -10,6 +10,55 @@ import XCTest
 @MainActor
 final class SettingsAudioFormatTests: MockURLProtocolTestCase {
 
+    func testOpeningCustomSettingsPreservesFractionalSampleRateAcrossReopen() {
+        // WHY: Mounting Settings synchronizes the visible draft into the audio graph and persisted
+        // configuration. Rounding the draft there silently changes the next request's PCM format
+        // and invokes the live-format cancellation policy even though the user changed nothing.
+        let sampleRate = 24_000.4
+        let defaults = makeOwnedDefaults([
+            SettingsKeys.ttsProvider: "Custom",
+            SettingsKeys.customSampleRate: sampleRate
+        ])
+        let secretStore = InMemorySecretStore()
+        let audioPlayer = AudioPlayerManager()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
+        MockURLProtocol.installRequestHandler { _ in
+            XCTFail("Opening a Custom Settings form must not request metadata.")
+            return (HTTPURLResponse(), Data())
+        }
+
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            defaults: defaults,
+            testCase: self
+        )
+
+        XCTAssertEqual(settings.text(in: .customSampleRate), "24000.4")
+        XCTAssertEqual(defaults.double(forKey: SettingsKeys.customSampleRate), sampleRate)
+        XCTAssertEqual(audioPlayer.sampleRate, sampleRate)
+        // A later ordinary Settings synchronization must read the preserved draft rather than
+        // rounding it after SwiftUI has committed the initial state.
+        settings.type("custom-model", into: .customModel, expecting: "")
+        XCTAssertEqual(defaults.double(forKey: SettingsKeys.customSampleRate), sampleRate)
+        XCTAssertEqual(audioPlayer.sampleRate, sampleRate)
+        settings.release()
+
+        let reopenedSettings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: audioPlayer,
+            secretStore: secretStore,
+            defaults: defaults,
+            testCase: self
+        )
+
+        XCTAssertEqual(reopenedSettings.text(in: .customSampleRate), "24000.4")
+        XCTAssertEqual(defaults.double(forKey: SettingsKeys.customSampleRate), sampleRate)
+        XCTAssertEqual(audioPlayer.sampleRate, sampleRate)
+        reopenedSettings.release()
+    }
+
     func testEditingTheCustomSampleRateCancelsTheRequestItInvalidates() {
         // WHY: This is the Settings half of NB9, on the route that changes a format most often.
         // Typing a rate the graph accepts discards the PCM already decoded at the old one; the

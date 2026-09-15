@@ -140,6 +140,16 @@ final class HostedSettings {
         edit(control, to: newText, file: file, line: line)
     }
 
+    /// Returns text the mounted form shows for a plain field without editing its binding.
+    func text(in field: PlainTextField) -> String? {
+        let fields = editableTextFields().filter { !($0 is NSSecureTextField) }
+        guard fields.indices.contains(field.position) else {
+            XCTFail("Settings does not render the requested plain text field.")
+            return nil
+        }
+        return fields[field.position].stringValue
+    }
+
     /// Types a new API key into the form's key field, which is the only secure field it renders.
     func typeAPIKey(_ newText: String, file: StaticString = #filePath, line: UInt = #line) {
         let secureFields = editableTextFields().compactMap { $0 as? NSSecureTextField }
