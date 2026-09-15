@@ -3,7 +3,7 @@ import Foundation
 /// Streams speech audio for one request at a time and publishes request state to the menu bar.
 ///
 /// Marked `@unchecked Sendable` because the `URLSessionDataDelegate` conformance requires
-/// `Sendable` and URLSession invokes delegate methods on its own queue. Three confinement rules
+/// `Sendable` and URLSession invokes delegate methods on its own queue. Four confinement rules
 /// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
 /// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
 ///   `baseURL`, `apiKey`, `model`, `voice`, `selectedMetadataProvider`, the metadata request
