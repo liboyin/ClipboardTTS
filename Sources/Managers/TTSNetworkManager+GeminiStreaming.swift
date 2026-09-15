@@ -56,7 +56,7 @@ extension TTSNetworkManager {
     /// content-free candidate, or not at all, and reading it must not change how audio is classified.
     private struct GeminiEventContent {
         enum Payload {
-            case audio(Data)
+            case audio([Data])
             case noAudio
             case invalid
         }
@@ -193,14 +193,16 @@ extension TTSNetworkManager {
                 context.geminiDeclaredFinishReason = declaredFinishReason
             }
             switch content.payload {
-            case let .audio(audioData):
-                guard let playableAudio = recordGeminiAudio(audioData, in: &context) else { continue }
-                let dataHandler = context.client.didReceiveAudio
-                enqueueAudioDelivery(
-                    playableAudio,
-                    dataHandler: dataHandler,
-                    requestGeneration: context.requestGeneration
-                )
+            case let .audio(audioParts):
+                for audioData in audioParts {
+                    guard let playableAudio = recordGeminiAudio(audioData, in: &context) else { continue }
+                    let dataHandler = context.client.didReceiveAudio
+                    enqueueAudioDelivery(
+                        playableAudio,
+                        dataHandler: dataHandler,
+                        requestGeneration: context.requestGeneration
+                    )
+                }
             case .noAudio:
                 continue
             case .invalid:
@@ -247,7 +249,7 @@ extension TTSNetworkManager {
         )
     }
 
-    /// Classifies the audio one Gemini candidate carries, independently of any reason it declared.
+    /// Classifies every audio part in one Gemini candidate, independently of any reason it declared.
     ///
     /// A part that declares a media type this app cannot play is invalid rather than ignored. The
     /// blob it arrived in is the same one that carries images, video, and documents elsewhere in
@@ -268,6 +270,7 @@ extension TTSNetworkManager {
         guard let parts = rawParts as? [[String: Any]] else {
             return .invalid
         }
+        var audioParts: [Data] = []
         for part in parts {
             guard let rawInlineData = part["inlineData"] else { continue }
             guard let inlineData = rawInlineData as? [String: Any],
@@ -276,9 +279,9 @@ extension TTSNetworkManager {
                   let audioData = Data(base64Encoded: base64String) else {
                 return .invalid
             }
-            return .audio(audioData)
+            audioParts.append(audioData)
         }
-        return .noAudio
+        return audioParts.isEmpty ? .noAudio : .audio(audioParts)
     }
 
 }

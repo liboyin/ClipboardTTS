@@ -78,6 +78,61 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         }
     }
 
+    func testGeminiDeliversEveryAudioPartInOrderAndJoinsPartialFrames() {
+        // WHY: Gemini puts response parts in one ordered candidate. The PCM accumulator, not each
+        // part, owns frame boundaries, so a frame split between parts must still reach playback.
+        let manager = TestNetworkFactory.makeManager()
+        configureGemini(manager)
+        let requestStarted = expectation(description: "Gemini request starts")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 1.0)
+            return (successResponse(for: request), nil)
+        }
+
+        let expectedAudio = [Data([0, 1]), Data([2, 3])]
+        let allAudioDelivered = expectation(description: "All complete PCM frames deliver")
+        let delivered = LockedValue<[Data]>([])
+        let task = startGeminiRequest(manager, requestStarted: requestStarted) { data in
+            let deliveredCount = delivered.withValue { chunks -> Int in
+                chunks.append(data)
+                return chunks.count
+            }
+            if deliveredCount == expectedAudio.count {
+                allAudioDelivered.fulfill()
+            }
+        }
+        defer { releaseResponse.signal() }
+
+        receive(manager, response: successResponse(for: task), for: task)
+        let multipartEvent = sseEvent(
+            audioParts: [Data([0]), Data([1, 2]), Data([3])],
+            lineEnding: "\n"
+        )
+        manager.urlSession(
+            manager.session,
+            dataTask: task,
+            didReceive: multipartEvent
+        )
+        wait(for: [allAudioDelivered], timeout: 1.0)
+        XCTAssertEqual(delivered.value, expectedAudio)
+        assertTerminalState(of: manager, expectedError: nil) {
+            manager.urlSession(manager.session, task: task, didCompleteWithError: nil)
+        }
+    }
+
+    func testGeminiMalformedLaterAudioPartRevokesTheWholeEvent() {
+        // WHY: Returning after a valid first part would play it and silently ignore a corrupt
+        // later part, which is a successful-looking response from a malformed provider event.
+        let malformedInlineData = "{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"AAE=\"}}"
+        assertGeminiEventFailure(
+            event: Data(
+                "data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\"AAE=\"}},\(malformedInlineData)]}}]}\n\n".utf8
+            )
+        )
+    }
+
     func testGeminiEOFWithTrailingIncompleteEventFailsAfterDeliveringPriorAudio() {
         // WHY: A graceful HTTP completion must not silently accept an unterminated event after
         // playback starts; parsing it would risk base64 corruption, while discarding it loses a
@@ -315,12 +370,16 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
     }
 
     private func sseEvent(audio: Data, lineEnding: String) -> Data {
-        let prefix = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\""
-        let suffix = "\"}}]}}]}"
-        return Data("\(prefix)\(audio.base64EncodedString())\(suffix)\(lineEnding)\(lineEnding)".utf8)
+        sseEvent(audioParts: [audio], lineEnding: lineEnding)
+    }
+
+    private func sseEvent(audioParts: [Data], lineEnding: String) -> Data {
+        let prefix = "data: {\"candidates\":[{\"content\":{\"parts\":["
+        let audioPartsJSON = audioParts.map { "{\"inlineData\":{\"data\":\"\($0.base64EncodedString())\"}}" }
+            .joined(separator: ",")
+        return Data("\(prefix)\(audioPartsJSON)]}}]}\(lineEnding)\(lineEnding)".utf8)
     }
 }
-
 /// File scope rather than a method, so a `@Sendable` mock handler builds a response without
 /// capturing the test case.
 ///
