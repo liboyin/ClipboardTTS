@@ -314,6 +314,32 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         XCTAssertEqual(scheduler.scheduledActionCount, 1)
     }
 
+    func testAutomaticPlaybackSchedulesTheCompleteFrameBeforeATrailingByte() {
+        // WHY: An odd final response must preserve the frame it completed while discarding the
+        // orphaned byte. Scheduling the raw byte count would manufacture half a sample; rejecting
+        // the packet would make the player's behavior disagree with the network completion rule.
+        let scheduler = ManualAutomaticPlaybackScheduler()
+        let scheduledBuffers = ScheduledPCMBufferRecorder()
+        let stateUpdates = AudioStateUpdateRecorder()
+        let bufferedState = stateUpdates.expectNextUpdate()
+        let player = AudioPlayerManager(
+            scheduledBufferObserver: scheduledBuffers.record,
+            automaticPlaybackScheduler: scheduler.schedule,
+            audioStateObserver: stateUpdates.record
+        )
+        defer { player.stop() }
+        let generation = player.startNewStream()
+
+        player.scheduleAudio(data: Data([0, 1, 2]), streamGeneration: generation)
+        wait(for: [bufferedState], timeout: 1.0)
+
+        XCTAssertEqual(scheduledBuffers.count, 1)
+        XCTAssertEqual(scheduledBuffers.totalFrameCount, 1)
+        XCTAssertTrue(player.hasAudio)
+        XCTAssertEqual(player.bufferDuration, 1.0 / 24_000.0, accuracy: 0.000_001)
+        XCTAssertEqual(scheduler.scheduledActionCount, 1)
+    }
+
     private func assertPlayingState(of player: AudioPlayerManager, is expectedState: Bool) {
         let expectation = XCTestExpectation(description: "Delayed playback action is handled on the main queue")
         DispatchQueue.main.async {

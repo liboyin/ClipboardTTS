@@ -63,10 +63,6 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 
 ### Non-blocking
 
-#### NB2 — A trailing partial PCM byte causes a false no-audio failure
-
-**Validated — both transport probes; legacy Task 38, revised to Non-blocking.** Complete frames survive; the even-length completion predicate misreports that no playable audio arrived. **Paths:** [failure classifier](Sources/Managers/TTSNetworkManager+Failures.swift), [AudioPlayerManager](Sources/Managers/AudioPlayerManager.swift), failure/streaming tests, README. **Direction:** implement D3; never drop complete frames to satisfy the stricter predicate. **Acceptance:** network and player agree for empty, one-byte, odd, and even responses. Preserve HTTP, transport, malformed-event, redirect, and explicitly declared Gemini truncation precedence.
-
 #### NB3 — Gemini ignores additional audio parts in one event
 
 **Validated — multipart probe.** Parts [0,1] and [2,3] delivered only [0,1] without failure; a malformed second part was ignored. **Paths:** [Gemini decoder](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift). **Direction:** inspect all relevant parts of the selected candidate in order; preserve candidate selection and metadata behavior. **Acceptance:** valid parts contribute ordered PCM, fragments join correctly, malformed later parts cannot silently succeed, and fatal-event revocation remains. **Reference:** [Google Content schema](https://ai.google.dev/api/generate-content#Content).
@@ -141,12 +137,13 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 
 ## Ready for implementation
 
-No task is currently expanded into a full boundary. Suggested order: the remaining response work (NB2/NB3); settings/catalog simplification. This is priority guidance, not a phase fence. Expand the assigned task into a boundary here before implementing it, and give every change its assigned scope.
+No task is currently expanded into a full boundary. Suggested order: the remaining response work (NB3); settings/catalog simplification. This is priority guidance, not a phase fence. Expand the assigned task into a boundary here before implementing it, and give every change its assigned scope.
 
 ## Deferred, accepted, and completed dispositions
 
 - **N1 — Fixed.** Completed documentation-only boundary — **intent/direction:** align [TTSNetworkManager](Sources/Managers/TTSNetworkManager.swift)'s count with its four listed rules; **dependency:** that source list; **non-goals:** change no rule, test, or runtime behavior; **validation:** inspect the comment, local TODO link, and diff; **done:** remove the active entry and retain this trace.
 - **N2 — Fixed.** Updated [.swiftlint.yml](.swiftlint.yml)'s function-length rationale to describe `streamTTS`'s current validation, authorization, and lifecycle setup; no lint rule, threshold, source, test, or runtime behavior changed.
+- **NB2 — Fixed.** Completion now treats a response as playable when it contains at least one complete 16-bit PCM frame, so a final orphaned byte no longer turns the frames the player schedules into a no-audio failure. Empty and single-byte OpenAI, Custom, and Gemini responses still fail; Gemini continues delivering only its complete frames, and the player continues scheduling only complete frames. README owns the current behavior.
 - **N3 — Fixed.** The Settings sidebar provider binding now calls `syncSettings()` directly, preserving provider normalization, future-request settings, audio-format synchronization, and metadata refresh; NB14 still owns duplicate model/voice-observer removal and discovery-frequency changes.
 - **N4 — Fixed.** Renamed the three metadata-provider tests for their protected provider/catalog behavior; discovery, declaration placement, bodies, assertions, fixtures, and production behavior are unchanged. XCTest executes them alphabetically under their new names.
 - **N5 — Fixed.** The test bundle now targets macOS 14, matching Xcode 26.6 XCTest's binary minimum; the app remains macOS 13. `check-coverage.sh` uses the generated app scheme and its host architecture. Regeneration was inspected but remains uncommitted; a clean 294-test run and the 97.79% coverage gate passed. AppIntents' skipped-metadata messages are benign because neither target links its framework; no source warning was suppressed.
@@ -167,7 +164,7 @@ No task is currently expanded into a full boundary. Suggested order: the remaini
 
 | Old task | Current owner | Disposition |
 |---|---|---|
-| 38 | NB2 / D3 | Retained; Non-blocking, tolerate trailing partial byte |
+| 38 | NB2 / D3 | Fixed; tolerate a trailing partial byte after complete PCM |
 | 40 | NB4 / D5 | Fixed; see NB4's disposition |
 | 42 | NB25 | Retained validation question; historical mutant is not current proof |
 | 44 | NB1 / D4 | Fixed; see NB1's disposition |

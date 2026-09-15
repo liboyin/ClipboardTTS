@@ -171,9 +171,12 @@ extension TTSNetworkManager {
         return nil
     }
 
-    /// Returns whether a byte count represents at least one whole 16-bit PCM frame.
+    /// Returns whether a byte count contains at least one whole 16-bit PCM frame.
+    ///
+    /// A response may end halfway through its next frame. The player retains only complete frames,
+    /// so that final byte must not turn otherwise playable audio into a no-audio failure.
     private func containsCompletePCMFrame(_ byteCount: Int) -> Bool {
-        byteCount >= 2 && byteCount.isMultiple(of: 2)
+        byteCount >= 2
     }
 
     /// Returns whether a Gemini candidate explicitly reported ending for a reason other than `STOP`.

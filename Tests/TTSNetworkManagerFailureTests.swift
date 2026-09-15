@@ -151,7 +151,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
             XCTAssertFalse(manager.isStreaming)
     }
 
-    func testGeminiResponseWithOddLengthPCMDoesNotDeliverUnplayableAudio() {
+    func testGeminiResponseWithOneBytePCMDoesNotDeliverAudio() {
         // WHY: A decodable Gemini payload can still be unusable when it contains only one byte.
         // The provider-specific decoder must enforce the same 16-bit PCM boundary as streamed audio.
         let manager = TestNetworkFactory.makeManager()
@@ -170,8 +170,8 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         }
 
         assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
-            manager.streamTTS(text: "Test odd-length Gemini audio") { _ in
-                XCTFail("Odd-length PCM must not be delivered.")
+            manager.streamTTS(text: "Test one-byte Gemini audio") { _ in
+                XCTFail("A payload without a complete PCM frame must not be delivered.")
             }
         }
 
