@@ -128,7 +128,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Creates a manager, optionally observing the lifecycle of its underlying URL session, the
     /// request-state transaction a conditional revocation opens, and a retry's installation.
-    init(configuration: URLSessionConfiguration = .default,
+    init(configuration: URLSessionConfiguration? = nil,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
          secretStore: SecretStoring = KeychainSecretStore(),
@@ -169,7 +169,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         self.callbackAuthority = callbackAuthority
 
         super.init()
-        self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        self.session = URLSession(configuration: configuration ?? Self.productionSessionConfiguration(), delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
         if let errorMessage = secretStartupState.errorMessage { self.lastError = errorMessage }
         // Startup collapses its migration failures into the first provider's guidance, so the same

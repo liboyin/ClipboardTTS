@@ -25,12 +25,22 @@ func requestBodyData(from request: URLRequest) -> Data? {
     return body
 }
 
-/// Creates sessions and network managers whose requests are always routed through MockURLProtocol.
+/// Creates mock-routed sessions and managers, plus a no-request production-policy inspection mode.
 enum TestNetworkFactory {
+    enum ManagerSessionConfiguration {
+        /// The ordinary test policy, onto which this factory installs MockURLProtocol routing.
+        case ephemeral
+        /// A caller-owned policy, onto which this factory installs MockURLProtocol routing.
+        case provided(URLSessionConfiguration)
+        /// The manager builds its production default; no request may be issued from that manager.
+        case productionDefault
+    }
+
     /// Creates a mock-routed manager. `defaults` is fresh test-owned storage unless the caller
     /// passes its own, so a manager reads and migrates nothing the developer configured, and a test
     /// that must share one domain between the manager and a hosted form passes that domain here.
     static func makeManager(
+        sessionConfiguration: ManagerSessionConfiguration = .ephemeral,
         secretStore: SecretStoring = InMemorySecretStore(),
         defaults: UserDefaults = InMemoryDefaults(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
@@ -41,8 +51,17 @@ enum TestNetworkFactory {
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
+        let configuration: URLSessionConfiguration?
+        switch sessionConfiguration {
+        case .ephemeral:
+            configuration = makeConfiguration(testIdentifier: testIdentifier)
+        case let .provided(policy):
+            configuration = makeConfiguration(testIdentifier: testIdentifier, sessionConfiguration: policy)
+        case .productionDefault:
+            configuration = nil
+        }
         let manager = TTSNetworkManager(
-            configuration: makeConfiguration(testIdentifier: testIdentifier),
+            configuration: configuration,
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
             secretStore: secretStore,
@@ -94,8 +113,9 @@ enum TestNetworkFactory {
         return session
     }
 
-    private static func makeConfiguration(testIdentifier: String) -> URLSessionConfiguration {
-        let configuration = URLSessionConfiguration.ephemeral
+    private static func makeConfiguration(testIdentifier: String,
+                                          sessionConfiguration: URLSessionConfiguration? = nil) -> URLSessionConfiguration {
+        let configuration = sessionConfiguration ?? URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         configuration.httpAdditionalHeaders = [
             MockURLProtocol.testIdentifierHeader: testIdentifier
