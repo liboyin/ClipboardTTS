@@ -61,7 +61,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// The legacy-key migration warning this manager last published, retained so a later recovery
     /// can withdraw or replace exactly that message rather than whatever `lastError` holds by then.
     private var migrationFailureMessage: String?
-    private(set) var selectedMetadataProvider: String
+    private(set) var selectedMetadataProvider: APIKeyProvider
     var metadataGeneration: UInt64 = 0
     var nextMetadataRequestIdentifier: UInt64 = 0
     var modelMetadataRequest: MetadataRequest?
@@ -73,27 +73,13 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     var activeTaskForTesting: URLSessionDataTask? { stateQueue.sync { activeRequest?.task } }
     #endif
 
-    enum ProviderKind: Equatable {
-        case openAICompatible
-        case gemini
-        case custom
-
-        init(baseURL: String, selectedProvider: String) {
-            if selectedProvider == "Custom" {
-                self = .custom
-            } else {
-                self = baseURL.contains("generativelanguage.googleapis.com") ? .gemini : .openAICompatible
-            }
-        }
-    }
-
     /// The values used to create one request, captured before the task is resumed.
     struct RequestSettings {
         let baseURL: String
         let apiKey: String
         let model: String
         let voice: String
-        let provider: ProviderKind
+        let provider: APIKeyProvider
     }
 
     /// State that belongs exclusively to the active URL session task and is guarded by `stateQueue`.
@@ -101,7 +87,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         let task: URLSessionDataTask
         let taskIdentifier: Int
         let requestGeneration: UInt64
-        let provider: ProviderKind
+        let provider: APIKeyProvider
         /// The request this attempt sent, retained so its permitted retry replays exactly it.
         let request: URLRequest
         /// Receives this request's PCM and, behind all of it, the one terminal event it delivers.
@@ -140,7 +126,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          retryInstallationObserver: @escaping @Sendable () -> Void = {}) {
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
-        self.selectedMetadataProvider = provider.settingsValue
+        self.selectedMetadataProvider = provider
         let secretStartupState = APIKeyStartupState.load(
             selectedProvider: provider.settingsValue, secretStore: secretStore, defaults: defaults
         )
@@ -182,21 +168,21 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
     ///
-    /// The caller names the provider rather than letting the manager infer one from the endpoint,
-    /// so `selectedMetadataProvider` can only ever hold an identity a surface is able to match: an
-    /// inferred name that no provider form recognizes would silently refuse every list it tags.
+    /// The caller's string is normalized before it enters request or metadata state, so endpoint
+    /// text cannot select a protocol and every stored identity has a matching provider surface.
     func updateSettings(baseURL: String,
                         apiKey: String,
                         model: String,
                         voice: String,
                         selectedProvider: String) {
+        let provider = APIKeyProvider(selectedProvider: selectedProvider)
         let invalidatedGeneration: UInt64? = stateQueue.sync {
-            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != selectedProvider
+            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != provider
             self.baseURL = baseURL
             self.apiKey = apiKey
             self.model = model
             self.voice = voice
-            self.selectedMetadataProvider = selectedProvider
+            self.selectedMetadataProvider = provider
 
             guard metadataScopeChanged else { return nil }
 
@@ -225,7 +211,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Returns whether the manager's future-request settings belong to the supplied persisted provider.
-    func isCurrentProvider(_ provider: String) -> Bool {
+    func isCurrentProvider(_ provider: APIKeyProvider) -> Bool {
         stateQueue.sync {
             selectedMetadataProvider == provider
         }
@@ -249,7 +235,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                 apiKey: apiKey,
                 model: model,
                 voice: voice,
-                provider: ProviderKind(baseURL: baseURL, selectedProvider: selectedMetadataProvider)
+                provider: selectedMetadataProvider
             )
         }
     }
@@ -384,7 +370,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Gemini is exempt because its body is a Server-Sent Event stream rather than the audio
     /// itself: `text/event-stream` is the correct declaration there, and what has to be checked is
     /// each event's own inline payload, which `TTSNetworkManager+GeminiStreaming` does.
-    private func declaresUnplayableBody(_ response: HTTPURLResponse, for provider: ProviderKind) -> Bool {
+    private func declaresUnplayableBody(_ response: HTTPURLResponse, for provider: APIKeyProvider) -> Bool {
         guard provider != .gemini else { return false }
         return !SpeechResponseFormatPolicy.permitsPCMBody(
             declaredContentType: response.value(forHTTPHeaderField: "Content-Type")

@@ -18,7 +18,7 @@ extension TTSNetworkManager {
         "The TTS endpoint returned a response that is not audio. Check the API endpoint in Settings and try again."
 
     private struct TaskCompletionResult {
-        let provider: ProviderKind?
+        let provider: APIKeyProvider?
         let requestGeneration: UInt64?
         let responseStatusCode: Int?
         let providerAudioByteCount: Int
@@ -164,7 +164,7 @@ extension TTSNetworkManager {
             return Self.truncatedGeminiResponseFailure
         } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
             return noPlayableAudio
-        } else if (result.provider == .openAICompatible || result.provider == .custom)
+        } else if (result.provider == .openAI || result.provider == .custom)
                     && !containsCompletePCMFrame(result.providerAudioByteCount) {
             return noPlayableAudio
         }

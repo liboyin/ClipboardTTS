@@ -179,4 +179,65 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             XCTAssertFalse(SettingsKeys.allUserDefaultsKeys.contains { defaults.string(forKey: $0) == token })
         }
     }
+
+    func testCustomGoogleLookingHostUsesTheOpenAICompatibleSpeechContract() {
+        // WHY: A Custom hostname is provider-controlled text, not an identity. Treating this one
+        // as Gemini would send the wrong URL, payload, and credential to a compatible server.
+        let endpoint = "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech"
+        let manager = TestNetworkFactory.makeManager()
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "custom-token",
+            model: "custom-model",
+            voice: "custom-voice",
+            selectedProvider: "Custom"
+        )
+        let requestEmitted = expectation(description: "Custom compatible request is emitted")
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.url?.absoluteString, endpoint)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer custom-token")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
+            guard let bodyData = requestBodyData(from: request),
+                  let body = try? JSONSerialization.jsonObject(with: bodyData) as? [String: String] else {
+                XCTFail("A Custom endpoint must receive the OpenAI-compatible payload.")
+                requestEmitted.fulfill()
+                return (HTTPURLResponse(), Data())
+            }
+            XCTAssertEqual(body["model"], "custom-model")
+            XCTAssertEqual(body["voice"], "custom-voice")
+            XCTAssertEqual(body["response_format"], "pcm")
+            requestEmitted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data([0, 1]))
+        }
+
+        manager.streamTTS(text: "Keep Custom compatible") { _ in }
+        wait(for: [requestEmitted], timeout: 2.0)
+    }
+
+    func testMalformedDirectProviderIdentityNormalizesToOpenAI() {
+        // WHY: Direct callers bypass the Settings sidebar, so normalization must happen before
+        // the manager snapshots its request settings rather than only while the form is rendered.
+        let endpoint = "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech"
+        let manager = TestNetworkFactory.makeManager()
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "normalized-token",
+            model: "openai-model",
+            voice: "openai-voice",
+            selectedProvider: "Malformed identity"
+        )
+        XCTAssertTrue(manager.isCurrentProvider(.openAI))
+
+        let requestEmitted = expectation(description: "Normalized compatible request is emitted")
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.url?.absoluteString, endpoint)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer normalized-token")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
+            requestEmitted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data([0, 1]))
+        }
+
+        manager.streamTTS(text: "Normalize direct input") { _ in }
+        wait(for: [requestEmitted], timeout: 2.0)
+    }
 }

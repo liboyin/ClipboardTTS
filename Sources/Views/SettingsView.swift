@@ -168,7 +168,7 @@ struct SettingsView: View {
 
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
                                         networkManager: networkManager,
-                                        provider: selectedProvider.settingsValue,
+                                        provider: selectedProvider,
                                         onSync: syncSettings)
 
             testVoiceButton
@@ -184,7 +184,7 @@ struct SettingsView: View {
 
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
                                         networkManager: networkManager,
-                                        provider: selectedProvider.settingsValue,
+                                        provider: selectedProvider,
                                         onSync: syncSettings)
 
             testVoiceButton
@@ -204,7 +204,7 @@ struct SettingsView: View {
 
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
                                         networkManager: networkManager,
-                                        provider: selectedProvider.settingsValue,
+                                        provider: selectedProvider,
                                         onSync: syncSettings)
 
             Section(header: Text("Audio Format").font(.headline)) {

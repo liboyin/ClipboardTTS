@@ -149,7 +149,7 @@ struct MenuBarView: View {
     /// inside the request's own start window is out of scope, because a Settings edit advances no
     /// request generation for the deferred action to observe.
     private func refusesOversizedOpenAIText(_ text: String) -> Bool {
-        guard networkManager.isCurrentProvider(APIKeyProvider.openAI.settingsValue) else { return false }
+        guard networkManager.isCurrentProvider(.openAI) else { return false }
         // OpenAI documents the maximum as "characters" without naming a Unicode unit. Scalars are
         // the unit a code-point count reaches first: grapheme clusters would let text the provider
         // rejects through, while UTF-16 units or UTF-8 bytes would refuse non-Latin text the

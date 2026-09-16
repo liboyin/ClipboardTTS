@@ -9,14 +9,14 @@ import Foundation
 /// under another provider's configuration would be wrong even where it is defined.
 struct ProviderSuggestions: Equatable {
     /// The state before any list is published, and the one an invalidated metadata scope returns to.
-    static let unpublished = ProviderSuggestions(provider: "", values: [])
+    static let unpublished = ProviderSuggestions(provider: nil, values: [])
 
-    /// The persisted provider value these suggestions were fetched for.
-    let provider: String
+    /// The provider these suggestions were fetched for, if a catalog was published.
+    let provider: APIKeyProvider?
     let values: [String]
 
     /// The suggestions when they belong to `provider`, and none otherwise.
-    func values(for provider: String) -> [String] {
+    func values(for provider: APIKeyProvider) -> [String] {
         self.provider == provider ? values : []
     }
 }
@@ -33,7 +33,7 @@ extension TTSNetworkManager {
         /// The provider this request's results may be published for, carried on the token so a
         /// publication takes its identity from the request that earned it rather than from settings
         /// that may have changed since.
-        let provider: String
+        let provider: APIKeyProvider
     }
 
     struct MetadataRequest {
@@ -66,7 +66,7 @@ extension TTSNetworkManager {
 
     private struct MetadataSource: Equatable {
         let baseURL: String
-        let provider: String
+        let provider: APIKeyProvider
     }
 
     private struct OpenAIModelsResponse: Decodable {
@@ -223,9 +223,12 @@ extension TTSNetworkManager {
 
     /// Fetches models for the selected metadata source, replacing only an equally current model request.
     func fetchAvailableModels(baseURL: String, apiKey: String, selectedProvider: String) {
-        let source = MetadataSource(baseURL: baseURL, provider: selectedProvider)
+        let source = MetadataSource(
+            baseURL: baseURL,
+            provider: APIKeyProvider(selectedProvider: selectedProvider)
+        )
         guard let token = beginMetadataRequest(for: .models, source: source) else { return }
-        if baseURL.contains("generativelanguage.googleapis.com") {
+        if source.provider == .gemini {
             publishMetadata(["gemini-3.1-flash-tts-preview"], for: .models, token: token)
             return
         }
@@ -269,18 +272,21 @@ extension TTSNetworkManager {
     /// The catalog still travels the guarded token path, because publication is asynchronous and a
     /// provider or endpoint the user changes in that window must invalidate it.
     func fetchAvailableVoices(baseURL: String, selectedProvider: String) {
-        let source = MetadataSource(baseURL: baseURL, provider: selectedProvider)
+        let source = MetadataSource(
+            baseURL: baseURL,
+            provider: APIKeyProvider(selectedProvider: selectedProvider)
+        )
         guard let token = beginMetadataRequest(for: .voices, source: source) else { return }
-        switch selectedProvider {
-        case "OpenAI":
+        switch source.provider {
+        case .openAI:
             publishMetadata(
                 openAIVoices(for: currentModel()),
                 for: .voices,
                 token: token
             )
-        case "Gemini":
+        case .gemini:
             publishMetadata(Self.geminiVoices, for: .voices, token: token)
-        default:
+        case .custom:
             finishMetadataRequest(for: .voices, token: token)
         }
     }

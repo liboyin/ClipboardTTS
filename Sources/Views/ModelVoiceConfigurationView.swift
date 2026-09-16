@@ -6,8 +6,8 @@ struct ModelVoiceConfigurationView: View {
     @Binding var ttsModel: String
     @Binding var ttsVoice: String
     @ObservedObject var networkManager: TTSNetworkManager
-    /// The persisted provider whose form this is; only suggestions published for it may be offered.
-    let provider: String
+    /// The provider whose form this is; only suggestions published for it may be offered.
+    let provider: APIKeyProvider
     var onSync: () -> Void
 
     /// The choices a suggestion picker may offer for `selection`, or none when it must not render.
@@ -18,7 +18,7 @@ struct ModelVoiceConfigurationView: View {
     /// has no matching tag as undefined, so a model or voice the provider does not list is offered
     /// as it was typed, keeping it selected while the catalog it can be corrected from stays usable.
     static func pickerChoices(from suggestions: ProviderSuggestions,
-                              for provider: String,
+                              for provider: APIKeyProvider,
                               selection: String) -> [String] {
         let choices = suggestions.values(for: provider)
         guard !choices.isEmpty, !choices.contains(selection) else { return choices }

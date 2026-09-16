@@ -246,7 +246,7 @@ final class HostedModelVoiceFields {
     /// Mounts the fields for `provider` with fixed values, because this host exists to render one
     /// configuration rather than to drive edits; `HostedSettings` owns editing and synchronization.
     init(networkManager: TTSNetworkManager,
-         provider: String,
+         provider: APIKeyProvider,
          model: String,
          voice: String,
          testCase: XCTestCase,

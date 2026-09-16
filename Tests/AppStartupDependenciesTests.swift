@@ -95,7 +95,7 @@ final class AppStartupDependenciesTests: XCTestCase {
             "Automatic hosted startup must not select the installed app's own defaults domain."
         )
         XCTAssertTrue(defaultDependencies.secretStore is InMemorySecretStore)
-        XCTAssertTrue(defaultDependencies.networkManager.isCurrentProvider("OpenAI"))
+        XCTAssertTrue(defaultDependencies.networkManager.isCurrentProvider(.openAI))
         assertRequestInputs(
             defaultDependencies.networkManager,
             match: .init(
@@ -103,7 +103,7 @@ final class AppStartupDependenciesTests: XCTestCase {
                 apiKey: "",
                 model: "tts-1",
                 voice: "alloy",
-                provider: .openAICompatible
+                provider: .openAI
             )
         )
         XCTAssertEqual(defaultDependencies.audioPlayer.sampleRate, AudioPlayerManager.defaultSampleRate)
@@ -119,7 +119,7 @@ final class AppStartupDependenciesTests: XCTestCase {
             [.read(.custom), .save(.custom), .read(.custom)]
         )
         XCTAssertEqual(hostedSecretStore.storedSecrets, [.custom: "hosted-legacy-credential"])
-        XCTAssertTrue(dependencies.networkManager.isCurrentProvider("Custom"))
+        XCTAssertTrue(dependencies.networkManager.isCurrentProvider(.custom))
         assertRequestInputs(
             dependencies.networkManager,
             match: .init(
@@ -183,7 +183,7 @@ final class AppStartupDependenciesTests: XCTestCase {
             [.read(.custom), .save(.custom), .read(.custom)]
         )
         XCTAssertEqual(productionSecretStore.storedSecrets, [.custom: "production-legacy-credential"])
-        XCTAssertTrue(dependencies.networkManager.isCurrentProvider("Custom"))
+        XCTAssertTrue(dependencies.networkManager.isCurrentProvider(.custom))
         assertRequestInputs(
             dependencies.networkManager,
             match: .init(

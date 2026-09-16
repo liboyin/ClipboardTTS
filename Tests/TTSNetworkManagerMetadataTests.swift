@@ -185,7 +185,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
-        manager.modelSuggestions = ProviderSuggestions(provider: "Custom", values: ["known-tts-model"])
+        manager.modelSuggestions = ProviderSuggestions(provider: .custom, values: ["known-tts-model"])
 
         let requestCompleted = expectation(description: "Malformed metadata request completed")
         MockURLProtocol.installRequestHandler { request in
@@ -218,7 +218,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
-        manager.modelSuggestions = ProviderSuggestions(provider: "Custom", values: ["old-tts-model"])
+        manager.modelSuggestions = ProviderSuggestions(provider: .custom, values: ["old-tts-model"])
 
         let requestCompleted = expectation(description: "Empty metadata request completed")
         MockURLProtocol.installRequestHandler { request in

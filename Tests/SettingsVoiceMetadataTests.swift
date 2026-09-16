@@ -52,8 +52,8 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = AudioPlayerManager()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        networkManager.modelSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["alloy", "nova"])
+        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
 
         let settings = HostedSettings(
             networkManager: networkManager,
@@ -88,12 +88,12 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
-        networkManager.modelSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: "OpenAI", values: ["alloy", "nova"])
+        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
 
         let switchedFields = HostedModelVoiceFields(
             networkManager: networkManager,
-            provider: "Gemini",
+            provider: .gemini,
             model: "gemini-3.1-flash-tts-preview",
             voice: "Aoede",
             testCase: self
@@ -106,7 +106,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         // above cannot pass merely because these fields render no picker at all.
         let openAIFields = HostedModelVoiceFields(
             networkManager: networkManager,
-            provider: "OpenAI",
+            provider: .openAI,
             model: "tts-1",
             voice: "alloy",
             testCase: self

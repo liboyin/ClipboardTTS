@@ -18,8 +18,8 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
-        manager.modelSuggestions = ProviderSuggestions(provider: "Gemini", values: ["current-model"])
-        manager.voiceSuggestions = ProviderSuggestions(provider: "Gemini", values: ["current-voice"])
+        manager.modelSuggestions = ProviderSuggestions(provider: .gemini, values: ["current-model"])
+        manager.voiceSuggestions = ProviderSuggestions(provider: .gemini, values: ["current-voice"])
 
         let staleRequestStarted = expectation(description: "Mismatched metadata request must not start")
         staleRequestStarted.isInverted = true

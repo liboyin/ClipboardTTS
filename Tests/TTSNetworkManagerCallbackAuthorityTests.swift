@@ -3,7 +3,7 @@ import XCTest
 
 final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
     func testOpenAIStopWaitsForAnAuthorizedCallbackBeforeReturning() {
-        assertConcurrentStopCannotOutrunAuthorizedCallback(provider: .openAICompatible)
+        assertConcurrentStopCannotOutrunAuthorizedCallback(provider: .openAI)
     }
 
     func testGeminiStopWaitsForAnAuthorizedCallbackBeforeReturning() {
@@ -119,7 +119,7 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
 
     /// Forces a stop to overlap a callback that has passed generation authorization. The callback
     /// barrier makes the required ordering observable without relying on a scheduler delay.
-    private func assertConcurrentStopCannotOutrunAuthorizedCallback(provider: TTSNetworkManager.ProviderKind) {
+    private func assertConcurrentStopCannotOutrunAuthorizedCallback(provider: APIKeyProvider) {
         let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.callback-authority")
         let callbackAuthority = ObservedCallbackAuthority()
         let manager = TestNetworkFactory.makeManager(
@@ -135,7 +135,7 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
                 voice: "test",
                 selectedProvider: "Gemini"
             )
-        case .openAICompatible, .custom:
+        case .openAI, .custom:
             manager.updateSettings(
                 baseURL: "https://mock.api/v1/audio/speech",
                 apiKey: "test",
@@ -172,7 +172,7 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
         switch provider {
         case .gemini:
             manager.urlSession(manager.session, dataTask: task, didReceive: geminiEvent(containing: Data([1, 2])))
-        case .openAICompatible, .custom:
+        case .openAI, .custom:
             manager.urlSession(manager.session, dataTask: task, didReceive: Data([1, 2]))
         }
         wait(for: [callbackEntered], timeout: 1.0)

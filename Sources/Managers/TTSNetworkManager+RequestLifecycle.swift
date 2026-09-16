@@ -18,14 +18,14 @@ extension TTSNetworkManager {
     /// of the logical request the user started.
     struct RetryAttempt {
         let request: URLRequest
-        let provider: ProviderKind
+        let provider: APIKeyProvider
         let requestGeneration: UInt64
         let client: SpeechStreamClient
     }
 
     private func replaceActiveRequest(with task: URLSessionDataTask,
                                       request: URLRequest,
-                                      provider: ProviderKind,
+                                      provider: APIKeyProvider,
                                       requestGeneration: UInt64,
                                       client: SpeechStreamClient,
                                       isRetryAttempt: Bool = false) -> Bool {

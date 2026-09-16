@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import ClipboardTTSApp
 
@@ -60,6 +61,40 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             openAIModelsPublished.fulfill()
         }
         wait(for: [openAIModelsPublished], timeout: 1.0)
+    }
+
+    func testCustomGoogleLookingHostUsesOpenAICompatibleModelDiscovery() {
+        // WHY: Model discovery must take its protocol from the selected identity just as speech
+        // does. Otherwise a Custom host containing Google's hostname would get Gemini's static
+        // list and no request for the catalog it actually exposes.
+        let endpoint = "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech"
+        let manager = TestNetworkFactory.makeManager()
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "custom-token",
+            model: "custom-model",
+            voice: "custom-voice",
+            selectedProvider: "Custom"
+        )
+        let discoveryRequested = expectation(description: "Custom model discovery is requested")
+        MockURLProtocol.installRequestHandler { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com.custom.example/v1/models")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer custom-token")
+            XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
+            discoveryRequested.fulfill()
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, Data("{ \"data\": [{\"id\": \"custom-tts-model\"}] }".utf8))
+        }
+        let modelsPublished = expectation(description: "Custom discovered models are published")
+        let observation = manager.$modelSuggestions.dropFirst().sink { suggestions in
+            guard suggestions.values == ["custom-tts-model"] else { return }
+            XCTAssertEqual(suggestions.provider, .custom)
+            modelsPublished.fulfill()
+        }
+        defer { observation.cancel() }
+
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-token", selectedProvider: "Custom")
+        wait(for: [discoveryRequested, modelsPublished], timeout: 2.0)
     }
 
     func testVoiceCatalogsReflectProviderAndModelCapabilities() {
