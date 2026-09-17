@@ -37,9 +37,26 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     /// it always describes the session the buffered PCM belongs to rather than an earlier one.
     @Published private(set) var streamTermination: SpeechStreamTermination?
     @Published private(set) var sampleRate: Double = defaultSampleRate
-    @Published private(set) var sampleRateError: String?
+    /// Why the requested PCM format cannot be used, or nil when the graph holds a usable format.
+    @Published private var formatError: String?
+    /// Why the most recent engine start failed, or nil once an engine start has succeeded since.
+    ///
+    /// Kept apart from `formatError` because the two recover differently: a format is fixed by
+    /// choosing another rate, while a stopped engine is fixed by starting it again, which any later
+    /// Play, automatic start, or new session attempts on its own.
+    @Published private var engineStartError: String?
     @Published private(set) var hasValidSampleRateInput = true
+    /// Whether the graph holds a supported PCM format. An engine that failed to start does not make
+    /// it false: the format is still right, and the next start attempt can still play it.
     @Published private(set) var hasValidSampleRateConfiguration = true
+    /// The audio failure shown to the user. A format failure wins, because no engine start can make
+    /// an unusable format playable.
+    var sampleRateError: String? {
+        formatError ?? engineStartError
+    }
+    private static let unsupportedSampleRateMessage = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
+    private static let unconfigurableSampleRateMessage = "Couldn't configure the PCM sample rate. Try again."
+    private static let engineStartFailureMessage = "Couldn't start audio playback. Try again."
     @Published var playbackRate: Float = 1.0 {
         didSet {
             timePitch.rate = playbackRate
@@ -116,14 +133,14 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         if !hasValidInitialSampleRate {
             hasValidSampleRateInput = false
             hasValidSampleRateConfiguration = false
-            sampleRateError = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
+            formatError = Self.unsupportedSampleRateMessage
         }
     }
     private func setupEngine(sampleRate: Double) {
         engine.attach(playerNode)
         engine.attach(timePitch)
         guard let standardFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
-            sampleRateError = "Couldn't configure the PCM sample rate. Try again."
+            formatError = Self.unconfigurableSampleRateMessage
             return
         }
         self.sampleRate = sampleRate
@@ -132,12 +149,48 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         }
         engine.connect(playerNode, to: timePitch, format: standardFormat)
         engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
+        startEngineIfStopped()
+    }
+
+    /// Starts the engine when it is not running and publishes the outcome, on the main queue.
+    ///
+    /// Every start attempt goes through here or through `attemptEngineStart` paired with
+    /// `publishEngineStart`, so a success always clears the failure an earlier attempt left
+    /// behind. An engine already running counts as a success for the same reason: whoever started
+    /// it resolved that failure.
+    @discardableResult
+    private func startEngineIfStopped() -> Bool {
+        let started = attemptEngineStart()
+        publishEngineStart(succeeded: started)
+        return started
+    }
+
+    /// Starts the engine when it is not running, without publishing, and answers whether it runs.
+    ///
+    /// Separate from the publication so a caller holding `bufferQueue` can start the engine there
+    /// and publish only after it has left the queue.
+    private func attemptEngineStart() -> Bool {
+        guard !engine.isRunning else { return true }
         do {
             try engineStarter(engine)
+            return true
         } catch {
-            hasValidSampleRateConfiguration = false
-            sampleRateError = "Couldn't start audio playback. Try again."
+            return false
         }
+    }
+
+    private func publishEngineStart(succeeded: Bool) {
+        engineStartError = succeeded ? nil : Self.engineStartFailureMessage
+    }
+
+    /// Starts a stopped engine for a new session, answering whether that session may begin.
+    ///
+    /// A session refused here would otherwise stay refused until something else happened to start
+    /// the engine, with the menu offering a "Try again" that did nothing. Asking at the start of each
+    /// session makes that retry real, and a failure is published so the user sees why nothing began.
+    func prepareForNewStream() -> Bool {
+        guard hasValidSampleRateConfiguration else { return false }
+        return startEngineIfStopped()
     }
     /// Changes the PCM sample rate after clearing all audio that was decoded with the previous format.
     @discardableResult
@@ -145,26 +198,14 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         guard Self.isSupportedSampleRate(sampleRate) else {
             hasValidSampleRateInput = false
             hasValidSampleRateConfiguration = false
-            sampleRateError = "PCM sample rate must be a finite value from 8,000 to 48,000 Hz."
+            formatError = Self.unsupportedSampleRateMessage
             return .invalid
         }
         hasValidSampleRateInput = true
         guard changesAudioFormat(to: sampleRate) else {
-            guard !engine.isRunning else {
-                hasValidSampleRateConfiguration = true
-                sampleRateError = nil
-                return .unchanged
-            }
-            do {
-                try engineStarter(engine)
-                hasValidSampleRateConfiguration = true
-                sampleRateError = nil
-                return .unchanged
-            } catch {
-                hasValidSampleRateConfiguration = false
-                sampleRateError = "Couldn't start audio playback. Try again."
-                return .engineStartFailed
-            }
+            hasValidSampleRateConfiguration = true
+            formatError = nil
+            return startEngineIfStopped() ? .unchanged : .engineStartFailed
         }
         stop()
         engine.stop()
@@ -173,7 +214,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         engine.disconnectNodeOutput(timePitch)
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
             hasValidSampleRateConfiguration = false
-            sampleRateError = "Couldn't configure the PCM sample rate. Try again."
+            formatError = Self.unconfigurableSampleRateMessage
             return .engineStartFailed
         }
         engine.connect(playerNode, to: timePitch, format: format)
@@ -182,16 +223,9 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             audioFormat = format
         }
         self.sampleRate = sampleRate
-        do {
-            try engineStarter(engine)
-            hasValidSampleRateConfiguration = true
-            sampleRateError = nil
-            return .updated
-        } catch {
-            hasValidSampleRateConfiguration = false
-            sampleRateError = "Couldn't start audio playback. Try again."
-            return .engineStartFailed
-        }
+        hasValidSampleRateConfiguration = true
+        formatError = nil
+        return startEngineIfStopped() ? .updated : .engineStartFailed
     }
 
     /// Returns whether applying `sampleRate` would replace the format the buffered PCM was decoded
@@ -213,8 +247,11 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     }
 
     /// Whether the current configuration can start a new PCM stream without misinterpreting its format.
+    ///
+    /// A stopped engine does not make it false: `prepareForNewStream()` starts the engine for the
+    /// session that needs it, so a failed start can be retried by the next attempt to speak.
     var isReadyForNewStream: Bool {
-        hasValidSampleRateConfiguration && engine.isRunning
+        hasValidSampleRateConfiguration
     }
 
     func startNewStream() -> Int {
@@ -282,15 +319,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     /// performs releases the suspension. Later PCM therefore extends the replay the user asked for
     /// rather than jumping playback back to where the buffer had run out.
     func play() {
-        if !engine.isRunning {
-            do {
-                try engineStarter(engine)
-            } catch {
-                hasValidSampleRateConfiguration = false
-                sampleRateError = "Couldn't start audio playback. Try again."
-                return
-            }
-        }
+        guard startEngineIfStopped() else { return }
 
         if playbackProgress >= bufferDuration && bufferDuration > 0 {
             seek(to: 0.0)
@@ -583,23 +612,17 @@ private extension AudioPlayerManager {
             guard scheduleGeneration == streamGeneration,
                   automaticPlaybackSuppressedGeneration != streamGeneration,
                   !isPlaying else { return (false, false) }
-            if !engine.isRunning {
-                do {
-                    try engineStarter(engine)
-                } catch {
-                    return (false, true)
-                }
-            }
+            guard attemptEngineStart() else { return (false, true) }
             playerNode.play()
             return (true, false)
         }
         guard result.started else {
             if result.engineStartFailed {
-                hasValidSampleRateConfiguration = false
-                sampleRateError = "Couldn't start audio playback. Try again."
+                publishEngineStart(succeeded: false)
             }
             return
         }
+        publishEngineStart(succeeded: true)
         isPlaying = true
         startProgressTimer()
     }

@@ -48,6 +48,47 @@ final class SpeechSessionCoordinatorTests: MockURLProtocolTestCase {
         XCTAssertFalse(owned.audioPlayer.hasAudio)
     }
 
+    func testStartingASessionRestartsAnEngineThatFailedToStartAndSpeaks() {
+        // WHY: An engine stops when a start fails or the output device changes, and every entry
+        // point starts through this owner. Refusing such a session outright left Speak, Services,
+        // and Test Voice silently doing nothing until Settings happened to restart the engine.
+        let starter = SwitchableAudioEngineStarter(shouldFail: true)
+        let owned = makeOwnedSpeechSession(engineStarter: starter.start)
+        defer { finishSpeechSession(owned) }
+        XCTAssertEqual(owned.audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
+        let requestStarted = expectation(description: "The session's request reaches the provider")
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            return (mockHTTPResponse(for: request, statusCode: 200), Data(repeating: 0, count: 2_048))
+        }
+        starter.shouldFail = false
+
+        owned.session.start(text: "Speak me")
+
+        XCTAssertTrue(owned.networkManager.isStreaming, "A session whose engine restarted must start its request.")
+        XCTAssertNil(owned.audioPlayer.sampleRateError, "The restart must clear the failure it resolved.")
+        wait(for: [requestStarted], timeout: 2.0)
+    }
+
+    func testStartingASessionIsRefusedWhenItsEngineStillCannotStart() {
+        // WHY: Retrying the start is what makes the failure actionable, but a retry that fails
+        // again must still refuse: a request started against a stopped engine spends the provider
+        // call on speech nobody can hear.
+        let starter = SwitchableAudioEngineStarter(shouldFail: true)
+        let owned = makeOwnedSpeechSession(engineStarter: starter.start)
+        defer { finishSpeechSession(owned) }
+        MockURLProtocol.installRequestHandler { request in
+            XCTFail("A session whose engine cannot start must not reach the provider")
+            return (mockHTTPResponse(for: request, statusCode: 200), nil)
+        }
+
+        owned.session.start(text: "Speak me")
+
+        XCTAssertEqual(starter.callCount, 2, "The session must retry the start before refusing.")
+        XCTAssertFalse(owned.networkManager.isStreaming, "A refused session must start no request.")
+        XCTAssertEqual(owned.audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
+    }
+
     func testStartingASessionDiscardsWhatThePreviousSessionBuffered() {
         // WHY: Services and Test Voice replace whatever is speaking rather than asking for a second
         // click. Opening a new audio generation is what makes that replacement real: reusing the

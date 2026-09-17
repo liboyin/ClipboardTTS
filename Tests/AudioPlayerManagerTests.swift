@@ -141,7 +141,7 @@ final class AudioPlayerManagerTests: XCTestCase {
         // WHY: A valid format change invalidates already-scheduled PCM even when the engine cannot
         // restart. The UI must then show a safe cleared state instead of claiming old-format audio
         // remains playable.
-        let startController = AudioEngineStartController()
+        let startController = SwitchableAudioEngineStarter()
         let player = AudioPlayerManager(
             engineStarter: startController.start,
             automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback
@@ -159,7 +159,9 @@ final class AudioPlayerManagerTests: XCTestCase {
         XCTAssertEqual(player.bufferDuration, 0.0)
         XCTAssertEqual(player.playbackProgress, 0.0)
         XCTAssertEqual(player.sampleRateError, "Couldn't start audio playback. Try again.")
-        XCTAssertFalse(player.isReadyForNewStream)
+        // The rebuilt format is valid, so readiness stays true: the next session retries the start
+        // rather than being refused until something else restarts the engine.
+        XCTAssertTrue(player.isReadyForNewStream)
 
         XCTAssertEqual(player.setSampleRate(48_000), .engineStartFailed)
         XCTAssertEqual(player.sampleRateError, "Couldn't start audio playback. Try again.")
@@ -527,21 +529,6 @@ private final class ScheduledBufferSpy {
         frameLength = buffer.frameLength
         lock.unlock()
     }
-}
-
-private final class AudioEngineStartController {
-    var shouldFail = false
-
-    func start(_ engine: AVAudioEngine) throws {
-        if shouldFail {
-            throw AudioEngineStartFailure.failed
-        }
-        try engine.start()
-    }
-}
-
-private enum AudioEngineStartFailure: Error {
-    case failed
 }
 
 private func immediatelyScheduleAutomaticPlayback(after _: TimeInterval, _ action: @escaping () -> Void) {

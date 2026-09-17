@@ -42,6 +42,25 @@ enum TestAudioEngineStartError: Error {
     case failed
 }
 
+/// Fails engine starts while `shouldFail` is set and starts the real engine otherwise, so a test can
+/// leave an engine stopped by a failure and then let a later attempt recover it.
+final class SwitchableAudioEngineStarter {
+    var shouldFail: Bool
+    private(set) var callCount = 0
+
+    init(shouldFail: Bool = false) {
+        self.shouldFail = shouldFail
+    }
+
+    func start(_ engine: AVAudioEngine) throws {
+        callCount += 1
+        if shouldFail {
+            throw TestAudioEngineStartError.failed
+        }
+        try engine.start()
+    }
+}
+
 final class ManualAutomaticPlaybackScheduler {
     private let lock = NSLock()
     private var actions: [() -> Void] = []

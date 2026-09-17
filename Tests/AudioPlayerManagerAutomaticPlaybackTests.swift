@@ -282,7 +282,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         assertPlayingState(of: player, is: false)
 
         XCTAssertEqual(engineStarter.callCount, 2)
-        XCTAssertFalse(player.hasValidSampleRateConfiguration)
+        XCTAssertTrue(player.hasValidSampleRateConfiguration, "A failed start is not a format failure.")
         XCTAssertEqual(player.sampleRateError, "Couldn't start audio playback. Try again.")
     }
 

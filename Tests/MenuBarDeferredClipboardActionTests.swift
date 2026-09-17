@@ -263,6 +263,47 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         XCTAssertFalse(networkManager.isStreaming, "Clear Buffer must leave the pipeline silent.")
     }
 
+    func testSpeakClickReachesTheSessionWhileTheEngineIsStopped() {
+        // WHY: The menu's own readiness gate runs before the session owner can retry the engine.
+        // If that gate still required a running engine, the click after a failed start or a device
+        // change would do nothing at all, and the "Try again" in the visible failure would be a
+        // retry the user could not perform.
+        let starter = SwitchableAudioEngineStarter(shouldFail: true)
+        let audioPlayer = AudioPlayerManager(
+            engineStarter: starter.start,
+            automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule
+        )
+        let pasteboard = FakePasteboardReader(text: "Clipboard text")
+        let textExtraction = TextExtractionManager(pasteboard: pasteboard)
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        let requestStarted = expectation(description: "The click's request reaches the provider")
+        MockURLProtocol.installRequestHandler { request in
+            requestStarted.fulfill()
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, nil)
+        }
+        let deferral = CapturingDeferralScheduler()
+        let view = makeMenu(
+            audioPlayer: audioPlayer,
+            textExtraction: textExtraction,
+            networkManager: networkManager,
+            deferredClipboardAction: DeferredClipboardAction(scheduler: deferral.scheduler)
+        )
+        XCTAssertEqual(audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
+
+        view.speakCopiedText()
+        XCTAssertEqual(deferral.requestedDelays, [0.2], "A stopped engine must not refuse the click before its delay.")
+        starter.shouldFail = false
+        deferral.runDeferredActions()
+
+        XCTAssertEqual(pasteboard.readCount, 1)
+        XCTAssertTrue(networkManager.isStreaming, "The click must start speech once the engine restarts.")
+        XCTAssertNil(audioPlayer.sampleRateError)
+        wait(for: [requestStarted], timeout: 2.0)
+        networkManager.stopStreaming()
+        audioPlayer.stop()
+    }
+
     func testDeferredClipboardActionDropsWhenTheAudioConfigurationBecomesInvalid() {
         // WHY: Settings can invalidate the PCM graph inside the delay window. Reading the clipboard
         // then would request audio the engine cannot play at the configured rate, so the stale

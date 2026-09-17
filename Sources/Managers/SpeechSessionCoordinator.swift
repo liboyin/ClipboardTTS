@@ -55,7 +55,9 @@ final class SpeechSessionCoordinator: ObservableObject {
     ///
     /// It refuses while the audio graph cannot play the selected format, because a session started
     /// against a stopped or misconfigured graph would either decode the provider's PCM at the wrong
-    /// rate or never play it at all.
+    /// rate or never play it at all. A stopped engine is started first rather than refused outright,
+    /// so an engine that failed once — or stopped when the output device changed — does not refuse
+    /// every later session until something else restarts it; only a start that fails again refuses.
     ///
     /// Replacing the previous session takes exactly two steps, because each manager already revokes
     /// its own half: `startNewStream()` retires the old audio generation and discards what it had
@@ -65,7 +67,7 @@ final class SpeechSessionCoordinator: ObservableObject {
     /// between the two steps is safe in both directions: PCM the old request authorized carries the
     /// retired audio generation, and its terminal event names a stream the player no longer has.
     func start(text: String) {
-        guard audioPlayer.isReadyForNewStream else { return }
+        guard audioPlayer.prepareForNewStream() else { return }
         let generation = audioPlayer.startNewStream()
         networkManager.streamTTS(text: text, client: SpeechStreamClient(
             didReceiveAudio: { [audioPlayer] data in

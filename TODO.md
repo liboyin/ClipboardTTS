@@ -40,6 +40,13 @@ The review did not exercise live providers, physical device switching, macOS 13,
 | D8 | Remove the unused clipboard-presence console messages. | NB24 |
 | D9 | Keep AGENTS concise and principle-based, the review skill procedural, and TODO focused on future work with its own maintenance rules. This separates stable working policy from review operations and evolving plans. | Documentation ownership |
 
+### Accepted user decisions — 2026-09-17
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D10 | An audio configuration change pauses the session at its position: restart the engine on the new output, keep the buffer and the running request, and cancel any pending automatic start or underrun resume. Play resumes from that position. Speech never moves to a different output device unasked. | NB11 |
+| D11 | A new speech attempt (menu, Services, Test Voice) retries starting a stopped engine instead of silently refusing. Success clears the stale failure and starts speech; failure keeps "Couldn't start audio playback. Try again." visible and starts no request. | NB11 |
+
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
 ### Constraints that remain in force
@@ -73,7 +80,7 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 
 #### NB11 — Engine interruption and recovery leave inconsistent state
 
-**Validated — owned-engine probes; physical switching untested.** Simulated configuration change left readiness false without guidance. Failed play followed by successful retry left the engine running/isPlaying true but readiness false and the old error visible. **Paths:** [AudioPlayerManager](Sources/Managers/AudioPlayerManager.swift), audio tests, README. **Direction:** centralize consistent start/recovery state updates; handle configuration notifications through the main-thread owner. Split interruption handling and stale-error recovery if independent. **Acceptance:** successful starts reconcile readiness/errors, failures stay actionable, and an explicit configuration-change recovery policy preserves manual pause/generation ownership. Add safe notification tests and record a physical-device smoke test. **Reference:** [Apple engine configuration changes](https://developer.apple.com/documentation/avfaudio/avaudioengineconfigurationchangenotification).
+**Validated — owned-engine probes; physical switching untested. Start-failure reconciliation fixed by NB11a; configuration-change recovery remains.** Simulated configuration change left readiness false without guidance. Failed play followed by successful retry left the engine running/isPlaying true but readiness false and the old error visible. **Paths:** [AudioPlayerManager](Sources/Managers/AudioPlayerManager.swift), audio tests, README. **Direction:** centralize consistent start/recovery state updates; handle configuration notifications through the main-thread owner. Split interruption handling and stale-error recovery if independent. **Acceptance:** successful starts reconcile readiness/errors, failures stay actionable, and an explicit configuration-change recovery policy preserves manual pause/generation ownership. Add safe notification tests and record a physical-device smoke test. **Boundary:** [NB11 execution boundary](#nb11--execution-boundary). **Reference:** [Apple engine configuration changes](https://developer.apple.com/documentation/avfaudio/avaudioengineconfigurationchangenotification).
 
 #### NB12 — Startup rereads a key migration already secured
 
@@ -121,7 +128,19 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 
 ## Ready for implementation
 
-No task is currently expanded into a full boundary. Suggested order: settings/catalog simplification. This is priority guidance, not a phase fence. Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
+Suggested order after NB11: settings/catalog simplification. This is priority guidance, not a phase fence. Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
+
+### NB11 — execution boundary
+
+NB11a (D11) landed first: every engine start publishes through one owner in `AudioPlayerManager`, a failed start no longer invalidates the format, and a new session retries a stopped engine. README owns that contract. NB11b builds on that owner.
+
+**NB11b — configuration-change recovery (D10).**
+- **Intent:** after `AVAudioEngineConfigurationChange` the app is usable again without Settings and never shows playback that is not happening.
+- **Dependencies:** NB11a; D10; [Apple engine configuration changes](https://developer.apple.com/documentation/avfaudio/avaudioengineconfigurationchangenotification).
+- **Direction:** the player observes that notification for its own engine through an injected notification center and handles it on the main queue. Handling suspends playback the way Pause does, which revokes the current generation's pending automatic start and any underrun resume, even before the first PCM. It then restarts the engine through NB11a's owner and re-anchors the node at the published position without playing, because a restarted engine's schedule cannot be trusted. If the restart fails, `play()` restarts the engine and re-anchors before it plays. The handler does not cancel the request, advance a generation, or discard buffered PCM.
+- **Non-goals:** no auto-resume on the new device; no reconnecting the graph for a new hardware format (Apple keeps connections); no macOS 13 or live-device automation.
+- **Validation:** tests post a notification from an owned center with the test-owned engine as object, off the main thread. Cover: playing, prebuffer-pending, underrun-suspended, manually paused, and idle states; a failing restart then Play; a notification for another engine ignored; the observer removed with its owner. Mutants: no observer; resume instead of pause; no re-anchor; no automatic-start revocation; handling off the main queue; acting on another engine's notification. A physical-device smoke test (disconnect output during speech) is recorded as performed or as a limitation.
+- **Done:** gates pass, review finds no Blocking issue, README describes the recovery policy, and NB11's entry is removed.
 
 ## Deferred, accepted, and completed dispositions
 
