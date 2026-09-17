@@ -97,6 +97,7 @@ final class ScheduledPCMBufferRecorder {
     private let lock = NSLock()
     private var bufferCount = 0
     private var frameCount: AVAudioFrameCount = 0
+    private var latestFrameLength: AVAudioFrameCount?
 
     var count: Int {
         lock.lock()
@@ -110,10 +111,18 @@ final class ScheduledPCMBufferRecorder {
         return frameCount
     }
 
+    /// The frame length of the most recently scheduled buffer, which says where a reschedule began.
+    var lastFrameLength: AVAudioFrameCount? {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestFrameLength
+    }
+
     func record(_ buffer: AVAudioPCMBuffer) {
         lock.lock()
         bufferCount += 1
         frameCount += buffer.frameLength
+        latestFrameLength = buffer.frameLength
         lock.unlock()
     }
 }

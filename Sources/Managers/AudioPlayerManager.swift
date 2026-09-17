@@ -4,6 +4,7 @@
 // they describe.
 import Foundation
 import AVFoundation
+import os
 /// Buffers streamed PCM, drives the playback engine, and publishes playback state to the menu bar.
 ///
 /// Marked `@unchecked Sendable` because network callbacks schedule audio from the URLSession
@@ -97,11 +98,23 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     private let progressTimerScheduler: (Timer) -> Void
     private let audioObservers: (processed: () -> Void, statePublished: () -> Void)
     private var progressTimer: Timer?
+    private let notificationCenter: NotificationCenter
+    /// Runs a counted configuration change's recovery on the main queue, where production hops.
+    private let configurationChangeRecoveryScheduler: (@escaping @Sendable () -> Void) -> Void
+    private var configurationChangeObserver: NSObjectProtocol?
+    /// Configuration changes received on the posting thread whose main-queue recovery has not yet run.
+    ///
+    /// It is a count, not a flag. A second change can be counted before its recovery is queued, so the
+    /// first recovery can run while the second is still outstanding. A flag it cleared would then let
+    /// a stream started in that interval play on the changed output.
+    private let pendingConfigurationChanges = OSAllocatedUnfairLock(initialState: 0)
     /// Creates the audio graph. The buffer observer is notified after each buffer is passed to the node.
     /// The scheduler defers automatic playback after the first complete PCM frame. The rendered-sample-time
     /// reader supplies each progress tick its position, and the timer scheduler decides where the timer
     /// driving those ticks runs. The processing observer runs after the audio queue handles a
-    /// packet or a terminal event, and the state observer runs after publication.
+    /// packet or a terminal event, and the state observer runs after publication. The notification
+    /// center is where this engine's configuration changes are observed, and the recovery scheduler
+    /// must run each change's recovery later on the main queue, never on the posting thread.
     init(sampleRate: Double = AudioPlayerManager.defaultSampleRate,
          scheduledBufferObserver: @escaping (AVAudioPCMBuffer) -> Void = { _ in },
          engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() },
@@ -120,20 +133,31 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
              RunLoop.main.add(timer, forMode: .default)
          },
          audioDataProcessingObserver: @escaping () -> Void = {},
-         audioStateObserver: @escaping () -> Void = {}) {
+         audioStateObserver: @escaping () -> Void = {},
+         notificationCenter: NotificationCenter = .default,
+         configurationChangeRecoveryScheduler: @escaping (@escaping @Sendable () -> Void) -> Void
+             = AudioPlayerManager.mainQueueRecoveryScheduler) {
         self.scheduledBufferObserver = scheduledBufferObserver
         self.engineStarter = engineStarter
         self.automaticPlaybackScheduler = automaticPlaybackScheduler
         self.renderedSampleTime = renderedSampleTimeReader
         self.progressTimerScheduler = progressTimerScheduler
         self.audioObservers = (processed: audioDataProcessingObserver, statePublished: audioStateObserver)
+        self.notificationCenter = notificationCenter
+        self.configurationChangeRecoveryScheduler = configurationChangeRecoveryScheduler
         let hasValidInitialSampleRate = Self.isSupportedSampleRate(sampleRate)
         let initialSampleRate = hasValidInitialSampleRate ? sampleRate : Self.defaultSampleRate
         setupEngine(sampleRate: initialSampleRate)
+        observeEngineConfigurationChanges()
         if !hasValidInitialSampleRate {
             hasValidSampleRateInput = false
             hasValidSampleRateConfiguration = false
             formatError = Self.unsupportedSampleRateMessage
+        }
+    }
+    deinit {
+        if let configurationChangeObserver {
+            notificationCenter.removeObserver(configurationChangeObserver)
         }
     }
     private func setupEngine(sampleRate: Double) {
@@ -152,46 +176,6 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         startEngineIfStopped()
     }
 
-    /// Starts the engine when it is not running and publishes the outcome, on the main queue.
-    ///
-    /// Every start attempt goes through here or through `attemptEngineStart` paired with
-    /// `publishEngineStart`, so a success always clears the failure an earlier attempt left
-    /// behind. An engine already running counts as a success for the same reason: whoever started
-    /// it resolved that failure.
-    @discardableResult
-    private func startEngineIfStopped() -> Bool {
-        let started = attemptEngineStart()
-        publishEngineStart(succeeded: started)
-        return started
-    }
-
-    /// Starts the engine when it is not running, without publishing, and answers whether it runs.
-    ///
-    /// Separate from the publication so a caller holding `bufferQueue` can start the engine there
-    /// and publish only after it has left the queue.
-    private func attemptEngineStart() -> Bool {
-        guard !engine.isRunning else { return true }
-        do {
-            try engineStarter(engine)
-            return true
-        } catch {
-            return false
-        }
-    }
-
-    private func publishEngineStart(succeeded: Bool) {
-        engineStartError = succeeded ? nil : Self.engineStartFailureMessage
-    }
-
-    /// Starts a stopped engine for a new session, answering whether that session may begin.
-    ///
-    /// A session refused here would otherwise stay refused until something else happened to start
-    /// the engine, with the menu offering a "Try again" that did nothing. Asking at the start of each
-    /// session makes that retry real, and a failure is published so the user sees why nothing began.
-    func prepareForNewStream() -> Bool {
-        guard hasValidSampleRateConfiguration else { return false }
-        return startEngineIfStopped()
-    }
     /// Changes the PCM sample rate after clearing all audio that was decoded with the previous format.
     @discardableResult
     func setSampleRate(_ sampleRate: Double) -> SampleRateUpdateResult {
@@ -318,11 +302,18 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     /// suspends exactly where its published position reached the buffered end, and the seek it
     /// performs releases the suspension. Later PCM therefore extends the replay the user asked for
     /// rather than jumping playback back to where the buffer had run out.
+    ///
+    /// A Play that has to start a stopped engine first re-anchors the node at the published position,
+    /// because the buffers scheduled before the engine stopped are not ones a restarted engine can be
+    /// trusted to render; that is the path after a configuration change whose own restart failed.
     func play() {
+        let startsStoppedEngine = !engine.isRunning
         guard startEngineIfStopped() else { return }
 
         if playbackProgress >= bufferDuration && bufferDuration > 0 {
             seek(to: 0.0)
+        } else if startsStoppedEngine && hasAudio {
+            seek(to: playbackProgress)
         }
         playerNode.play()
 
@@ -599,10 +590,120 @@ extension AudioPlayerManager {
     /// output timeline: playing it again renders the buffer `scheduleAudio` has just queued behind
     /// what the user already heard. Nothing is re-scheduled and no prebuffer window is opened,
     /// because neither the audio nor the reason to wait for more of it has changed.
+    ///
+    /// It does not resume while the engine is stopped or a configuration change is waiting for its
+    /// recovery, which releases the suspension itself. A stopped engine means the output changed, and
+    /// the notification that says so can still be on its way; playing the node then would raise.
     private func resumeAfterUnderrun() {
+        guard engine.isRunning, !isConfigurationChangePending else { return }
         playerNode.play()
         isPlaying = true
         startProgressTimer()
+    }
+}
+
+/// Engine start ownership: every attempt to start the engine, and the failure it publishes or clears.
+extension AudioPlayerManager {
+    /// Starts the engine when it is not running and publishes the outcome, on the main queue.
+    ///
+    /// Every start attempt goes through here or through `attemptEngineStart` paired with
+    /// `publishEngineStart`, so a success always clears the failure an earlier attempt left
+    /// behind. An engine already running counts as a success for the same reason: whoever started
+    /// it resolved that failure.
+    @discardableResult
+    fileprivate func startEngineIfStopped() -> Bool {
+        let started = attemptEngineStart()
+        publishEngineStart(succeeded: started)
+        return started
+    }
+
+    /// Starts the engine when it is not running, without publishing, and answers whether it runs.
+    ///
+    /// Separate from the publication so a caller holding `bufferQueue` can start the engine there
+    /// and publish only after it has left the queue.
+    fileprivate func attemptEngineStart() -> Bool {
+        guard !engine.isRunning else { return true }
+        do {
+            try engineStarter(engine)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    fileprivate func publishEngineStart(succeeded: Bool) {
+        engineStartError = succeeded ? nil : Self.engineStartFailureMessage
+    }
+
+    /// Starts a stopped engine for a new session, answering whether that session may begin.
+    ///
+    /// A session refused here would otherwise stay refused until something else happened to start
+    /// the engine, with the menu offering a "Try again" that did nothing. Asking at the start of each
+    /// session makes that retry real, and a failure is published so the user sees why nothing began.
+    func prepareForNewStream() -> Bool {
+        guard hasValidSampleRateConfiguration else { return false }
+        return startEngineIfStopped()
+    }
+}
+
+/// Recovery from `AVAudioEngineConfigurationChange`: the output hardware changed, so the engine
+/// stopped itself and nothing the menu shows about playback is true any more.
+extension AudioPlayerManager {
+    /// Observes configuration changes of this manager's own engine, and removes the observer with it.
+    ///
+    /// The notification can be posted on any thread. The block therefore only hops to the main queue,
+    /// where the engine and published state live. It is registered without an operation queue
+    /// because a queue makes the posting thread wait for the block, and a poster the main thread is
+    /// itself waiting on would deadlock. It holds the manager weakly, so observing never keeps a
+    /// player alive; only a change already on its way to the main queue holds it, until handled.
+    ///
+    /// The change is counted on the posting thread, before the hop. Main-queue work queued ahead of
+    /// the recovery, an automatic start or an underrun resume, would otherwise start speech on the new
+    /// output before the recovery could pause it. Both check the count and stand down while it is
+    /// non-zero. The count sits behind its own lock, not `bufferQueue`, because the posting thread
+    /// belongs to AVFoundation and must never wait on work that may itself be starting the engine.
+    /// Production's recovery scheduler: queues the recovery on the main queue, behind work already there.
+    static let mainQueueRecoveryScheduler: @Sendable (@escaping @Sendable () -> Void) -> Void = { recovery in
+        DispatchQueue.main.async(execute: recovery)
+    }
+
+    fileprivate func observeEngineConfigurationChanges() {
+        configurationChangeObserver = notificationCenter.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.pendingConfigurationChanges.withLock { $0 += 1 }
+            self.configurationChangeRecoveryScheduler {
+                self.recoverFromEngineConfigurationChange()
+            }
+        }
+    }
+
+    /// Pauses the session where it was and restarts the engine for the output it now has.
+    ///
+    /// Pausing is the policy, not a side effect: speech must never move to a different output device
+    /// the user did not choose, such as the speakers after headphones are unplugged. So the change is
+    /// recorded exactly as a Pause would record it. That revokes the stream's pending automatic start,
+    /// even before its first PCM arrives, and any underrun resume. The request, its generation, and
+    /// the PCM it has buffered are all left alone, so Play resumes the same session.
+    ///
+    /// The node is re-anchored at the published position after the restart. Whatever it had
+    /// scheduled belonged to the engine that stopped, and scheduling the remaining PCM again is what
+    /// makes Play render from the position the menu shows. If the restart fails, its error is
+    /// published and `play()` restarts and re-anchors instead.
+    fileprivate func recoverFromEngineConfigurationChange() {
+        defer { pendingConfigurationChanges.withLock { $0 -= 1 } }
+        let position = playbackProgress
+        suspendPlayback(resumableAfterUnderrun: false)
+        guard startEngineIfStopped() else { return }
+        seek(to: position)
+    }
+
+    /// Whether a configuration change has been received and its recovery has not yet run.
+    fileprivate var isConfigurationChangePending: Bool {
+        pendingConfigurationChanges.withLock { $0 > 0 }
     }
 }
 
@@ -611,6 +712,7 @@ private extension AudioPlayerManager {
         let result = bufferQueue.sync { () -> (started: Bool, engineStartFailed: Bool) in
             guard scheduleGeneration == streamGeneration,
                   automaticPlaybackSuppressedGeneration != streamGeneration,
+                  !isConfigurationChangePending,
                   !isPlaying else { return (false, false) }
             guard attemptEngineStart() else { return (false, true) }
             playerNode.play()
