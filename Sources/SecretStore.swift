@@ -223,23 +223,26 @@ struct APIKeyStartupState {
     let apiKey: String
     let errorMessage: String?
 
-    /// Migrates a legacy key before reading the selected provider's current saved key.
+    /// Migrates legacy keys, then takes the selected provider's key from what that migration secured.
+    ///
+    /// The store is read only when the migration secured nothing for that provider. Reading back a
+    /// key it has just secured would let a transient failure leave startup without it, after the
+    /// plaintext copy is already gone.
     static func load(selectedProvider: String,
                      secretStore: SecretStoring,
                      defaults: UserDefaults) -> APIKeyStartupState {
-        let migrationFailures = APIKeyMigrationService(secretStore: secretStore)
-            .migrateLegacyAPIKeys(defaults: defaults)
-            .pendingProviders
+        let migration = APIKeyMigrationService(secretStore: secretStore).migrateLegacyAPIKeys(defaults: defaults)
+        let migrationMessage = migration.pendingProviders.first.map(APIKeyMigrationService.failureMessage(for:))
         let provider = APIKeyProvider(selectedProvider: selectedProvider)
+        if let securedSecret = migration.securedSecrets[provider] {
+            return APIKeyStartupState(apiKey: securedSecret, errorMessage: migrationMessage)
+        }
         do {
-            return APIKeyStartupState(
-                apiKey: try secretStore.secret(for: provider) ?? "",
-                errorMessage: migrationFailures.first.map(APIKeyMigrationService.failureMessage(for:))
-            )
+            return APIKeyStartupState(apiKey: try secretStore.secret(for: provider) ?? "", errorMessage: migrationMessage)
         } catch {
             return APIKeyStartupState(
                 apiKey: "",
-                errorMessage: migrationFailures.first.map(APIKeyMigrationService.failureMessage(for:))
+                errorMessage: migrationMessage
                     ?? "Couldn't read the saved \(provider.displayName) API key. Check Keychain access and try again."
             )
         }

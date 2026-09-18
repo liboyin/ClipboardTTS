@@ -116,7 +116,7 @@ final class AppStartupDependenciesTests: XCTestCase {
         XCTAssertNil(hostedDefaults.object(forKey: SettingsKeys.legacyCustomAPIKey))
         XCTAssertEqual(
             hostedSecretStore.operations,
-            [.read(.custom), .save(.custom), .read(.custom)]
+            [.read(.custom), .save(.custom)]
         )
         XCTAssertEqual(hostedSecretStore.storedSecrets, [.custom: "hosted-legacy-credential"])
         XCTAssertTrue(dependencies.networkManager.isCurrentProvider(.custom))
@@ -180,7 +180,7 @@ final class AppStartupDependenciesTests: XCTestCase {
         XCTAssertNil(productionDefaults.object(forKey: SettingsKeys.legacyCustomAPIKey))
         XCTAssertEqual(
             productionSecretStore.operations,
-            [.read(.custom), .save(.custom), .read(.custom)]
+            [.read(.custom), .save(.custom)]
         )
         XCTAssertEqual(productionSecretStore.storedSecrets, [.custom: "production-legacy-credential"])
         XCTAssertTrue(dependencies.networkManager.isCurrentProvider(.custom))

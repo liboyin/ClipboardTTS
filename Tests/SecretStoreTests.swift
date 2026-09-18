@@ -119,4 +119,75 @@ final class SecretStoreTests: MockURLProtocolTestCase {
         XCTAssertEqual(try store.secret(for: .openAI), "test-new-keychain-key")
         XCTAssertNil(defaults.object(forKey: SettingsKeys.legacyOpenAIAPIKey))
     }
+
+    func testStartupKeepsTheKeyItsMigrationSecuredWhenTheStoreCannotBeReadAgain() {
+        // WHY: Migration deletes the plaintext copy once the store accepts the key, so the value
+        // it reports is the only copy startup can still rely on. Reading the store again would let
+        // a transient failure leave the app with no credential and nothing to recover it from.
+        let store = ScriptedSecretStore()
+        let defaults = makeOwnedDefaults([
+            SettingsKeys.legacyOpenAIAPIKey: "test-legacy-openai-key",
+            SettingsKeys.legacyGeminiAPIKey: "test-legacy-gemini-key"
+        ])
+        // The migration reads each legacy provider once; any later read fails.
+        store.allowedReadCount = 2
+
+        let state = APIKeyStartupState.load(selectedProvider: "Gemini", secretStore: store, defaults: defaults)
+
+        XCTAssertEqual(state.apiKey, "test-legacy-gemini-key")
+        XCTAssertNil(state.errorMessage)
+        XCTAssertNil(defaults.object(forKey: SettingsKeys.legacyGeminiAPIKey))
+        XCTAssertEqual(store.storedSecret(for: .gemini), "test-legacy-gemini-key")
+    }
+
+    func testStartupKeepsAnExistingKeychainKeyOverStalePlaintextWithoutReadingItAgain() {
+        // WHY: The migration already decided that a saved key beats stale plaintext; startup must
+        // adopt that decision rather than lose it to a second read.
+        let store = ScriptedSecretStore()
+        store.seed("test-new-keychain-key", for: .openAI)
+        let defaults = makeOwnedDefaults([
+            SettingsKeys.legacyOpenAIAPIKey: "test-stale-legacy-key"
+        ])
+        store.allowedReadCount = 1
+
+        let state = APIKeyStartupState.load(selectedProvider: "OpenAI", secretStore: store, defaults: defaults)
+
+        XCTAssertEqual(state.apiKey, "test-new-keychain-key")
+        XCTAssertNil(state.errorMessage)
+    }
+
+    func testStartupWithASecuredSelectedKeyStillWarnsAboutAnotherProvidersPendingKey() {
+        // WHY: Adopting the selected key must not hide the one plaintext key still waiting to be
+        // secured; that warning is what leads the user to Settings' recovery action.
+        let store = ScriptedSecretStore()
+        let defaults = makeOwnedDefaults([
+            SettingsKeys.legacyOpenAIAPIKey: "test-legacy-openai-key",
+            SettingsKeys.legacyCustomAPIKey: "test-legacy-custom-key"
+        ])
+        store.failingProviders = [.openAI]
+
+        let state = APIKeyStartupState.load(selectedProvider: "Custom", secretStore: store, defaults: defaults)
+
+        XCTAssertEqual(state.apiKey, "test-legacy-custom-key")
+        XCTAssertEqual(state.errorMessage, APIKeyMigrationService.failureMessage(for: .openAI))
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.legacyOpenAIAPIKey), "test-legacy-openai-key")
+    }
+
+    func testStartupWithoutAMigratedKeyReadsTheStoreAndReportsAReadFailure() throws {
+        // WHY: Only a key the migration secured makes the read unnecessary. An ordinary launch must
+        // still load the saved key, and still say so when the store cannot be read.
+        let store = InMemorySecretStore()
+        try store.saveSecret("test-saved-custom-key", for: .custom)
+
+        let loaded = APIKeyStartupState.load(selectedProvider: "Custom", secretStore: store, defaults: makeOwnedDefaults())
+
+        XCTAssertEqual(loaded.apiKey, "test-saved-custom-key")
+        XCTAssertNil(loaded.errorMessage)
+
+        store.nextError = .unavailable
+        let failed = APIKeyStartupState.load(selectedProvider: "Custom", secretStore: store, defaults: makeOwnedDefaults())
+
+        XCTAssertEqual(failed.apiKey, "")
+        XCTAssertEqual(failed.errorMessage, "Couldn't read the saved Custom API key. Check Keychain access and try again.")
+    }
 }
