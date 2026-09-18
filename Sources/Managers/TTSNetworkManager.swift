@@ -7,10 +7,10 @@ import Foundation
 /// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
 /// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
 ///   `baseURL`, `apiKey`, `model`, `voice`, `selectedMetadataProvider`, the metadata request
-///   records, and the publication-depth counter) is read and written only under `stateQueue`.
-/// - The `@Published` properties, `isPublishingMetadata`, and `migrationFailureMessage` are written
-///   only on the main queue (every write path dispatches or already runs there) and are observed by
-///   SwiftUI on main. Construction is the one exception: the initializer assigns
+///   records, and the request-state publication flag) is read and written only under `stateQueue`.
+/// - The `@Published` properties, `isPublishingMetadata`, `migrationFailureMessage`, and the queued
+///   request-state publications are written only on the main queue (every write path dispatches or
+///   already runs there); SwiftUI observes them on main. Construction is the one exception: the initializer assigns
 ///   `migrationFailureMessage`, and `lastError` when startup could not secure or read a saved key,
 ///   on whichever thread builds the manager and before it is shared.
 /// - A recursive callback-authority lock spans delivery authorization through the complete handler
@@ -57,7 +57,10 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     let callbackAuthority: CallbackAuthorityLocking
     var activeRequest: ActiveRequestContext?
     var requestGeneration: UInt64 = 0
-    private var requestStatePublicationDepth = 0
+    private var isPublishingRequestState = false
+    /// Request-state publications requested while another was being published, applied in order
+    /// once it finishes. Main-queue confined, like the `@Published` properties it updates.
+    private var queuedRequestStatePublications: [@Sendable () -> Void] = []
     /// The legacy-key migration warning this manager last published, retained so a later recovery
     /// can withdraw or replace exactly that message rather than whatever `lastError` holds by then.
     private var migrationFailureMessage: String?
@@ -242,7 +245,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Publishes a request failure on the main queue and marks the request as finished.
     func publishFailure(_ message: String, requestGeneration: UInt64? = nil) {
-        let update: @Sendable () -> Void = { [weak self] in
+        publishRequestState { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
@@ -250,26 +253,16 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                 self.isStreaming = false
             }
         }
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
-        }
     }
 
     /// Clears a failure message only when it belongs to the latest request attempt.
     func clearLastError(requestGeneration: UInt64? = nil) {
-        let update: @Sendable () -> Void = { [weak self] in
+        publishRequestState { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
                 self.lastError = nil
             }
-        }
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
         }
     }
 
@@ -284,7 +277,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// is where its recovery is.
     func updateMigrationFailureWarning(for provider: APIKeyProvider?) {
         let message = provider.map(APIKeyMigrationService.failureMessage(for:))
-        let update: @Sendable () -> Void = { [weak self] in
+        publishRequestState { [weak self] in
             guard let self else { return }
             let publishedWarning = self.migrationFailureMessage
             self.migrationFailureMessage = message
@@ -293,11 +286,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                 self.lastError = message
             }
         }
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
-        }
     }
 
     /// Withdraws startup's guidance that a provider's saved key could not be read, once Settings has
@@ -305,30 +293,20 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// that published or cleared `lastError` since startup owns that line.
     func withdrawKeyReadFailure(for provider: APIKeyProvider) {
         let message = APIKeyStartupState.readFailureMessage(for: provider)
-        let update: @Sendable () -> Void = { [weak self] in
+        publishRequestState { [weak self] in
             guard let self, self.lastError == message else { return }
             self.withRequestStatePublication { self.lastError = nil }
-        }
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
         }
     }
 
     /// Publishes the request lifecycle state on the main queue.
     func setStreaming(_ isStreaming: Bool, requestGeneration: UInt64? = nil) {
-        let update: @Sendable () -> Void = { [weak self] in
+        publishRequestState { [weak self] in
             guard let self else { return }
             guard self.isCurrentRequestGeneration(requestGeneration) else { return }
             self.withRequestStatePublication {
                 self.isStreaming = isStreaming
             }
-        }
-        if Thread.isMainThread {
-            update()
-        } else {
-            DispatchQueue.main.async(execute: update)
         }
     }
 
@@ -340,17 +318,37 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Defers request starts triggered by synchronous `@Published` observer re-entrancy.
     func deferRequestStartIfPublishingState(_ action: @escaping @Sendable () -> Void) -> Bool {
-        let isPublishing = stateQueue.sync { requestStatePublicationDepth > 0 }
+        let isPublishing = stateQueue.sync { isPublishingRequestState }
         guard isPublishing else { return false }
         DispatchQueue.main.async(execute: action)
         return true
     }
 
-    /// Marks a `@Published` mutation so re-entrant observers cannot start a request mid-update.
+    /// Applies a request-state publication on the main queue, or queues it behind the one in progress.
+    /// `@Published` notifies observers before storing, so a publication an observer requests there
+    /// would be stored over by the outer value. A queued one is evaluated only when the outer
+    /// publication applies it, so its checks judge the state it replaces.
+    private func publishRequestState(_ update: @escaping @Sendable () -> Void) {
+        guard Thread.isMainThread else {
+            return DispatchQueue.main.async { [weak self] in self?.publishRequestState(update) }
+        }
+        if stateQueue.sync(execute: { isPublishingRequestState }) {
+            queuedRequestStatePublications.append(update)
+        } else {
+            update()
+        }
+    }
+
+    /// Marks a `@Published` mutation so re-entrant observers cannot start a request or publish
+    /// request state mid-update, then applies, in order, any publication they queued. It never
+    /// nests: `publishRequestState` runs an update only while no publication is in progress.
     private func withRequestStatePublication(_ update: () -> Void) {
-        stateQueue.sync { requestStatePublicationDepth += 1 }
-        defer { stateQueue.sync { requestStatePublicationDepth -= 1 } }
+        stateQueue.sync { isPublishingRequestState = true }
         update()
+        stateQueue.sync { isPublishingRequestState = false }
+        while !queuedRequestStatePublications.isEmpty {
+            queuedRequestStatePublications.removeFirst()()
+        }
     }
 
     /// Records what a response says about itself before any of its body arrives.
