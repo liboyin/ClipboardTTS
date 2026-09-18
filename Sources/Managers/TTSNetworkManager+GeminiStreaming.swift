@@ -1,36 +1,91 @@
 import Foundation
 
 /// Incrementally separates Server-Sent Event `data` payloads while preserving an unfinished line.
+///
+/// Parsing runs while request state is held, so its work and memory are bounded rather than left
+/// to the provider: each received byte is searched for a line ending once, and one event may occupy
+/// at most `maximumUnfinishedEventByteCount` bytes before it ends.
+///
+/// An event is charged the raw bytes of its data lines and of any line still unfinished, without
+/// their line feeds, and the cap is checked as each line completes as well as between callbacks.
+/// How URLSession splits the stream therefore cannot change whether an event fits. Charging the
+/// `data:` field name keeps empty data lines, which add a separator but no value, from growing an
+/// event without bound. The charge is never smaller than the payload the event joins to.
 struct GeminiSSEEventParser {
-    private var incompleteLine = Data()
+    /// D13's cap on one unfinished event: 64 MiB.
+    ///
+    /// The largest event Google documents is about 42 MB. Every Gemini TTS model is limited to
+    /// 16,384 output tokens, billed at 25 audio tokens per second: 655 s of 24-kHz 16-bit mono PCM,
+    /// base64-encoded. Models other than `gemini-3.1-flash-tts-preview` do not stream, so they send
+    /// that whole utterance as one event. The headroom covers JSON framing and a modest limit
+    /// increase; re-verify both figures before lowering it.
+    static let defaultMaximumUnfinishedEventByteCount = 64 * 1024 * 1024
+
+    /// The stream sent more than the cap before ending one event.
+    struct UnfinishedEventTooLarge: Error {}
+
+    let maximumUnfinishedEventByteCount: Int
+    /// Received bytes after the last line ending.
+    private var unfinishedLine = Data()
+    /// Leading bytes of `unfinishedLine` already searched and known to hold no line ending.
+    private var searchedUnfinishedByteCount = 0
     private var eventDataLines: [Data] = []
+    /// Raw bytes of the current event's completed data lines, without their line feeds.
+    private var eventChargedByteCount = 0
+    /// Total bytes searched for a line ending, which stays equal to the bytes received.
+    private(set) var searchedByteCount = 0
+
+    /// Takes the cap as a parameter only so tests can reach its boundary with small events.
+    init(maximumUnfinishedEventByteCount: Int = Self.defaultMaximumUnfinishedEventByteCount) {
+        self.maximumUnfinishedEventByteCount = maximumUnfinishedEventByteCount
+    }
 
     /// Reports whether end of stream would discard an incomplete Server-Sent Event.
     var hasIncompleteEvent: Bool {
-        !incompleteLine.isEmpty || !eventDataLines.isEmpty
+        !unfinishedLine.isEmpty || !eventDataLines.isEmpty
     }
 
     /// Appends bytes from one URL-session callback and returns only fully terminated event payloads.
-    mutating func append(_ data: Data) -> [Data] {
-        incompleteLine.append(data)
+    ///
+    /// - Throws: `UnfinishedEventTooLarge` when a line of the current event, together with its
+    ///   earlier data lines, exceeds the cap. The parser must not be used afterwards.
+    mutating func append(_ data: Data) throws -> [Data] {
+        unfinishedLine.append(data)
         var payloads: [Data] = []
+        var lineStart = unfinishedLine.startIndex
+        var searchStart = unfinishedLine.startIndex + searchedUnfinishedByteCount
 
-        while let lineEnding = incompleteLine.firstIndex(of: 0x0A) {
-            var line = Data(incompleteLine.prefix(upTo: lineEnding))
-            incompleteLine.removeSubrange(...lineEnding)
-            if line.last == 0x0D {
-                line.removeLast()
+        while let lineEnding = unfinishedLine[searchStart...].firstIndex(of: 0x0A) {
+            searchedByteCount += lineEnding - searchStart + 1
+            guard eventChargedByteCount + (lineEnding - lineStart) <= maximumUnfinishedEventByteCount else {
+                throw UnfinishedEventTooLarge()
             }
-
+            var line = unfinishedLine[lineStart..<lineEnding]
+            let lineChargedByteCount = line.count
+            if line.last == 0x0D {
+                line = line.dropLast()
+            }
             if line.isEmpty {
-                guard !eventDataLines.isEmpty else { continue }
-                payloads.append(joinedDataLines())
-                eventDataLines.removeAll(keepingCapacity: true)
+                if !eventDataLines.isEmpty {
+                    payloads.append(takeEventPayload())
+                }
             } else if line.starts(with: Data("data:".utf8)) {
                 appendDataLine(from: line)
+                eventChargedByteCount += lineChargedByteCount
             }
+            lineStart = lineEnding + 1
+            searchStart = lineStart
         }
+        searchedByteCount += unfinishedLine.endIndex - searchStart
 
+        // Drop every completed line in one move, so a packet's cost is proportional to its size.
+        if lineStart > unfinishedLine.startIndex {
+            unfinishedLine.removeSubrange(unfinishedLine.startIndex..<lineStart)
+        }
+        searchedUnfinishedByteCount = unfinishedLine.count
+        guard eventChargedByteCount + unfinishedLine.count <= maximumUnfinishedEventByteCount else {
+            throw UnfinishedEventTooLarge()
+        }
         return payloads
     }
 
@@ -42,10 +97,18 @@ struct GeminiSSEEventParser {
         eventDataLines.append(value)
     }
 
-    private func joinedDataLines() -> Data {
-        eventDataLines.dropFirst().reduce(eventDataLines.first ?? Data()) { partial, line in
-            partial + Data([0x0A]) + line
+    /// Joins the event's data lines with line feeds, as SSE specifies, and starts the next event.
+    private mutating func takeEventPayload() -> Data {
+        var payload = Data(capacity: eventChargedByteCount)
+        for (index, line) in eventDataLines.enumerated() {
+            if index > 0 {
+                payload.append(0x0A)
+            }
+            payload.append(line)
         }
+        eventDataLines.removeAll(keepingCapacity: true)
+        eventChargedByteCount = 0
+        return payload
     }
 }
 
@@ -140,15 +203,23 @@ extension TTSNetworkManager {
                   !context.isErrorResponse, !context.refusedResponseFormat else { return nil }
             if context.provider == .gemini {
                 guard !context.hasGeminiStreamFailure else { return nil }
-                let events = context.geminiEventParser.append(data)
-                guard !events.isEmpty else {
-                    activeRequest = context
-                    return nil
+                let failedRequest: (task: URLSessionDataTask, requestGeneration: UInt64)?
+                do {
+                    let events = try context.geminiEventParser.append(data)
+                    guard !events.isEmpty else {
+                        activeRequest = context
+                        return nil
+                    }
+                    // Decode and account for events before completion can clear this request. Only
+                    // the user handler is deferred, so it remains outside stateQueue but retains the
+                    // order in which this request accepted delegate callbacks.
+                    failedRequest = enqueueGeminiEvents(events, into: &context, for: dataTask)
+                } catch {
+                    // An event over the cap is a malformed stream, like an event that cannot be read.
+                    context.hasGeminiStreamFailure = true
+                    failedRequest = (dataTask, context.requestGeneration)
                 }
-                // Decode and account for events before completion can clear this request. Only
-                // the user handler is deferred, so it remains outside stateQueue but retains the
-                // order in which this request accepted delegate callbacks.
-                if let failedRequest = enqueueGeminiEvents(events, into: &context, for: dataTask) {
+                if let failedRequest {
                     // Invalidate queued delivery before it can acquire callback authority. A
                     // delivery already waiting on stateQueue will therefore observe the failed
                     // generation when it continues, while a running handler is awaited below.
