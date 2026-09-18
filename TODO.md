@@ -24,6 +24,8 @@ The review did not exercise live providers, physical device switching, macOS 13,
 
 A follow-up sequential review on 2026-09-18 covered the Codex commits `afccaff`–`379cd97` and produced NB26–NB29 and N6. It was read-only against `ec01095`: it inspected the ten diffs, the affected source and tests, `project.yml`, the generated scheme list, and `swiftlint --strict` (0 violations in 95 files). It did not rerun the test suite, the coverage gate, or the mutation evidence those commits' dispositions claim.
 
+N7 comes from NB12's gate run on 2026-09-18 at `6578dac`, which used Xcode 27.0 (27A266a) and Swift 6.4 rather than the Xcode 26.6 recorded above. Toolchain claims recorded against 26.6 have not been revalidated on 27.0.
+
 **Validated** means source inspection and/or the stated review probe supported the finding. **Not independently validated** identifies inherited evidence still needing verification. Architectural benefits are design judgments, even when the underlying structure is validated.
 
 ## Decisions and constraints
@@ -64,7 +66,7 @@ NB6 must establish a defensible event-size bound from provider evidence before c
 
 ## Active backlog
 
-Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review recorded under Evidence provenance. NB22 is completed by this documentation change and appears under dispositions. NB25 preserves inherited Task 42. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB22 is completed by this documentation change and appears under dispositions. NB25 preserves inherited Task 42. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -141,6 +143,10 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 #### N6 — `displayedCustomSampleRate` is not separated from its neighbours
 
 **Validated — source inspection.** [SettingsView.swift:365-370](Sources/Views/SettingsView.swift) declares the helper with no blank line before its documentation comment or after its closing brace, unlike every other member in the file. `swiftlint --strict` does not flag it. **Direction/acceptance:** restore the surrounding blank lines; no behaviour, test, lint, or coverage result changes.
+
+#### N7 — The automatic-playback prebuffer closure draws an implicit-strong-capture warning
+
+**Validated — clean build output.** The clean `check-coverage.sh` build for NB12 (`6578dac`) reported `'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]` at [AudioPlayerManager.swift:275](Sources/Managers/AudioPlayerManager.swift). The inner `[weak self]` scheduler closure sits inside `scheduleAudio`'s `bufferQueue.async` closure, which captures `self` strongly without saying so. The line dates from `503ab88b`, and NB12 did not touch the file. It was not previously recorded, and whether Xcode 26.6 emitted it is unverified. **Paths:** [AudioPlayerManager](Sources/Managers/AudioPlayerManager.swift), [audio tests](Tests/AudioPlayerManagerTests.swift). **Direction:** make the capture intent explicit so the warning resolves without suppression. Keep the prebuffer closure from retaining the manager across its delay. **Acceptance:** a clean build reports no source warning at that site; automatic playback, its generation guard, and B3's pause revocation behave as before; no diagnostic is disabled.
 
 ## Ready for implementation
 
