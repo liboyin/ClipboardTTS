@@ -22,6 +22,8 @@ The findings come from the 2026-09-06 full-project review of cf39ce5a9777a9acf15
 
 The review did not exercise live providers, physical device switching, macOS 13, or Thread Sanitizer. Device-change evidence used an owned engine and a simulated notification. The inherited Task 42 whole-suite mutant result was not rerun. N5's completed disposition records the relevant toolchain warnings.
 
+A follow-up sequential review on 2026-09-18 covered the Codex commits `afccaff`–`379cd97` and produced NB26–NB29 and N6. It was read-only against `ec01095`: it inspected the ten diffs, the affected source and tests, `project.yml`, the generated scheme list, and `swiftlint --strict` (0 violations in 95 files). It did not rerun the test suite, the coverage gate, or the mutation evidence those commits' dispositions claim.
+
 **Validated** means source inspection and/or the stated review probe supported the finding. **Not independently validated** identifies inherited evidence still needing verification. Architectural benefits are design judgments, even when the underlying structure is validated.
 
 ## Decisions and constraints
@@ -62,7 +64,7 @@ NB6 must establish a defensible event-size bound from provider evidence before c
 
 ## Active backlog
 
-Finding IDs preserve the full-project review's numbering. NB22 is completed by this documentation change and appears under dispositions. NB25 preserves inherited Task 42. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review recorded under Evidence provenance. NB22 is completed by this documentation change and appears under dispositions. NB25 preserves inherited Task 42. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -121,6 +123,28 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 #### NB25 — Provider-only metadata invalidation needs current falsification evidence
 
 **Not independently validated — inherited Task 42 mutation claim.** The check still compares endpoint and provider. OpenAI and Custom can share a default endpoint; provider-only invalidation remains meaningful. The prior whole-suite surviving mutant is historical. **Paths:** [updateSettings](Sources/Managers/TTSNetworkManager.swift), [metadata source tests](Tests/TTSNetworkManagerMetadataSourceTests.swift), README. **Direction/acceptance:** verify pending model cancellation and prompt list clearing on a provider-only switch; independently falsify provider change, endpoint change, and needless invalidation when neither changes. Do not remove the guard because an old mutant survived. If NB20 supersedes a property, identify its replacement owner and retained coverage.
+
+#### NB26 — A test factory mode can create a manager that reaches the real network
+
+**Validated — source inspection.** `TestNetworkFactory.ManagerSessionConfiguration.productionDefault` passes `nil` to `TTSNetworkManager.init(configuration:)`, so that manager builds `productionSessionConfiguration()` with default protocol classes, and nothing registers `MockURLProtocol` globally. Only a comment — "no request may be issued from that manager" — keeps a test in that mode off the network, which AGENTS forbids outright. The one current caller issues no request from it. **Paths:** [TestNetworkSupport](Tests/TestNetworkSupport.swift), [session policy test](Tests/TTSNetworkManagerSessionPolicyTests.swift). **Direction:** make the mode structurally unable to leave the machine — layer a protocol class that fails every request onto the inspected policy, or assert the policy `productionSessionConfiguration()` returns without building a live session from it. **Acceptance:** the five policy assertions still hold against what the manager actually used; a request issued from that manager fails locally; the mock-routed modes and scope teardown are unchanged.
+
+#### NB27 — A later malformed Gemini inline part discards audio already validated ahead of it
+
+**Validated — source inspection.** `audioPayload(in:)` now reads every part before returning, so any part whose `inlineData` is unreadable or declares a non-audio media type makes the whole candidate `.invalid` and takes the fatal revocation path, dropping audio parts that passed validation earlier in the same event. Before `912bf09` the first audio part returned immediately and a later part was never read. The trade-off is deliberate and documented; the exposure is that a provider adding one non-audio inline part to an `AUDIO`-modality response would silence an utterance that previously played. **Paths:** [audioPayload](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [Gemini streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift), README. **Direction:** decide from provider evidence whether an unplayable part accompanying valid audio is a corrupt stream or an ignorable extra; keep the current rule until that evidence exists. **Acceptance:** the chosen rule and its evidence are stated in README, and both a malformed-only event and a mixed valid/malformed event keep a test.
+
+#### NB28 — Three landed invariants carry no recorded mutation evidence
+
+**Validated — TODO inspection.** The NB2, NB3, and NB7 dispositions describe the new behavior but record no mutants, while NB1, NB4, NB5, NB9, NB10, and B2–B4 each name the mutants that fail a named test. AGENTS requires a revert, a plausible regression, and an over-restriction where applicable for each added or changed invariant. Inspection indicates the obvious reverts do die — the parity predicate against `testOpenAICompatibleResponsesKeepACompleteFrameBeforeTrailingPartialBytes`, first-part-only Gemini delivery against `testGeminiDeliversEveryAudioPartInOrderAndJoinsPartialFrames`, and endpoint inference against `testCustomGoogleLookingHostUsesOpenAICompatibleModelDiscovery` — but that is reasoning, not a run. **Paths:** the NB2/NB3/NB7 dispositions below, [PCM completion](Sources/Managers/TTSNetworkManager+Failures.swift), [Gemini streaming](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [provider dispatch](Sources/Managers/TTSNetworkManager.swift). **Direction/acceptance:** run the missing mutants in isolated scratch copies and record each against the named test that fails it, or record why a category does not apply. Classify on a named failing test rather than an exit code or a test-count summary.
+
+#### NB29 — The app's minimum OS is no longer reachable by any automated evidence
+
+**Validated — project and toolchain inspection.** `5c6e5b1` raised `ClipboardTTSAppTests` to macOS 14 for Xcode 26.6's XCTest minimum while `ClipboardTTSApp` stays at 13, so every gate now runs one major version above the floor the app advertises. README records the split; nothing owns how macOS 13 support is evidenced. **Paths:** [project.yml](project.yml), README, this file's integration acceptance. **Direction:** either agree a manual macOS 13 smoke check as that evidence and record its scope, or raise the app's deployment target to the version actually exercised. **Acceptance:** the supported floor and the evidence for it agree; any retained macOS 13 claim names what was run there, on which revision, and when.
+
+### Nits
+
+#### N6 — `displayedCustomSampleRate` is not separated from its neighbours
+
+**Validated — source inspection.** [SettingsView.swift:365-370](Sources/Views/SettingsView.swift) declares the helper with no blank line before its documentation comment or after its closing brace, unlike every other member in the file. `swiftlint --strict` does not flag it. **Direction/acceptance:** restore the surrounding blank lines; no behaviour, test, lint, or coverage result changes.
 
 ## Ready for implementation
 
