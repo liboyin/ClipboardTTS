@@ -300,6 +300,22 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         }
     }
 
+    /// Withdraws startup's guidance that a provider's saved key could not be read, once Settings has
+    /// read it. Like `updateMigrationFailureWarning`, it replaces only that exact message: a request
+    /// that published or cleared `lastError` since startup owns that line.
+    func withdrawKeyReadFailure(for provider: APIKeyProvider) {
+        let message = APIKeyStartupState.readFailureMessage(for: provider)
+        let update: @Sendable () -> Void = { [weak self] in
+            guard let self, self.lastError == message else { return }
+            self.withRequestStatePublication { self.lastError = nil }
+        }
+        if Thread.isMainThread {
+            update()
+        } else {
+            DispatchQueue.main.async(execute: update)
+        }
+    }
+
     /// Publishes the request lifecycle state on the main queue.
     func setStreaming(_ isStreaming: Bool, requestGeneration: UInt64? = nil) {
         let update: @Sendable () -> Void = { [weak self] in

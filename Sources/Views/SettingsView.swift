@@ -136,7 +136,11 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                 }
 
-                legacyKeyMigrationRecovery
+                SavedKeyRecoveryView(
+                    secretState: secretState,
+                    retryReading: retryReadingSavedKeys,
+                    retrySecuring: retrySecuringSavedKeys
+                )
 
                 if selectedProvider == .openAI {
                     openAISettings
@@ -221,30 +225,6 @@ struct SettingsView: View {
         }
     }
 
-    /// The recovery offered while a saved key is still waiting to be moved into the Keychain.
-    ///
-    /// Migration otherwise reruns only when a new `TTSNetworkManager` is created, so the guidance's
-    /// "try again" would mean relaunching the app. It is rendered for every pending provider,
-    /// because one that keeps failing must stay visible after another one succeeds.
-    @ViewBuilder
-    private var legacyKeyMigrationRecovery: some View {
-        if !secretState.pendingMigrationProviders.isEmpty {
-            Section {
-                ForEach(secretState.pendingMigrationProviders, id: \.self) { provider in
-                    Text(APIKeyMigrationService.failureMessage(for: provider))
-                        .foregroundStyle(.red)
-                }
-
-                HStack {
-                    SettingsActionButton(title: "Retry Securing Saved Keys", action: retrySecuringSavedKeys)
-                        .fixedSize()
-
-                    Spacer()
-                }
-            }
-        }
-    }
-
     private var testVoiceButton: some View {
         HStack {
             // An `NSViewRepresentable` is greedy by default, so `.fixedSize()` keeps this control
@@ -284,6 +264,21 @@ struct SettingsView: View {
         secretState.retryLegacyKeyMigration()
         applyCredentialsToFutureRequests()
         refreshMigrationWarning()
+    }
+
+    /// Reads the saved keys the store refused again, at the user's request, and hands on any it recovers.
+    ///
+    /// A recovered key withdraws the menu bar's startup guidance about it and reaches future
+    /// requests. A recovered selected-provider key also rediscovers models, as a key edit does,
+    /// because discovery at mount ran without it; the voice catalog and audio format do not follow a key.
+    func retryReadingSavedKeys() {
+        let previousAPIKey = currentAPIKey
+        secretState.retryUnreadableSecrets().forEach(networkManager.withdrawKeyReadFailure(for:))
+        applyCredentialsToFutureRequests()
+        guard currentAPIKey != previousAPIKey, selectedProvider != .custom else { return }
+        networkManager.fetchAvailableModels(
+            baseURL: currentBaseURL, apiKey: currentAPIKey, selectedProvider: selectedProvider.settingsValue
+        )
     }
 
     /// Points the menu bar's migration warning at whatever is still unsecured, or withdraws it.

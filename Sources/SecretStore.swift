@@ -240,11 +240,13 @@ struct APIKeyStartupState {
         do {
             return APIKeyStartupState(apiKey: try secretStore.secret(for: provider) ?? "", errorMessage: migrationMessage)
         } catch {
-            return APIKeyStartupState(
-                apiKey: "",
-                errorMessage: migrationMessage
-                    ?? "Couldn't read the saved \(provider.displayName) API key. Check Keychain access and try again."
-            )
+            return APIKeyStartupState(apiKey: "", errorMessage: migrationMessage ?? readFailureMessage(for: provider))
         }
+    }
+
+    /// The guidance for a saved key the store refused to read, shared by startup and Settings so a
+    /// recovery can recognize exactly the message it resolves.
+    static func readFailureMessage(for provider: APIKeyProvider) -> String {
+        "Couldn't read the saved \(provider.displayName) API key. Check Keychain access and try again."
     }
 }

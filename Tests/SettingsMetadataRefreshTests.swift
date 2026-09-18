@@ -146,7 +146,7 @@ private let currentOpenAIVoices = [
 ///
 /// Every begun request takes the next identifier synchronously, before any publication or network
 /// work, so the difference across one settled edit counts exactly the refreshes that edit started.
-private func metadataRequestsBegun(by manager: TTSNetworkManager) -> UInt64 {
+func metadataRequestsBegun(by manager: TTSNetworkManager) -> UInt64 {
     manager.stateQueue.sync { manager.nextMetadataRequestIdentifier }
 }
 
