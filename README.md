@@ -1,6 +1,6 @@
 # Clipboard TTS App
 
-Native macOS menu bar app (Swift/SwiftUI, macOS 13+) that reads clipboard text aloud through OpenAI-compatible TTS APIs or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
+Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text aloud through OpenAI-compatible TTS APIs or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
 ```
 Sources/
@@ -84,13 +84,13 @@ for the URL-session delegate bridge and documented confinement invariants. An in
 reports only the file batches it recompiled, so clear the derived data before concluding that a
 target is warning-free.
 
-`ClipboardTTSApp` remains deployable to macOS 13. The unit-test bundle instead targets macOS 14,
-which is the minimum of Xcode 26.6's XCTest libraries; this limits only where the test runner can
-launch. The generated project has one `ClipboardTTSApp` scheme, whose test action runs that bundle,
-so the coverage script selects it and the current host architecture explicitly to avoid a
-multiple-destination warning. Xcode 26.6 invokes AppIntents metadata extraction for both targets
-even though neither links AppIntents; its “Metadata extraction skipped” message is benign tool
-metadata, not a source warning. Do not suppress compiler or lint diagnostics to hide it.
+`ClipboardTTSApp` and its unit-test bundle both target macOS 14, so every gate runs on the app's own
+minimum; macOS 14 is also the minimum of Xcode 26.6's XCTest libraries. The generated project has
+one `ClipboardTTSApp` scheme, whose test action runs that bundle, so the coverage script selects it
+and the current host architecture explicitly to avoid a multiple-destination warning. Xcode 26.6
+invokes AppIntents metadata extraction for both targets even though neither links AppIntents; its
+“Metadata extraction skipped” message is benign tool metadata, not a source warning. Do not suppress
+compiler or lint diagnostics to hide it.
 
 For streaming requests, accept, parse, and account for provider data while holding request-state
 ownership; defer only the user audio handler to the ordered delivery queue. Completion must never

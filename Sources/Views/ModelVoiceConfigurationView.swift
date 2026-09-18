@@ -54,7 +54,7 @@ struct ModelVoiceConfigurationView: View {
             }
             // Each row observes its binding rather than each control: the field and the picker edit
             // the same value, so an observer on both would run the callback twice for one edit.
-            .onChange(of: ttsModel) { _ in onModelChange() }
+            .onChange(of: ttsModel) { onModelChange() }
 
             HStack {
                 TextField("Voice", text: $ttsVoice)
@@ -70,7 +70,7 @@ struct ModelVoiceConfigurationView: View {
                     .frame(width: 30)
                 }
             }
-            .onChange(of: ttsVoice) { _ in onVoiceChange() }
+            .onChange(of: ttsVoice) { onVoiceChange() }
         }
     }
 }

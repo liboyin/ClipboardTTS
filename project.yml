@@ -5,7 +5,7 @@ targets:
   ClipboardTTSApp:
     type: application
     platform: macOS
-    deploymentTarget: "13.0"
+    deploymentTarget: "14.0"
     # Swift 5 language mode with complete concurrency checking, so new isolation warnings stay
     # visible in every app build.
     settings:
@@ -38,8 +38,8 @@ targets:
   ClipboardTTSAppTests:
     type: bundle.unit-test
     platform: macOS
-    # Xcode 26.6's XCTest libraries have a macOS 14 minimum. This constrains only the
-    # test runner; ClipboardTTSApp continues to support macOS 13.
+    # Matches ClipboardTTSApp, so every gate runs on the app's own minimum. Xcode 26.6's XCTest
+    # libraries also require macOS 14.
     deploymentTarget: "14.0"
     sources: [Tests]
     dependencies:

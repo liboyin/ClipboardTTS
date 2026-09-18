@@ -19,6 +19,7 @@ final class HostedSettings {
     enum PlainTextField {
         case providerModel
         case providerVoice
+        case customBaseURL
         case customModel
         case customSampleRate
 
@@ -31,6 +32,8 @@ final class HostedSettings {
                 return 0
             case .providerVoice:
                 return 1
+            case .customBaseURL:
+                return 0
             case .customModel:
                 return 1
             case .customSampleRate:

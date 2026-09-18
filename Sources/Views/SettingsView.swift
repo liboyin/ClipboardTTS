@@ -120,7 +120,7 @@ struct SettingsView: View {
                     Text("Custom").tag("Custom")
                 }
                 .listStyle(.sidebar)
-                .onChange(of: ttsProvider) { _ in
+                .onChange(of: ttsProvider) {
                     syncSettings()
                 }
 
@@ -200,7 +200,7 @@ struct SettingsView: View {
             Section(header: Text("Custom Configuration").font(.headline)) {
                 TextField("Base URL", text: $apiBaseURL)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: apiBaseURL) { _ in syncSettings() }
+                    .onChange(of: apiBaseURL) { syncSettings() }
 
                 SecureField("API Key", text: secretBinding(for: .custom))
                     .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -214,7 +214,7 @@ struct SettingsView: View {
             Section(header: Text("Audio Format").font(.headline)) {
                 TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: customSampleRateText) { updateCustomSampleRate(from: $0) }
+                    .onChange(of: customSampleRateText) { _, newText in updateCustomSampleRate(from: newText) }
                 if let sampleRateError = audioPlayer.sampleRateError {
                     Text(sampleRateError)
                         .foregroundStyle(.red)
