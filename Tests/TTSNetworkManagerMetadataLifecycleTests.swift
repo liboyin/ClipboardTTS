@@ -101,7 +101,7 @@ final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
     }
 
     func testOneSettingsRefreshPublishesBothTheModelListAndTheVoiceCatalog() {
-        // WHY: This is the trade-off the replacement guard has to respect. `fetchMetadata` asks
+        // WHY: This is the trade-off the replacement guard has to respect. `syncSettings` asks
         // for models and then voices in a single refresh, and both go through the same guard, so
         // one that did not distinguish the two kinds would let the voice request cancel the model
         // request started beside it and leave the model picker permanently empty.
@@ -129,7 +129,7 @@ final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
             return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
         }
 
-        // The order `SettingsView.fetchMetadata` uses.
+        // The order `SettingsView.syncSettings` uses.
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
         wait(for: [modelsRequestStarted], timeout: 2.0)
         manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "OpenAI")

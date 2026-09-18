@@ -169,7 +169,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onSync: syncSettings)
+                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
 
             testVoiceButton
         }
@@ -185,7 +185,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onSync: syncSettings)
+                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
 
             testVoiceButton
         }
@@ -205,7 +205,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onSync: syncSettings)
+                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
 
             Section(header: Text("Audio Format").font(.headline)) {
                 TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)
@@ -307,12 +307,22 @@ struct SettingsView: View {
         speechSession.start(text: "Hello! This is a test of your text to speech configuration.")
     }
 
-    func syncSettings() {
+    /// Applies the form to future requests, then refreshes the lists the edit can alter: discovered
+    /// models follow only the provider, endpoint, and key, and the voice catalog also follows the
+    /// OpenAI model the manager now holds. A Custom endpoint has no discovery contract.
+    func syncSettings(discoveringModels: Bool = true, refreshingVoices: Bool = true) {
         normalizeSelectedProvider()
         applyCredentialsToFutureRequests()
         _ = syncAudioFormat()
-        fetchMetadata()
+        guard selectedProvider != .custom else { return }
+        let baseURL = currentBaseURL
+        let provider = selectedProvider.settingsValue
+        if discoveringModels { networkManager.fetchAvailableModels(baseURL: baseURL, apiKey: currentAPIKey, selectedProvider: provider) }
+        if refreshingVoices { networkManager.fetchAvailableVoices(baseURL: baseURL, selectedProvider: provider) }
     }
+
+    func applyModelChange() { syncSettings(discoveringModels: false) }
+    func applyVoiceChange() { syncSettings(discoveringModels: false, refreshingVoices: false) }
 
     /// Hands the form's current provider configuration to requests that start after this call.
     private func applyCredentialsToFutureRequests() {
@@ -362,22 +372,11 @@ struct SettingsView: View {
             isCustomSampleRateDraftValid = true
         }
     }
+
     /// Renders a persisted rate losslessly while keeping whole-number display compact.
     private func displayedCustomSampleRate(_ sampleRate: Double) -> String {
         let description = String(sampleRate)
         return description.hasSuffix(".0") ? String(description.dropLast(2)) : description
-    }
-    func fetchMetadata() {
-        guard selectedProvider != .custom else { return }
-        networkManager.fetchAvailableModels(
-            baseURL: currentBaseURL,
-            apiKey: currentAPIKey,
-            selectedProvider: selectedProvider.settingsValue
-        )
-        networkManager.fetchAvailableVoices(
-            baseURL: currentBaseURL,
-            selectedProvider: selectedProvider.settingsValue
-        )
     }
 
     private func normalizeSelectedProvider() {

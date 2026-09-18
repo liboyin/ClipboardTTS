@@ -8,7 +8,10 @@ struct ModelVoiceConfigurationView: View {
     @ObservedObject var networkManager: TTSNetworkManager
     /// The provider whose form this is; only suggestions published for it may be offered.
     let provider: APIKeyProvider
-    var onSync: () -> Void
+    /// Runs once per change to `ttsModel`, whichever control made it.
+    var onModelChange: () -> Void
+    /// Runs once per change to `ttsVoice`, whichever control made it.
+    var onVoiceChange: () -> Void
 
     /// The choices a suggestion picker may offer for `selection`, or none when it must not render.
     ///
@@ -38,7 +41,6 @@ struct ModelVoiceConfigurationView: View {
             HStack {
                 TextField("Model", text: $ttsModel)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: ttsModel) { _ in onSync() }
 
                 if !modelChoices.isEmpty {
                     Picker("", selection: $ttsModel) {
@@ -48,14 +50,15 @@ struct ModelVoiceConfigurationView: View {
                     }
                     .labelsHidden()
                     .frame(width: 30)
-                    .onChange(of: ttsModel) { _ in onSync() }
                 }
             }
+            // Each row observes its binding rather than each control: the field and the picker edit
+            // the same value, so an observer on both would run the callback twice for one edit.
+            .onChange(of: ttsModel) { _ in onModelChange() }
 
             HStack {
                 TextField("Voice", text: $ttsVoice)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .onChange(of: ttsVoice) { _ in onSync() }
 
                 if !voiceChoices.isEmpty {
                     Picker("", selection: $ttsVoice) {
@@ -65,9 +68,9 @@ struct ModelVoiceConfigurationView: View {
                     }
                     .labelsHidden()
                     .frame(width: 30)
-                    .onChange(of: ttsVoice) { _ in onSync() }
                 }
             }
+            .onChange(of: ttsVoice) { _ in onVoiceChange() }
         }
     }
 }

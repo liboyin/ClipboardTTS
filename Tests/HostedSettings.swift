@@ -198,22 +198,8 @@ final class HostedSettings {
         drainMainQueue(file: file, line: line)
     }
 
-    /// Replaces a field's text the way typing does, so SwiftUI's binding runs its setter.
-    ///
-    /// SwiftUI's macOS text fields observe their `NSTextField` through a coordinator implementing
-    /// `controlTextDidChange(_:)`. Assigning `stringValue` alone changes only what AppKit displays,
-    /// so the notification below is what carries the edit into the installed lifecycle storage.
     private func edit(_ control: NSTextField, to newText: String, file: StaticString, line: UInt) {
-        guard let coordinator = control.delegate else {
-            XCTFail(
-                "The hosted text field has no SwiftUI coordinator, so an edit cannot reach its binding.",
-                file: file,
-                line: line
-            )
-            return
-        }
-        control.stringValue = newText
-        coordinator.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: control))
+        editHostedTextField(control, to: newText, file: file, line: line)
         settle(file: file, line: line)
     }
 
@@ -257,7 +243,8 @@ final class HostedModelVoiceFields {
             ttsVoice: .constant(voice),
             networkManager: networkManager,
             provider: provider,
-            onSync: {}
+            onModelChange: {},
+            onVoiceChange: {}
         )
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(x: 0, y: 0, width: 560, height: 200)
@@ -283,13 +270,33 @@ final class HostedModelVoiceFields {
     }
 }
 
+/// Replaces a hosted field's text the way typing does, so SwiftUI's binding runs its setter.
+///
+/// SwiftUI's macOS text fields observe their `NSTextField` through a coordinator implementing
+/// `controlTextDidChange(_:)`. Assigning `stringValue` alone changes only what AppKit displays, so
+/// the notification below is what carries the edit into the installed lifecycle storage. The caller
+/// settles its host afterwards.
+@MainActor
+func editHostedTextField(_ control: NSTextField, to newText: String, file: StaticString, line: UInt) {
+    guard let coordinator = control.delegate else {
+        XCTFail(
+            "The hosted text field has no SwiftUI coordinator, so an edit cannot reach its binding.",
+            file: file,
+            line: line
+        )
+        return
+    }
+    control.stringValue = newText
+    coordinator.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: control))
+}
+
 /// Runs the main-queue turns SwiftUI needs to apply a change and rebuild its AppKit controls.
 ///
 /// One turn delivers the observation a change produced; the next runs the work its updated body
 /// scheduled. Laying out around them forces the controls a later lookup addresses to exist now
 /// rather than at some arbitrary later moment, which is what replaces a timing delay here.
 @MainActor
-private func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
+func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
     for _ in 0..<2 {
         host?.layoutSubtreeIfNeeded()
         drainHostedMainQueue(file: file, line: line)
@@ -298,7 +305,7 @@ private func settleHostedView(_ host: NSView?, file: StaticString, line: UInt) {
 }
 
 @MainActor
-private func drainHostedMainQueue(file: StaticString, line: UInt) {
+func drainHostedMainQueue(file: StaticString, line: UInt) {
     let drained = XCTestExpectation(description: "Hosted view completed a main-queue turn")
     DispatchQueue.main.async { drained.fulfill() }
     guard XCTWaiter().wait(for: [drained], timeout: 2.0) == .completed else {
@@ -308,7 +315,7 @@ private func drainHostedMainQueue(file: StaticString, line: UInt) {
 }
 
 @MainActor
-private extension NSView {
+extension NSView {
     func descendantButton(titled title: String) -> NSButton? {
         if let button = self as? NSButton, button.title == title {
             return button

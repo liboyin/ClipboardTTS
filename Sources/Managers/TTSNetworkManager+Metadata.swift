@@ -268,7 +268,7 @@ extension TTSNetworkManager {
     ///
     /// No provider the app supports offers voice discovery, so this creates no request and needs no
     /// credential: OpenAI and Gemini publish the documented constants above, and a Custom endpoint
-    /// has no discovery contract, which is why `SettingsView.fetchMetadata` does not ask for one.
+    /// has no discovery contract, which is why `SettingsView.syncSettings` does not ask for one.
     /// The catalog still travels the guarded token path, because publication is asynchronous and a
     /// provider or endpoint the user changes in that window must invalidate it.
     func fetchAvailableVoices(baseURL: String, selectedProvider: String) {

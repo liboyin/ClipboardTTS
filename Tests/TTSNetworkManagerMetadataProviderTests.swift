@@ -193,7 +193,7 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
         // endpoint never declared or send the saved key to a path the user never configured. No
         // handler is installed, so this scope's unhandled-request accounting fails if one is sent.
         //
-        // `SettingsView.fetchMetadata` is what keeps Settings from asking; this arm is the
+        // `SettingsView.syncSettings` is what keeps Settings from asking; this arm is the
         // manager's own answer, kept so the contract does not depend on that one caller alone.
         manager.updateSettings(
             baseURL: "https://custom.api/v1/audio/speech",
