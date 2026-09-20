@@ -105,6 +105,27 @@ Run tests and check the line coverage of `Sources/Managers/`:
 ./check-coverage.sh
 ```
 
+That gate fails closed, and its two failures are distinct: coverage that was measured and fell short
+exits 1, while a report that cannot support a verdict at all exits 2. Before any percentage is
+compared, the script enumerates the gated sources on disk and requires the report to measure exactly
+that population — every one of them present, none counted that no longer exists, none counted twice,
+and each carrying at least one executable line — so neither a report that measured none of them nor
+one carrying a stale record can decide the verdict. A group with no executable lines reads `n/a`
+instead of `100.00%` for the same reason. A report the script cannot read reaches that same exit 2
+rather than the threshold's exit 1: an extraction that fails, a body that is not JSON, and a report
+whose targets, file list, or file records are not the shape xccov documents are all refusals. A file
+record is read for its path and its two line counts only, and its name is taken from the last
+`/Sources/` component of that path, so a checkout living under a directory itself named `Sources`
+still names its files the way the gated population does. Counts a report cannot mean are refused
+there rather than averaged into a percentage: a boolean, a negative, or more covered lines than
+executable ones. A fully covered file and a wholly uncovered one are ordinary readings. The
+exemption is not tightened by any of this: an exempt source may carry no executable lines, name a
+file that is no longer on disk, or be absent from the report entirely. `Sources/SettingsKeys.swift`
+is such a source — it declares only string constants, and no coverage record names it. Passing a
+path ending in `.json` checks an already-extracted xccov report instead of a result bundle, which is
+the seam `./verify-coverage-gate.sh` uses to drive this policy end to end over synthetic reports
+with no build, no bundle, and no network. Run that verification whenever the policy changes.
+
 Because XCTest launches the hosted macOS app before XCTest `setUp()`, `ClipboardTTSApp.init` detects that host and builds a separate dependency graph: a fresh process-private defaults suite and an `InMemorySecretStore`. Its startup manager reads and migrates only that owned state, so it cannot read, migrate, delete, or block on the installed app's settings or Keychain. `SettingsView` binds every one of its `@AppStorage` properties to the domain it is handed, so the window that graph opens displays and writes the same private domain rather than the process default store the property-wrapper attribute would otherwise resolve to. Production startup continues to use `UserDefaults.standard` and `KeychainSecretStore`; `AppStartupDependencies.make` is the supported injection seam for regression coverage.
 
 Every initializer reached from that startup graph must receive the selected defaults explicitly; a default parameter on a downstream migration or manager is not sufficient isolation. Startup regressions must exercise the automatic hosted branch as well as injected branches: seed conspicuous values into an owned store standing in for a developer installation, then prove the automatic graph uses neither it nor `UserDefaults.standard` and selects an `InMemorySecretStore`, leaving those values unchanged. That last check compares the domain by identity rather than reading it, because seeding the installed app's own settings to prove they were left alone is the access these regressions exist to forbid. Do not test a Keychain regression by running a Keychain-backed hosted startup—the expected failure can block on macOS; the baseline must prove it selects the in-memory store instead. Any defaults a regression seeds itself must live in memory rather than in a `UserDefaults(suiteName:)` suite: emptying a suite's persistent domain does not delete it, and `cfprefsd` rewrites the suite's plist into `~/Library/Preferences` when the hosted test process exits, so a seeded suite left one file behind per run. The automatic hosted branch keeps the production fresh suite, which materializes no file precisely because nothing writes through it. A test-owned `UserDefaults` subclass must keep its values out of the app's own domain as well as off disk. No regression asserts this by listing the developer's preferences directory: reading their state to prove it was left alone is the access this storage exists to remove, and Foundation persists asynchronously, so such a check could pass before a plist appeared. What establishes that the accessors answer from owned memory is the aggregate view — owned storage reads back exactly what its owner set and nothing else — with a separately owned store beside it proving that one owner's seed reaches no other.
