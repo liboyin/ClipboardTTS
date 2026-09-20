@@ -26,6 +26,7 @@ Link to the owning document instead of duplicating its procedure. Operational in
 - Before removing a layer, identify all unique behavior it carries, including copy, errors, ordering, timing, diagnostics, and UI/accessibility behavior. Give retained behavior an explicit owner and preserve its verification.
 - Verify changing language, framework, library, and service assumptions empirically or against version-appropriate documentation.
 - Update documentation when the change makes it stale. Distinguish current behavior, accepted future decisions, proposals, and unverified hypotheses.
+- Markdown documentation MUST use one source line per prose paragraph (no hard-wrapped in-paragraph line breaks). Preserve structural line breaks required by Markdown, including headings, lists, tables, blockquotes, and fenced code blocks.
 - Verify current empirical claims before recording them. Historical evidence MUST identify its revision, relevant environment, provenance, and limitations; it does not certify current validation.
 - Use Swift documentation comments (`///`) for non-obvious purposes, contracts, side effects, or constraints of new or changed non-test declarations. Test names MUST describe the protected behavior; comments should explain non-obvious reasons or trade-offs.
 
