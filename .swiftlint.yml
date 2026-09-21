@@ -25,7 +25,8 @@ function_body_length:
 type_body_length:
   warning: 320
 
-# TTSNetworkManager nests its decodable response model one extra level, which reads fine.
+# Three declarations nest one extra level, which reads fine: the speech request body's coding keys,
+# one Gemini event's audio classification, and the discovery response's own model.
 nesting:
   type_level: 2
 

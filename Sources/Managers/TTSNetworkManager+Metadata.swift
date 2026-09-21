@@ -43,50 +43,9 @@ extension TTSNetworkManager {
         var task: URLSessionDataTask?
     }
 
-    private static let legacyOpenAIVoices = [
-        "alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"
-    ]
-    private static let currentOpenAIVoices = [
-        "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
-        "shimmer", "verse", "marin", "cedar"
-    ]
-    /// The complete Gemini TTS voice catalog, in the order Google's guide lists it.
-    ///
-    /// Gemini documents no voice-discovery endpoint, so this list is the app's only source of
-    /// truth for the Settings suggestions, which are the only place a voice is chosen. Transcribed
-    /// from the "Voice options" table of https://ai.google.dev/gemini-api/docs/speech-generation,
-    /// verified 2026-08-20; it must be re-verified against that guide whenever Google changes the
-    /// documented set.
-    private static let geminiVoices = [
-        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
-        "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib",
-        "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
-        "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
-    ]
-
     private struct MetadataSource: Equatable {
         let baseURL: String
         let provider: APIKeyProvider
-    }
-
-    private struct OpenAIModelsResponse: Decodable {
-        struct Model: Decodable {
-            let id: String
-        }
-
-        let data: [Model]
-    }
-
-    /// Builds a metadata endpoint, refusing one whose transport would expose the key it carries.
-    ///
-    /// A discovery request attaches the same `Authorization: Bearer` credential as a speech
-    /// request, so it answers to the same rule as `requestEndpoint(for:)`. A refusal is silent, as
-    /// every other metadata failure is: the lists stay as they were and no request is created.
-    /// Only model discovery reaches this, and only Settings' fixed OpenAI endpoint reaches that,
-    /// so the refusal is defense in depth for a caller that later derives the URL differently.
-    private func metadataURL(from urlString: String) -> URL? {
-        guard let url = URL(string: urlString), EndpointTransportPolicy.permitsCredentials(url) else { return nil }
-        return url
     }
 
     private func beginMetadataRequest(for kind: MetadataKind,
@@ -228,13 +187,12 @@ extension TTSNetworkManager {
             provider: APIKeyProvider(selectedProvider: selectedProvider)
         )
         guard let token = beginMetadataRequest(for: .models, source: source) else { return }
-        if source.provider == .gemini {
-            publishMetadata(["gemini-3.1-flash-tts-preview"], for: .models, token: token)
+        if let documentedModels = ProviderMetadataCatalog.models(for: source.provider) {
+            publishMetadata(documentedModels, for: .models, token: token)
             return
         }
 
-        let modelsURLString = baseURL.replacingOccurrences(of: "/audio/speech", with: "/models")
-        guard let url = metadataURL(from: modelsURLString) else {
+        guard let url = OpenAIModelDiscovery.url(forSpeechEndpoint: baseURL) else {
             finishMetadataRequest(for: .models, token: token)
             return
         }
@@ -251,11 +209,11 @@ extension TTSNetworkManager {
                 return
             }
 
-            guard let response = try? JSONDecoder().decode(OpenAIModelsResponse.self, from: data) else {
+            guard let models = OpenAIModelDiscovery.models(from: data) else {
                 self.finishMetadataRequest(for: .models, token: token)
                 return
             }
-            self.publishMetadata(response.data.map(\.id).filter { $0.contains("tts") }, for: .models, token: token)
+            self.publishMetadata(models, for: .models, token: token)
         }
         guard attachModelMetadataTask(task, token: token) else {
             task.cancel()
@@ -264,39 +222,27 @@ extension TTSNetworkManager {
         task.resume()
     }
 
-    /// Publishes the selected provider's voice catalog, replacing only an equally current voice request.
+    /// Publishes the selected provider's documented voice catalog, replacing only an equally current
+    /// voice request.
     ///
     /// No provider the app supports offers voice discovery, so this creates no request and needs no
-    /// credential: OpenAI and Gemini publish the documented constants above, and a Custom endpoint
-    /// has no discovery contract, which is why `SettingsView.syncSettings` does not ask for one.
+    /// credential: `ProviderMetadataCatalog` states what OpenAI and Gemini document, and a Custom
+    /// endpoint documents nothing, which is why `SettingsView.syncSettings` does not ask for one.
     /// The catalog still travels the guarded token path, because publication is asynchronous and a
     /// provider or endpoint the user changes in that window must invalidate it.
+    ///
+    /// The configured model is read for every provider, because which catalogs depend on it is the
+    /// catalog's own contract rather than this caller's; only OpenAI's answer uses it.
     func fetchAvailableVoices(baseURL: String, selectedProvider: String) {
         let source = MetadataSource(
             baseURL: baseURL,
             provider: APIKeyProvider(selectedProvider: selectedProvider)
         )
         guard let token = beginMetadataRequest(for: .voices, source: source) else { return }
-        switch source.provider {
-        case .openAI:
-            publishMetadata(
-                openAIVoices(for: currentModel()),
-                for: .voices,
-                token: token
-            )
-        case .gemini:
-            publishMetadata(Self.geminiVoices, for: .voices, token: token)
-        case .custom:
+        guard let voices = ProviderMetadataCatalog.voices(for: source.provider, model: currentModel()) else {
             finishMetadataRequest(for: .voices, token: token)
+            return
         }
-    }
-
-    private func openAIVoices(for model: String) -> [String] {
-        switch model {
-        case "tts-1", "tts-1-hd":
-            return Self.legacyOpenAIVoices
-        default:
-            return Self.currentOpenAIVoices
-        }
+        publishMetadata(voices, for: .voices, token: token)
     }
 }

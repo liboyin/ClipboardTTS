@@ -222,8 +222,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Returns the model that future requests will use.
     ///
-    /// Deliberately reads the model alone: the OpenAI voice catalog is the only caller, and its
-    /// choice depends on nothing else. Handing it an aggregate would deliver the saved API key,
+    /// Deliberately reads the model alone: the voice-catalog path is the only caller, and the one
+    /// catalog that depends on the model depends on nothing else. Handing it an aggregate would deliver the saved API key,
     /// endpoint, and provider identity to a metadata-only path that would discard all three, so a
     /// credential must not be added back here.
     func currentModel() -> String {
