@@ -51,7 +51,8 @@ extension TTSNetworkManager {
     private func beginMetadataRequest(for kind: MetadataKind,
                                       source: MetadataSource) -> MetadataRequestToken? {
         stateQueue.sync {
-            guard baseURL == source.baseURL, selectedMetadataProvider == source.provider else { return nil }
+            guard requestSettings.baseURL == source.baseURL,
+                  requestSettings.provider == source.provider else { return nil }
 
             // Only a models request owns a URLSession task; a voice request publishes a
             // documented constant, so replacing one needs no cancellation.

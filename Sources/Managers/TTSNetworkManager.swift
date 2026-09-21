@@ -6,8 +6,8 @@ import Foundation
 /// `Sendable` and URLSession invokes delegate methods on its own queue. Four confinement rules
 /// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
 /// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
-///   `baseURL`, `apiKey`, `model`, `voice`, `selectedMetadataProvider`, the metadata request
-///   records, and the request-state publication flag) is read and written only under `stateQueue`.
+///   `requestSettings`, the metadata request records, and the request-state publication flag) is
+///   read and written only under `stateQueue`.
 /// - The `@Published` properties, `isPublishingMetadata`, `migrationFailureMessage`, and the queued
 ///   request-state publications are written only on the main queue (every write path dispatches or
 ///   already runs there); SwiftUI observes them on main. Construction is the one exception: the initializer assigns
@@ -26,10 +26,11 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     @Published var modelSuggestions = ProviderSuggestions.unpublished
     @Published var voiceSuggestions = ProviderSuggestions.unpublished
 
-    private(set) var baseURL: String
-    private var apiKey: String
-    private var model: String
-    private var voice: String
+    /// The configuration future requests read, replaced whole rather than field by field, so no
+    /// request can be built from a half-applied edit. Readable inside the type for the metadata
+    /// extension's freshness check, which runs in its own `stateQueue` transaction; every other
+    /// reader goes through an accessor below that takes the lock.
+    private(set) var requestSettings: RequestSettings
 
     var session: URLSession!
     /// Session-lifecycle and request-body seams used by production setup and focused tests.
@@ -64,7 +65,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// The legacy-key migration warning this manager last published, retained so a later recovery
     /// can withdraw or replace exactly that message rather than whatever `lastError` holds by then.
     private var migrationFailureMessage: String?
-    private(set) var selectedMetadataProvider: APIKeyProvider
     var metadataGeneration: UInt64 = 0
     var nextMetadataRequestIdentifier: UInt64 = 0
     var modelMetadataRequest: MetadataRequest?
@@ -129,27 +129,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          retryInstallationObserver: @escaping @Sendable () -> Void = {}) {
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
-        self.selectedMetadataProvider = provider
         let secretStartupState = APIKeyStartupState.load(
             selectedProvider: provider.settingsValue, secretStore: secretStore, defaults: defaults
         )
-        switch provider {
-        case .openAI:
-            self.baseURL = "https://api.openai.com/v1/audio/speech"
-            self.apiKey = secretStartupState.apiKey
-            self.model = defaults.string(forKey: SettingsKeys.openAIModel) ?? "tts-1"
-            self.voice = defaults.string(forKey: SettingsKeys.openAIVoice) ?? "alloy"
-        case .gemini:
-            self.baseURL = "https://generativelanguage.googleapis.com/v1beta"
-            self.apiKey = secretStartupState.apiKey
-            self.model = defaults.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview"
-            self.voice = defaults.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede"
-        case .custom:
-            self.baseURL = defaults.string(forKey: SettingsKeys.apiBaseURL) ?? "https://api.openai.com/v1/audio/speech"
-            self.apiKey = secretStartupState.apiKey
-            self.model = defaults.string(forKey: SettingsKeys.customModel) ?? ""
-            self.voice = defaults.string(forKey: SettingsKeys.customVoice) ?? ""
-        }
+        self.requestSettings = RequestSettings.resolved(
+            provider: provider, apiKey: secretStartupState.apiKey, defaults: defaults
+        )
         self.requestBodyEncoder = requestBodyEncoder
         self.requestObservers = (revocationTransaction: revocationTransactionObserver,
                                  retryInstallation: retryInstallationObserver)
@@ -180,12 +165,10 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
                         selectedProvider: String) {
         let provider = APIKeyProvider(selectedProvider: selectedProvider)
         let invalidatedGeneration: UInt64? = stateQueue.sync {
-            let metadataScopeChanged = self.baseURL != baseURL || self.selectedMetadataProvider != provider
-            self.baseURL = baseURL
-            self.apiKey = apiKey
-            self.model = model
-            self.voice = voice
-            self.selectedMetadataProvider = provider
+            let metadataScopeChanged = requestSettings.baseURL != baseURL || requestSettings.provider != provider
+            requestSettings = RequestSettings(
+                baseURL: baseURL, apiKey: apiKey, model: model, voice: voice, provider: provider
+            )
 
             guard metadataScopeChanged else { return nil }
 
@@ -216,7 +199,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Returns whether the manager's future-request settings belong to the supplied persisted provider.
     func isCurrentProvider(_ provider: APIKeyProvider) -> Bool {
         stateQueue.sync {
-            selectedMetadataProvider == provider
+            requestSettings.provider == provider
         }
     }
 
@@ -227,20 +210,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// endpoint, and provider identity to a metadata-only path that would discard all three, so a
     /// credential must not be added back here.
     func currentModel() -> String {
-        stateQueue.sync { model }
+        stateQueue.sync { requestSettings.model }
     }
 
     /// Captures the immutable settings one request attempt owns from start to finish.
     func requestSettingsSnapshot() -> RequestSettings {
-        stateQueue.sync {
-            RequestSettings(
-                baseURL: baseURL,
-                apiKey: apiKey,
-                model: model,
-                voice: voice,
-                provider: selectedMetadataProvider
-            )
-        }
+        stateQueue.sync { requestSettings }
     }
 
     /// Publishes a request failure on the main queue and marks the request as finished.
