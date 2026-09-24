@@ -90,7 +90,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, and NB31 from the startup inspection that followed it. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -117,6 +117,10 @@ No Blocking finding is outstanding; B2 was the last one and appears under dispos
 #### NB28 — Three landed invariants carry no recorded mutation evidence
 
 **Validated — TODO inspection.** The NB2, NB3, and NB7 dispositions describe the new behavior but record no mutants, while NB1, NB4, NB5, NB9, NB10, and B2–B4 each name the mutants that fail a named test. AGENTS requires a revert, a plausible regression, and an over-restriction where applicable for each added or changed invariant. Inspection indicates the obvious reverts do die — the parity predicate against `testOpenAICompatibleResponsesKeepACompleteFrameBeforeTrailingPartialBytes`, first-part-only Gemini delivery against `testGeminiDeliversEveryAudioPartInOrderAndJoinsPartialFrames`, and endpoint inference against `testCustomGoogleLookingHostUsesOpenAICompatibleModelDiscovery` — but that is reasoning, not a run. **Paths:** the NB2/NB3/NB7 dispositions below, [PCM completion](Sources/Managers/TTSNetworkManager+Failures.swift), [Gemini streaming](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [provider dispatch](Sources/Managers/TTSNetworkManager.swift). **Direction/acceptance:** run the missing mutants in isolated scratch copies and record each against the named test that fails it, or record why a category does not apply. Classify on a named failing test rather than an exit code or a test-count summary.
+
+#### NB31 — Hosted startup builds managers on the unrouted production session
+
+**Validated — source inspection, 2026-09-24, at `2f1843a`; no request was observed.** `AppStartupDependencies.make` builds its manager with no session configuration in both branches, so every graph it returns holds a session without mock routing, the exposure NB26 closed in the test factory. Two places reach it. `AppStartupDependenciesTests` builds four such graphs, and each test invalidates its session in a `defer` and sends no request. The hosted app's own graph, built by `ClipboardTTSApp.init` when XCTest launches the host, keeps its session for the whole run. Its `ServicesCoordinator` observes `NotificationCenter.default`, and `streamTTS` does not refuse an empty key, so a Services notification posted there during a run would send a request to `api.openai.com` whenever the host's audio engine can start. No test posts there today, because every Services test posts to its own `NotificationCenter()`, so only convention keeps the test process off the network. **Paths:** [startup](Sources/ClipboardTTSApp.swift), [startup tests](Tests/AppStartupDependenciesTests.swift). **Direction:** decide how the hosted-test branch, which already selects test-owned settings and secrets, also selects a session that cannot leave the machine, and whether the startup tests should inspect that choice rather than build live sessions. **Acceptance:** a request issued from any manager a hosted-test graph returns fails locally, the production branch still builds the NB5 policy, and the existing startup isolation tests still hold. **Dependencies:** none; related to NB26.
 
 ### Nits
 
