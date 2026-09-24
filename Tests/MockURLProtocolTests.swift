@@ -1,4 +1,5 @@
 import XCTest
+@testable import ClipboardTTSApp
 
 final class MockURLProtocolTests: MockURLProtocolTestCase {
     func testMockSessionCarriesItsCreationIdentifier() {
@@ -19,6 +20,26 @@ final class MockURLProtocolTests: MockURLProtocolTestCase {
         }.resume()
 
         wait(for: [completion], timeout: 2.0)
+    }
+
+    func testFactoryManagerSessionIsRegisteredForTeardownToInvalidate() {
+        // WHY: Teardown invalidates only the sessions registered with the scope, and its
+        // quiescence check waits for each of those to report invalidation. An unregistered session
+        // is never invalidated, outlives its test holding its delegate, and quiescence still passes.
+        // Each factory path gets its own test, so no other registration can answer for this one.
+        let manager = TestNetworkFactory.makeManager()
+        XCTAssertTrue(
+            MockURLProtocol.isRegisteredWithCurrentTest(manager.session),
+            "A factory manager's session must be registered for teardown to invalidate."
+        )
+    }
+
+    func testFactorySessionIsRegisteredForTeardownToInvalidate() {
+        // WHY: As for a factory manager's session: teardown invalidates only what the scope registered.
+        XCTAssertTrue(
+            MockURLProtocol.isRegisteredWithCurrentTest(TestNetworkFactory.makeSession()),
+            "A factory session must be registered for teardown to invalidate."
+        )
     }
 
     func testMissingHandlerReportsURLLoadingError() {

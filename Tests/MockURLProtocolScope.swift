@@ -1,3 +1,6 @@
+// swiftlint:disable file_length
+// The scope registry is private to this file so that every read and write of scope accounting
+// happens here, under its condition; splitting the file would have to widen that access.
 import Foundation
 import os
 
@@ -142,6 +145,17 @@ extension MockURLProtocol {
         }
         state.sessionRegistrations.append(SessionRegistration(session: session, delegate: delegate))
         ScopeStorage.setState(state, for: testIdentifier)
+    }
+
+    /// Returns whether `session` is registered with the current test's scope, which is what makes
+    /// teardown invalidate it and wait for that invalidation before the scope can quiesce.
+    static func isRegisteredWithCurrentTest(_ session: URLSession) -> Bool {
+        ScopeStorage.condition.lock()
+        defer { ScopeStorage.condition.unlock() }
+
+        guard let activeTestIdentifier = ScopeStorage.activeTestIdentifier,
+              let state = ScopeStorage.state(for: activeTestIdentifier) else { return false }
+        return state.sessionRegistrations.contains { $0.session === session }
     }
 
     /// Records that a registered session can no longer begin new protocol loads.
