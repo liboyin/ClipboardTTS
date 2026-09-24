@@ -14,15 +14,19 @@ targets:
       - Sources
       - path: LICENSE
         buildPhase: resources
+    # Every build is the strict lint gate, for Sources and Tests alike, so a build without SwiftLint
+    # fails rather than skipping it. A build started from the Xcode app does not inherit a shell's
+    # PATH, so Homebrew's two install locations are searched as well.
     preBuildScripts:
       - name: SwiftLint
         basedOnDependencyAnalysis: false
         script: |
-          if command -v swiftlint >/dev/null; then
-            swiftlint --strict
-          else
-            echo "warning: SwiftLint not installed (brew install swiftlint); skipping static analysis"
+          export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
+          if ! command -v swiftlint >/dev/null; then
+            echo "error: SwiftLint is not installed (brew install swiftlint); every build runs it as the strict lint gate"
+            exit 1
           fi
+          swiftlint --strict
     info:
       path: Sources/Info.plist
       properties:

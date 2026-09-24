@@ -96,7 +96,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, and NB31 from the startup inspection that followed it. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark streamlining work the user requested on 2026-09-24 rather than review findings. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, and NB31 from the startup inspection that followed it. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -142,6 +142,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [S1](completed_work/S1.md) — Done: every build runs strict SwiftLint and fails without it, replacing the standalone lint gate.
 - [NB30](completed_work/NB30.md) — Fixed: tests prove each factory session is registered, so teardown invalidates it.
 - [NB26](completed_work/NB26.md) — Fixed: no test can obtain a manager whose session reaches the real network.
 - [NB25](completed_work/NB25.md) — Fixed: a provider-only switch's metadata invalidation fails a test when it breaks.
