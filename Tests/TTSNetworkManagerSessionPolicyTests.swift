@@ -5,10 +5,7 @@ final class TTSNetworkManagerSessionPolicyTests: MockURLProtocolTestCase {
     func testProductionSessionPolicyDisablesPersistenceWhileRetainingMockRouting() {
         // WHY: The production policy must prevent retained responses and shared credential state,
         // but tests still need MockURLProtocol to own each request and session teardown.
-        let productionManager = TestNetworkFactory.makeManager(
-            sessionConfiguration: .productionDefault
-        )
-        let configuration = productionManager.session.configuration
+        let configuration = TestNetworkFactory.productionDefaultSessionPolicy()
         XCTAssertNil(configuration.urlCache)
         XCTAssertEqual(configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
         XCTAssertNil(configuration.httpCookieStorage)

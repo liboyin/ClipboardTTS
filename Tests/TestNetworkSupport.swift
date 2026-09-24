@@ -25,15 +25,31 @@ func requestBodyData(from request: URLRequest) -> Data? {
     return body
 }
 
-/// Creates mock-routed sessions and managers, plus a no-request production-policy inspection mode.
+/// Creates mock-routed sessions and managers, and reads the production session policy without
+/// handing out a manager that could send a request through it.
 enum TestNetworkFactory {
     enum ManagerSessionConfiguration {
         /// The ordinary test policy, onto which this factory installs MockURLProtocol routing.
         case ephemeral
         /// A caller-owned policy, onto which this factory installs MockURLProtocol routing.
         case provided(URLSessionConfiguration)
-        /// The manager builds its production default; no request may be issued from that manager.
-        case productionDefault
+        /// The manager builds its production default, which has no mock routing. Only this file can
+        /// create this case, and it hands out only the resulting policy.
+        case productionDefault(UnroutedSessionToken)
+    }
+
+    /// Restricts an unrouted manager to this file, which never returns one to a test.
+    struct UnroutedSessionToken {
+        fileprivate init() {}
+    }
+
+    /// Returns the policy of the session a manager builds for itself when given no configuration.
+    ///
+    /// That session has no mock routing, so the manager never leaves this function: a caller can
+    /// inspect the policy but holds nothing a request could be sent from. The manager is otherwise
+    /// built and torn down like every other factory manager.
+    static func productionDefaultSessionPolicy() -> URLSessionConfiguration {
+        makeManager(sessionConfiguration: .productionDefault(UnroutedSessionToken())).session.configuration
     }
 
     /// Creates a mock-routed manager. `defaults` is fresh test-owned storage unless the caller
