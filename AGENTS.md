@@ -4,7 +4,7 @@ This file owns the working principles for this repository. All agents MUST follo
 
 - **AGENTS.md:** concise working principles and required standards.
 - **[Adversarial review skill](.agents/skills/adversarial-review/SKILL.md):** how to conduct review, including dispatch, snapshots, investigation, triage, and reporting.
-- **[TODO.md](TODO.md):** future work, accepted decisions, dependencies, execution boundaries, and its own maintenance rules.
+- **[TODO.md](TODO.md):** future work, accepted decisions, dependencies, execution boundaries, and its own maintenance rules; each closed finding's full record moves to [completed_work/](completed_work/).
 - **[README.md](README.md):** current architecture, design assumptions, and operating procedures.
 - **[USER_STORIES.md](USER_STORIES.md):** product requirements and user-visible behavior.
 
