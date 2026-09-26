@@ -127,6 +127,18 @@ elif "PARTIAL" in target:
     print("\t Executed 3 tests, with 0 failures (0 unexpected)")
 elif "NOTESTS" in target:
     print("\t Executed 0 tests, with 0 failures (0 unexpected)\n** TEST SUCCEEDED **")
+elif "GROUPINT" in target:  # a terminal's Ctrl-C signals the runner's whole process group
+    os.killpg(os.getpgid(os.getppid()), signal.SIGINT)
+    time.sleep(20)  # only a test tool outside that group, which the runner then failed to stop, waits this out
+    with open(record, "a") as f:
+        f.write(repr(("finished", tests)) + "\n")
+elif "HANGUP" in target:  # so does a terminal's hangup, which the runner does not handle
+    with open(record, "a") as f:
+        f.write(repr(("hanging up", os.getpid())) + "\n")
+    os.killpg(os.getpgid(os.getppid()), signal.SIGHUP)
+    # A signal sent to the sender's own group reaches it before killpg returns, so only a tool outside it gets here.
+    with open(record, "a") as f:
+        f.write(repr(("outlived the hangup", os.getpid())) + "\n")
 elif "CTRLC" in target or "INTERRUPT" in target:
     os.kill(os.getppid(), signal.SIGINT if "CTRLC" in target else signal.SIGTERM)
     time.sleep(20)  # only a runner that failed to stop the test tool waits this out
@@ -158,6 +170,9 @@ SELECTOR_LOG = ("Test Case '-[ClipboardTTSAppTests.ASuite testGuard]' started.\n
                 "Test Case '-[ClipboardTTSAppTests.MixedSuite testSkips]' started.\n"
                 "Test Case '-[ClipboardTTSAppTests.MixedSuite testSkips]' skipped (0.001 seconds).\n")
 PASSED_ONLY_LOG = "Test Case '-[ClipboardTTSAppTests.ASuite testGuard]' passed (0.001 seconds).\n"
+# What a terminal's Ctrl-C does, sent from inside a stand-in tool that the runner started: signal the runner's
+# whole process group, which holds the tool too unless the runner started it outside that group.
+GROUP_SIGINT = "kill -s INT -- -$(ps -o pgid= -p $PPID | tr -d ' ')\n"
 
 
 def load_runner():
@@ -197,6 +212,11 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
         "if grep -q SPEC_BROKEN project.yml; then echo 'SPEC_BROKEN is not a valid spec' >&2; exit 1; fi\n"
         "if grep -q INTERRUPT Generated.txt 2>/dev/null && ! grep -q INTERRUPT project.yml; then\n"
         "  kill -TERM $PPID\n  sleep 1\nfi\n"
+        # A terminal's Ctrl-C, before a mutant's test run or while regenerating over it after its restore.
+        "if grep -q SPEC_CTRLC_BEFORE project.yml || { grep -q SPEC_CTRLC_AFTER Generated.txt 2>/dev/null &&\n"
+        "    ! grep -q SPEC_CTRLC_AFTER project.yml; }; then\n  " + GROUP_SIGINT + "fi\n"
+        "if grep -q SPEC_REGEN_FAILS Generated.txt 2>/dev/null && ! grep -q SPEC_REGEN_FAILS project.yml; then\n"
+        "  echo 'cannot regenerate over SPEC_REGEN_FAILS' >&2; exit 1\nfi\n"
         "cp project.yml Generated.txt\n")
     for tool in ("xcodebuild", "xcodegen"):
         (tools / tool).chmod(0o755)
@@ -204,18 +224,27 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
 
 
 def run_runner(root, repo, tools, mutants, extra=(), out=None, untracked=("Tests/New.swift",),
-               tests=("ClipboardTTSAppTests/ASuite",), ignore_sigint=False):
+               tests=("ClipboardTTSAppTests/ASuite",), ignore_sigint=False, own_session=False, env=None):
     spec = root / "spec.json"
     spec.write_text(json.dumps({"tests": list(tests), "untracked": list(untracked),
                                 "mutants": mutants}))
     out = out or root / "out"
     record = root / "record.txt"
     record.write_text("")
-    env = dict(os.environ, RUNNER_VERIFY_RECORD=str(record))
+    env = dict(os.environ, RUNNER_VERIFY_RECORD=str(record), **(env or {}))
+
+    def prepare():
+        if ignore_sigint:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if own_session:  # a hangup's default action, as a terminal's job has, even if this verifier runs under nohup
+            signal.signal(signal.SIGHUP, signal.SIG_DFL)
+
+    # own_session starts the runner as a terminal starts a job, as its own process group, which the stand-ins can
+    # then signal as the terminal would without reaching this verifier.
     result = subprocess.run([sys.executable, str(repo / "run-mutants.py"), str(spec), "--out", str(out),
                              "--xcodebuild", str(tools / "xcodebuild"), "--xcodegen", str(tools / "xcodegen"), *extra],
-                            capture_output=True, text=True, env=env, timeout=60,
-                            preexec_fn=(lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)) if ignore_sigint else None)
+                            capture_output=True, text=True, env=env, timeout=60, start_new_session=own_session,
+                            preexec_fn=prepare if ignore_sigint or own_session else None)
     runs = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     return result, out, runs
 
@@ -1057,6 +1086,73 @@ def end_to_end_cases():
         link = out / "copy" / "Sources" / "Conflict.swift"
         assert link.is_symlink() and os.readlink(link) == "Target.swift", "an unmerged path did not reach the copy"
 
+    def interrupted_by_a_terminal_during_generation(root, marker):
+        repo, tools = make_repo(root)
+        config = {"name": "config", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": marker}]}
+        result, out, runs = run_runner(root, repo, tools, [config, mutant("later", "KILL")], own_session=True)
+        assert result.returncode == 2 and "interrupted by signal 2; the copy was restored" in result.stderr, (
+            result.returncode, result.stderr)
+        for path in ("project.yml", "Generated.txt"):
+            assert (out / "copy" / path).read_text() == "name: SPEC_ORIGINAL\n", f"{path} was left mutated"
+        assert not any(r[0] == "let value = KILL" for r in runs), f"a mutant ran after the interrupt: {runs}"
+        report = json.loads((out / "results.json").read_text())
+        assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], report
+
+    def a_terminal_interrupt_during_generation_before_a_test_run_lets_it_finish(root):
+        interrupted_by_a_terminal_during_generation(root, "SPEC_CTRLC_BEFORE")
+
+    def a_terminal_interrupt_during_regeneration_after_a_restore_lets_it_finish(root):
+        interrupted_by_a_terminal_during_generation(root, "SPEC_CTRLC_AFTER")
+
+    def a_terminal_interrupt_during_the_architecture_query_is_an_interrupt(root):
+        repo, tools = make_repo(root)
+        (root / "bin").mkdir()
+        # Unlike the shell stand-ins, which cannot undo a SIGINT they inherit as ignored, this one takes the
+        # default action back, as a tool that handles Ctrl-C itself would, so only its process group shields it.
+        (root / "bin" / "uname").write_text(
+            f"#!{sys.executable}\nimport os, signal, sys\nsignal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+            "os.killpg(os.getpgid(os.getppid()), signal.SIGINT)\nos.execv('/usr/bin/uname', ['uname', *sys.argv[1:]])\n")
+        (root / "bin" / "uname").chmod(0o755)
+        result, out, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], own_session=True,
+                                       env={"PATH": f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"})
+        assert result.returncode == 2 and "error: interrupted by signal 2" in result.stderr, (result.returncode, result.stderr)
+        assert not any(r[0] == "let value = KILL" for r in runs), f"a mutant ran after the interrupt: {runs}"
+        assert not json.loads((out / "results.json").read_text())["complete"]
+
+    def a_terminal_signal_still_reaches_the_test_tool(root):
+        # The test tool stays in the runner's process group: a terminal's Ctrl-C ends it as the runner's own
+        # stop does, and a hangup, which the runner does not handle, cannot leave it running without the runner.
+        repo, tools = make_repo(root / "int")
+        result, out, runs = run_runner(root / "int", repo, tools, [mutant("groupint", "GROUPINT"), mutant("later", "KILL")],
+                                       own_session=True)
+        assert result.returncode == 2 and "interrupted by signal 2; the copy was restored" in result.stderr, (
+            result.returncode, result.stderr)
+        assert [r[0] for r in runs] == ["let value = ORIGINAL", "let value = GROUPINT"], f"the test tool was not stopped: {runs}"
+        assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL\n"
+        repo, tools = make_repo(root / "hup", "let value = ORIGINAL // HANGUP\n")
+        result, _, runs = run_runner(root / "hup", repo, tools, [mutant("kill", "KILL")], own_session=True)
+        assert result.returncode == -signal.SIGHUP, (result.returncode, result.stderr)
+        pid = next(r[1] for r in runs if r[0] == "hanging up")
+        for _ in range(200):  # wait for the tool to be gone, which ends at once unless it outlived the hangup
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        record = [ast.literal_eval(line) for line in (root / "hup" / "record.txt").read_text().splitlines()]
+        assert not any(r[0] == "outlived the hangup" for r in record), f"the test tool outlived the runner: {record}"
+
+    def a_failed_regeneration_after_a_restore_stops_the_run(root):
+        repo, tools = make_repo(root)
+        config = {"name": "config", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_REGEN_FAILS"}]}
+        result, out, runs = run_runner(root, repo, tools, [config, mutant("later", "KILL")])
+        assert result.returncode == 2 and "cannot regenerate over SPEC_REGEN_FAILS" in result.stderr, (
+            result.returncode, result.stderr)
+        assert "config:" not in result.stdout and len(runs) == 2, f"the run went on: {result.stdout} {runs}"
+        report = json.loads((out / "results.json").read_text())
+        assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], report
+        assert "cannot regenerate over SPEC_REGEN_FAILS" in report["error"], report
+
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
@@ -1090,7 +1186,11 @@ def end_to_end_cases():
               a_signal_during_the_control_stops_it, a_runner_outside_a_repository_refuses,
               paths_git_quotes_reach_the_copy, an_empty_or_new_nested_output_directory_is_accepted,
               a_mutant_that_skips_a_selected_test_is_unjudged, every_indexed_path_is_copied_as_the_working_tree_holds_it,
-              a_tracked_submodule_is_refused, an_unmerged_path_is_copied_once)
+              a_tracked_submodule_is_refused, an_unmerged_path_is_copied_once,
+              a_terminal_interrupt_during_generation_before_a_test_run_lets_it_finish,
+              a_terminal_interrupt_during_regeneration_after_a_restore_lets_it_finish,
+              a_terminal_interrupt_during_the_architecture_query_is_an_interrupt,
+              a_terminal_signal_still_reaches_the_test_tool, a_failed_regeneration_after_a_restore_stops_the_run)
     for check in checks:
         case(check.__name__, check)
     return failures, len(checks)

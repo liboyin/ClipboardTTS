@@ -190,6 +190,18 @@ def git(repo, *args, **kwargs):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, **kwargs)
 
 
+def run_shielded(command, **kwargs):
+    """Runs a short tool to completion in its own session, so a terminal's signals cannot cut it short.
+
+    A terminal's Ctrl-C signals its whole foreground process group. Inside that group the tool would
+    die with the signal and could leave a regeneration half done; outside it the tool finishes, and
+    only the runner hears the signal, records it, and stops once the copy is restored. The test tool
+    is not started this way: it stays in the runner's group, so a terminal's signals, a hangup
+    included, still end it.
+    """
+    return subprocess.run(command, check=True, capture_output=True, start_new_session=True, **kwargs)
+
+
 def build_copy(repo, copy, untracked):
     """Copies every indexed path as the working tree holds it and the named untracked files, never ignored content.
 
@@ -317,14 +329,14 @@ def plan_edits(copy, mutants):
 
 def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interrupts, expected):
     """Generates the project, refusing to test if generation changed an intended edit target."""
-    subprocess.run([xcodegen, "generate"], cwd=copy, check=True, capture_output=True)
+    run_shielded([xcodegen, "generate"], cwd=copy)
     # Tracked files can also be generated (Sources/Info.plist is one). Planning before generation
     # alone cannot prevent the generator from erasing a mutant before the tests observe it.
     changed = [os.path.relpath(path, copy) for path, sha in digest(expected).items() if sha != expected[path]]
     if changed:
         raise RunnerError(f"project generation changed {', '.join(changed)} before {pathlib.Path(log_path).stem} "
                           "was tested; mutate its generator input instead")
-    arch = subprocess.run(["uname", "-m"], check=True, capture_output=True, text=True).stdout.strip()
+    arch = run_shielded(["uname", "-m"], text=True).stdout.strip()
     command = [xcodebuild, "-project", "ClipboardTTSApp.xcodeproj", "-scheme", "ClipboardTTSApp",
                "-destination", f"platform=macOS,arch={arch}", "-derivedDataPath", str(derived_data), "test"]
     command += [f"-only-testing:{t}" for t in tests]
@@ -481,8 +493,9 @@ def main(argv=None):
             finally:
                 for target, original in originals.items():
                     target.write_bytes(original)
-                # A mutant of a generator input leaves generated files behind unless they are rebuilt.
-                subprocess.run([args.xcodegen, "generate"], cwd=copy, check=True, capture_output=True)
+                # A mutant of a generator input leaves generated files behind unless they are rebuilt, and
+                # a regeneration that fails for any reason leaves them unknown, so its failure stops the run.
+                run_shielded([args.xcodegen, "generate"], cwd=copy)
                 if digest(touched) != pristine:
                     raise RunnerError(f"the copy was not restored after {mutant['name']}")
             if interrupts.received:
