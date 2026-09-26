@@ -33,7 +33,7 @@ Link to the owning document instead of duplicating its procedure. Operational in
 # Test Guidelines
 
 - Tests MUST protect behavior or an invariant and fail when it breaks. Prefer controlled inputs, schedulers, and explicit completion over elapsed-time waits.
-- For each added or changed invariant, mutation evidence MUST cover a revert, a plausible regression, and an over-restriction where applicable. Each applicable mutant MUST fail a relevant test in an isolated scratch copy. Explain inapplicable categories; evidence belongs to the invariant and MAY be shared across assertions.
+- For each added or changed invariant, mutation evidence MUST cover a revert, a plausible regression, and an over-restriction where applicable. Each applicable mutant MUST fail a relevant test in an isolated scratch copy; mutants of code under XCTest run through README's `run-mutants.py` procedure. Explain inapplicable categories; evidence belongs to the invariant and MAY be shared across assertions.
 - Before removing or weakening coverage, demonstrate that a mutant breaking the protected property still fails another test. A surviving mutant requires investigation, not automatic removal of coverage.
 - XCTest cases MUST use `@testable import ClipboardTTSApp`. Automated tests MUST NOT access external services, `NSPasteboard.general`, the developer's Keychain, or real developer preferences, even temporarily.
 - Use test-owned state throughout hosted startup, managers, and SwiftUI persistence. Snapshot/restore is permitted only for owned state. Do not seed real preferences to prove non-access or leave seeded disk-backed suites behind. A scratch checkout alone does not isolate macOS state.
