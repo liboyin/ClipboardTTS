@@ -21,18 +21,20 @@ Spec (JSON):
 The tests and untracked lists are optional; tests defaults to the whole bundle.
 
 Usage:
-    run-mutants.py SPEC.json --out DIR [--only NAME ...]
+    run-mutants.py SPEC.json --out DIR [--only NAME ...] [--test-deadline SECONDS]
 
 DIR must lie outside the repository, must not contain it, and must be new, empty, or one this
 runner created. The copy, derived data, per-mutant logs, and a results.json are written there, and
 the copy stays for inspection. results.json records whether the run completed, its exit code,
-HEAD, digests of the spec and of the copied target state, the control's verdict, and each judged
-mutant; a run refused before its control writes none. Exit 0 means every mutant received a
+HEAD, digests of the spec and of the copied target state, the deadlines it ran under, the control's
+verdict, and each judged mutant; a run refused before its control writes none. Exit 0 means every mutant received a
 verdict, whatever it was; 1 means a mutant got no verdict or ran no test for some selector; 2
 means the runner refused the run or was interrupted by SIGINT or SIGTERM once the control began.
 Either signal before then ends the runner by that signal, before any mutant is applied; any other
 signal, such as SIGHUP, ends it at once and can leave the copy mutated until the next run rebuilds
-it.
+it. A test run, build included, still going after --test-deadline seconds (default 1800) is stopped
+and gets no verdict, and the next mutant runs; XcodeGen or uname still going after 60 seconds is
+killed and stops the run with exit 2.
 """
 
 import argparse
@@ -46,6 +48,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 
 TERMINAL_MARKERS = ("** TEST SUCCEEDED **", "** TEST FAILED **")
 BUILD_FAILURE_MARKERS = ("** BUILD FAILED **", "Testing cancelled because the build failed",
@@ -59,6 +62,12 @@ SKIPPED = re.compile(r"^Test Case '-\[([^.\s\]]+)\.([^\s\]]+) ([^\s\]]+)\]' skip
 SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 OWNERSHIP_MARKER = ".run-mutants-owned"
 OWNED_CHILDREN = ("copy", "derived-data", "logs", "results.json")
+# A full-bundle test run, build included, took about 50 s from fresh derived data on 2026-09-26 (Xcode
+# 27.0), but a mutant that lets the tests' explicit waits expire, about 577 s if every one did, still ends
+# in a named kill; a run that outlasts all of that is presumed hung.
+TEST_DEADLINE = 1800
+# XcodeGen generates this project in about 30 ms, and uname answers at once.
+TOOL_DEADLINE = 60
 
 
 class RunnerError(Exception):
@@ -115,6 +124,14 @@ def selectors_without_tests(log, tests):
                 and (len(parts) < 3 or parts[2].removesuffix("()") == case[2]))
 
     return [selector for selector in tests if not any(matches(selector, case) for case in started)]
+
+
+def positive_seconds(text):
+    """Parses a deadline in seconds, refusing one that could never be met or never expire."""
+    value = float(text)
+    if not 0 < value < float("inf"):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a positive number of seconds")
+    return value
 
 
 def relative_path(value, what):
@@ -190,7 +207,7 @@ def git(repo, *args, **kwargs):
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, **kwargs)
 
 
-def run_shielded(command, **kwargs):
+def run_shielded(command, deadline, **kwargs):
     """Runs a short tool to completion in its own session, so a terminal's signals cannot cut it short.
 
     A terminal's Ctrl-C signals its whole foreground process group. Inside that group the tool would
@@ -198,8 +215,62 @@ def run_shielded(command, **kwargs):
     only the runner hears the signal, records it, and stops once the copy is restored. The test tool
     is not started this way: it stays in the runner's group, so a terminal's signals, a hangup
     included, still end it.
+
+    Since no terminal's signal reaches the tool, the deadline is what stops one that hangs: its whole
+    session is killed, and the run stops as it does for a tool that failed.
     """
-    return subprocess.run(command, check=True, capture_output=True, start_new_session=True, **kwargs)
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                          **kwargs) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=deadline)
+        except subprocess.TimeoutExpired:
+            emptied = kill_session(process.pid, deadline)
+            process.wait()
+            unconfirmed = "" if emptied else "; not every process in its session could be confirmed stopped"
+            raise RunnerError(f"{' '.join(command)} did not finish within {deadline:g} seconds and was stopped"
+                              f"{unconfirmed}") from None
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, command, stdout, stderr)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def kill_session(session, deadline):
+    """SIGKILLs every live process in the session whose leader's id is session, returning whether none is left.
+
+    The leader's process group dies first, so the leader can be reaped even if no listing succeeds.
+    That is not enough on its own, because a member can move to a group of its own and stay in the
+    session, and one can fork while the processes are listed, so listing and killing repeat until a
+    listing finds none. Every listing shares the deadline, so a listing that hangs or fails, or members
+    that keep appearing, end the attempt unconfirmed rather than blocking the run. The caller has not
+    reaped the leader, so no other session can have taken its id; a zombie belongs to no session that
+    getsid reports.
+    """
+    try:
+        os.killpg(session, signal.SIGKILL)
+    except OSError:
+        pass  # nothing live is left in the leader's group
+    end = time.monotonic() + deadline
+    while True:
+        try:
+            listing = subprocess.run(["ps", "-A", "-o", "pid="], check=True, capture_output=True,
+                                     timeout=max(end - time.monotonic(), 0)).stdout
+        except (subprocess.SubprocessError, OSError):
+            return False
+        members = []
+        for pid in map(int, listing.split()):
+            try:
+                if os.getsid(pid) == session:
+                    members.append(pid)
+            except OSError:
+                pass  # gone since the listing, a zombie, or not this user's to inspect
+        if not members:
+            return True
+        for pid in members:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass  # gone since it was found
+        time.sleep(0.05)
 
 
 def build_copy(repo, copy, untracked):
@@ -327,16 +398,23 @@ def plan_edits(copy, mutants):
     return plans
 
 
-def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interrupts, expected):
-    """Generates the project, refusing to test if generation changed an intended edit target."""
-    run_shielded([xcodegen, "generate"], cwd=copy)
+def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interrupts, expected, deadlines):
+    """Generates the project, refusing to test if generation changed an intended edit target.
+
+    deadlines holds the test run's and each short tool's, in seconds. A test run, build included,
+    that has not finished by its deadline is presumed hung: it is stopped as an interrupt stops it,
+    killed if it has not exited within the short tools' deadline, and left without a verdict whatever
+    its log holds, because the deadline, not the tests, ended it.
+    """
+    test_deadline, tool_deadline = deadlines
+    run_shielded([xcodegen, "generate"], tool_deadline, cwd=copy)
     # Tracked files can also be generated (Sources/Info.plist is one). Planning before generation
     # alone cannot prevent the generator from erasing a mutant before the tests observe it.
     changed = [os.path.relpath(path, copy) for path, sha in digest(expected).items() if sha != expected[path]]
     if changed:
         raise RunnerError(f"project generation changed {', '.join(changed)} before {pathlib.Path(log_path).stem} "
                           "was tested; mutate its generator input instead")
-    arch = run_shielded(["uname", "-m"], text=True).stdout.strip()
+    arch = run_shielded(["uname", "-m"], tool_deadline, text=True).stdout.strip()
     command = [xcodebuild, "-project", "ClipboardTTSApp.xcodeproj", "-scheme", "ClipboardTTSApp",
                "-destination", f"platform=macOS,arch={arch}", "-derivedDataPath", str(derived_data), "test"]
     command += [f"-only-testing:{t}" for t in tests]
@@ -346,7 +424,17 @@ def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interru
         if interrupts.received:
             process.terminate()
         try:
-            process.wait()
+            process.wait(timeout=test_deadline)
+        except subprocess.TimeoutExpired:
+            # SIGTERM lets xcodebuild end the test host, which launchd started outside this process tree,
+            # and its own build service; SIGKILL is left for an xcodebuild that ignores it.
+            process.terminate()
+            try:
+                process.wait(timeout=tool_deadline)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            return "NO-VERDICT", [f"the test run did not finish within {test_deadline:g} seconds and was stopped"]
         finally:
             interrupts.process = None
     return classify(pathlib.Path(log_path).read_text(errors="replace"))
@@ -427,8 +515,11 @@ def main(argv=None):
     parser.add_argument("spec")
     parser.add_argument("--out", required=True)
     parser.add_argument("--only", nargs="+", default=None)
+    parser.add_argument("--test-deadline", type=positive_seconds, default=TEST_DEADLINE, metavar="SECONDS",
+                        help="stop a test run, build included, still going after this long (default %(default)g)")
     parser.add_argument("--xcodebuild", default="xcodebuild", help=argparse.SUPPRESS)
     parser.add_argument("--xcodegen", default="xcodegen", help=argparse.SUPPRESS)
+    parser.add_argument("--tool-deadline", type=positive_seconds, default=TOOL_DEADLINE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     here = pathlib.Path(__file__).resolve().parent
@@ -461,7 +552,9 @@ def main(argv=None):
         report = {"complete": False, "exit": 1, "error": "the runner raised an unexpected exception",
                   "head": git(repo, "rev-parse", "HEAD", text=True).stdout.strip(),
                   "spec_sha256": hashlib.sha256(spec_bytes).hexdigest(), "target_sha256": tree_digest(copy),
-                  "tests": tests, "selected": [m["name"] for m in mutants], "control": None, "mutants": []}
+                  "tests": tests, "selected": [m["name"] for m in mutants],
+                  "deadlines": {"test_run": args.test_deadline, "short_tool": args.tool_deadline},
+                  "control": None, "mutants": []}
         plans = plan_edits(copy, mutants)
     except (RunnerError, subprocess.CalledProcessError, ValueError, OSError) as error:
         print(f"error: {describe(error)}", file=sys.stderr)
@@ -471,10 +564,11 @@ def main(argv=None):
     signal.signal(signal.SIGINT, interrupts)
     signal.signal(signal.SIGTERM, interrupts)
     touched = sorted({target for plan in plans.values() for target in plan})
+    deadlines = (args.test_deadline, args.tool_deadline)
     pristine = digest(touched)
     try:
         verdict, details = run_tests(copy, derived_data, tests, logs / "control.log", args.xcodebuild, args.xcodegen,
-                                     interrupts, pristine)
+                                     interrupts, pristine, deadlines)
         report["control"] = {"verdict": verdict, "details": details}
         print(f"control: {verdict} {'; '.join(details)}".rstrip(), flush=True)
         if interrupts.received:
@@ -489,13 +583,13 @@ def main(argv=None):
             try:
                 apply_plan(plans[mutant["name"]], originals)
                 verdict, details = run_tests(copy, derived_data, tests, logs / f"{mutant['name']}.log",
-                                             args.xcodebuild, args.xcodegen, interrupts, digest(touched))
+                                             args.xcodebuild, args.xcodegen, interrupts, digest(touched), deadlines)
             finally:
                 for target, original in originals.items():
                     target.write_bytes(original)
                 # A mutant of a generator input leaves generated files behind unless they are rebuilt, and
                 # a regeneration that fails for any reason leaves them unknown, so its failure stops the run.
-                run_shielded([args.xcodegen, "generate"], cwd=copy)
+                run_shielded([args.xcodegen, "generate"], args.tool_deadline, cwd=copy)
                 if digest(touched) != pristine:
                     raise RunnerError(f"the copy was not restored after {mutant['name']}")
             if interrupts.received:

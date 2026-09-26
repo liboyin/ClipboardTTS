@@ -144,6 +144,22 @@ elif "CTRLC" in target or "INTERRUPT" in target:
     time.sleep(20)  # only a runner that failed to stop the test tool waits this out
     with open(record, "a") as f:
         f.write(repr(("finished", tests)) + "\n")
+elif "STALL" in target or "STUBBORN" in target:  # never finishes, as a run with a deadlocked test does
+    def note(what):
+        with open(record, "a") as f:
+            f.write(repr((what, os.getpid())) + "\n")
+    if "STUBBORN" in target:  # a tool that ignores the stop, after a log that would otherwise read as a survival
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        print("\t Executed 3 tests, with 0 failures (0 unexpected)\n** TEST SUCCEEDED **", flush=True)
+    else:
+        signal.signal(signal.SIGTERM, lambda *_: (note("stopped"), os._exit(143)))
+    note("stalling")
+    while os.getppid() != 1:  # only a runner that has gone without stopping it lets this end
+        time.sleep(0.05)
+    note("outlived the runner")
+elif "SLOW" in target:  # finishes, but only after longer than the short tools' deadline
+    time.sleep(4)
+    print("/x/Tests/A.swift:9: error: -[ClipboardTTSAppTests.ASuite testGuard] : XCTAssertTrue failed\n** TEST FAILED **")
 else:
     print("\t Executed 3 tests, with 0 failures (0 unexpected)\n** TEST SUCCEEDED **")
 '''
@@ -170,6 +186,37 @@ SELECTOR_LOG = ("Test Case '-[ClipboardTTSAppTests.ASuite testGuard]' started.\n
                 "Test Case '-[ClipboardTTSAppTests.MixedSuite testSkips]' started.\n"
                 "Test Case '-[ClipboardTTSAppTests.MixedSuite testSkips]' skipped (0.001 seconds).\n")
 PASSED_ONLY_LOG = "Test Case '-[ClipboardTTSAppTests.ASuite testGuard]' passed (0.001 seconds).\n"
+# Stands in for a short tool that never finishes. The tool notes its pid and waits until the runner that started it
+# has gone, which a runner that killed it never lets happen, and notes that instead. It starts a helper, which moves
+# to a process group of its own but stays in the tool's session and, once a fork is requested, starts a late member
+# there too; both note their pids and wait to be killed, even once orphaned. A holder, which a tool starts in a
+# session of its own, keeps that tool's output open after the tool has finished, until it is released. Whatever
+# waits gives up after a minute, so a case that failed leaves nothing running for long.
+STALLING_TOOL = r'''#!/usr/bin/env python3
+import os, signal, subprocess, sys, time
+role = sys.argv[1] if len(sys.argv) > 1 else "tool"
+def note(what):
+    with open(os.environ["RUNNER_VERIFY_RECORD"], "a") as f:
+        f.write(repr((what, role, os.getpid())) + "\n")
+if role == "tool":
+    subprocess.Popen([sys.executable, __file__, "helper"])
+if role != "holder":  # only a kill ends a tool that hangs this way
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+if role == "helper":  # so that stopping the tool's process group alone would miss it
+    os.setpgid(0, 0)
+note("stalling")
+if role == "tool":
+    while os.getppid() != 1:
+        time.sleep(0.05)
+    note("outlived what started it")
+    sys.exit()
+give_up, fork = time.monotonic() + 60, os.environ.get("RUNNER_VERIFY_FORK")
+while not os.path.exists(os.environ.get("RUNNER_VERIFY_RELEASE", "")) and time.monotonic() < give_up:
+    if role == "helper" and fork and os.path.exists(fork):
+        subprocess.Popen([sys.executable, __file__, "late"])
+        fork = None
+    time.sleep(0.05)
+'''
 # What a terminal's Ctrl-C does, sent from inside a stand-in tool that the runner started: signal the runner's
 # whole process group, which holds the tool too unless the runner started it outside that group.
 GROUP_SIGINT = "kill -s INT -- -$(ps -o pgid= -p $PPID | tr -d ' ')\n"
@@ -204,6 +251,7 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
     tools = root / "tools"
     tools.mkdir()
     (tools / "xcodebuild").write_text(FAKE_XCODEBUILD)
+    (tools / "stall").write_text(STALLING_TOOL)
     # Stands in for generation: the generated file mirrors the project spec it was generated from. When
     # it regenerates over a mutant's INTERRUPT state, it signals the runner mid-cleanup first.
     (tools / "xcodegen").write_text(
@@ -217,8 +265,11 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
         "    ! grep -q SPEC_CTRLC_AFTER project.yml; }; then\n  " + GROUP_SIGINT + "fi\n"
         "if grep -q SPEC_REGEN_FAILS Generated.txt 2>/dev/null && ! grep -q SPEC_REGEN_FAILS project.yml; then\n"
         "  echo 'cannot regenerate over SPEC_REGEN_FAILS' >&2; exit 1\nfi\n"
+        # Never finishes, before a mutant's test run or while regenerating over it after its restore.
+        "if grep -q SPEC_STALL_BEFORE project.yml || { grep -q SPEC_STALL_AFTER Generated.txt 2>/dev/null &&\n"
+        "    ! grep -q SPEC_STALL_AFTER project.yml; }; then\n  exec \"$(dirname \"$0\")/stall\"\nfi\n"
         "cp project.yml Generated.txt\n")
-    for tool in ("xcodebuild", "xcodegen"):
+    for tool in ("xcodebuild", "xcodegen", "stall"):
         (tools / tool).chmod(0o755)
     return repo, tools
 
@@ -267,11 +318,17 @@ def end_to_end_cases():
     failures = []
 
     def case(name, check):
-        with tempfile.TemporaryDirectory() as tmp:
-            try:
-                check(pathlib.Path(tmp))
-            except Exception as error:  # a crash is this case's failure, not the whole verifier's
-                failures.append(f"{name}: {type(error).__name__}: {error}")
+        failed = False
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                try:
+                    check(pathlib.Path(tmp))
+                except Exception as error:  # a crash is this case's failure, not the whole verifier's
+                    failed = True
+                    failures.append(f"{name}: {type(error).__name__}: {error}")
+        except OSError as error:  # so is a process the runner left behind, still writing where the case cleans up
+            if not failed:
+                failures.append(f"{name}: cleanup failed: {error}")
 
     def verdicts_and_restore(root):
         repo, tools = make_repo(root)
@@ -1153,6 +1210,187 @@ def end_to_end_cases():
         assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], report
         assert "cannot regenerate over SPEC_REGEN_FAILS" in report["error"], report
 
+    def gone(pid):
+        """Whether pid has exited, allowing a moment for one that is still exiting."""
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            time.sleep(0.05)
+        return False
+
+    def all_gone(pids):
+        """Whether every one of a case's stand-ins has exited; any still running is killed, being that case's own."""
+        survivors = [pid for pid in pids if not gone(pid)]
+        for pid in survivors:
+            os.kill(pid, signal.SIGKILL)
+        return not survivors
+
+    def a_test_run_past_its_deadline_is_stopped_and_left_unjudged(root):
+        repo, tools = make_repo(root)
+        result, out, runs = run_runner(root, repo, tools, [mutant("stall", "STALL"), mutant("later", "KILL")],
+                                       extra=("--test-deadline", "2.5"))
+        lines = dict(line.split(":", 1) for line in result.stdout.splitlines())
+        detail = "the test run did not finish within 2.5 seconds and was stopped"
+        assert result.returncode == 1, f"a stopped mutant is unjudged: {result.returncode}: {result.stderr}"
+        assert lines["stall"].strip() == f"NO-VERDICT {detail}", lines
+        assert lines["later"].strip() == "KILLED ClipboardTTSAppTests.ASuite testGuard", f"the campaign stopped: {lines}"
+        pid = next(r[1] for r in runs if r[0] == "stalling")
+        assert ("stopped", pid) in runs, f"the test tool was not asked to stop before it was killed: {runs}"
+        assert gone(pid) and not any(r[0] == "outlived the runner" for r in runs), runs
+        assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL\n"
+        report = json.loads((out / "results.json").read_text())
+        assert report["complete"] and report["exit"] == 1 and report["mutants"][0] == {
+            "name": "stall", "verdict": "NO-VERDICT", "details": [detail]}, report
+        assert report["deadlines"] == {"test_run": 2.5, "short_tool": 60}, report
+
+    def a_test_run_that_ignores_the_stop_is_killed_and_left_unjudged(root):
+        # It has already printed a success, but the deadline, not the tests, ended it.
+        repo, tools = make_repo(root)
+        # Python's own warnings are on, so a killed tool the runner never reaped says so on stderr.
+        result, out, runs = run_runner(root, repo, tools, [mutant("stubborn", "STUBBORN")],
+                                       extra=("--test-deadline", "2", "--tool-deadline", "2"),
+                                       env={"PYTHONWARNINGS": "default"})
+        assert result.returncode == 1, (result.returncode, result.stderr)
+        assert result.stderr == "", f"the killed test tool was not reaped cleanly: {result.stderr}"
+        assert "stubborn: NO-VERDICT the test run did not finish within 2 seconds" in result.stdout, result.stdout
+        pid = next(r[1] for r in runs if r[0] == "stalling")
+        record = [ast.literal_eval(line) for line in (root / "record.txt").read_text().splitlines()]
+        assert gone(pid) and not any(r[0] == "outlived the runner" for r in record), record
+        assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL\n"
+
+    def a_control_past_its_deadline_refuses(root):
+        repo, tools = make_repo(root, "let value = ORIGINAL // STALL\n")
+        result, out, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=("--test-deadline", "2"))
+        assert result.returncode == 2 and "control did not pass" in result.stderr, (result.returncode, result.stderr)
+        assert "control: NO-VERDICT the test run did not finish within 2 seconds and was stopped" in result.stdout
+        assert not any(r[0] == "let value = KILL" for r in runs), runs
+        report = json.loads((out / "results.json").read_text())
+        assert report["control"]["verdict"] == "NO-VERDICT" and report["mutants"] == [], report
+
+    def a_test_run_within_its_deadline_is_judged(root):
+        # It outlasts the short tools' deadline, which bounds only them and the wait for a stopped test tool.
+        repo, tools = make_repo(root)
+        result, _, _ = run_runner(root, repo, tools, [mutant("slow", "SLOW")],
+                                  extra=("--test-deadline", "30", "--tool-deadline", "1.5"))
+        assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+        assert "slow: KILLED ClipboardTTSAppTests.ASuite testGuard" in result.stdout, result.stdout
+
+    def a_short_tool_past_its_deadline_is_killed_with_its_session_and_stops_the_run(root):
+        # XcodeGen before a mutant's test run and after its restore, and uname: none hears a terminal's Ctrl-C.
+        for site in ("SPEC_STALL_BEFORE", "SPEC_STALL_AFTER", "uname"):
+            base = root / site
+            repo, tools = make_repo(base)
+            env = None
+            if site == "uname":
+                (base / "bin").mkdir()
+                (base / "bin" / "uname").write_text(f"#!/bin/sh\nexec '{tools / 'stall'}'\n")
+                (base / "bin" / "uname").chmod(0o755)
+                env = {"PATH": f"{base / 'bin'}{os.pathsep}{os.environ['PATH']}"}
+            edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": site}]
+            result, out, runs = run_runner(base, repo, tools, [{"name": "config", "edits": edits}, mutant("later", "KILL")],
+                                           extra=("--tool-deadline", "2"), env=env)
+            assert result.returncode == 2, (site, result.returncode, result.stderr)
+            assert "did not finish within 2 seconds and was stopped\n" in result.stderr, (site, result.stderr)
+            assert "Traceback" not in result.stderr and "config:" not in result.stdout, (site, result.stdout, result.stderr)
+            assert not any(r[0] == "let value = KILL" for r in runs), (site, runs)
+            pids = [r[2] for r in runs if r[0] == "stalling"]
+            assert sorted(r[1] for r in runs if r[0] == "stalling") == ["helper", "tool"], (site, runs)
+            assert all_gone(pids), (site, runs)
+            record = [ast.literal_eval(line) for line in (base / "record.txt").read_text().splitlines()]
+            assert not any(r[0] == "outlived what started it" for r in record), (site, record)
+            assert (out / "copy" / "project.yml").read_text() == "name: SPEC_ORIGINAL\n", site
+            report = json.loads((out / "results.json").read_text())
+            assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], (site, report)
+
+    def a_short_tool_whose_output_outlives_it_is_stopped_at_its_deadline(root):
+        # The tool has finished, so its session holds nothing left to kill, and the stop must still end the wait.
+        repo, tools = make_repo(root)
+        (root / "bin").mkdir()
+        (root / "bin" / "uname").write_text(
+            f"#!{sys.executable}\nimport subprocess, sys\n"
+            f"subprocess.Popen([sys.executable, {str(tools / 'stall')!r}, 'holder'], start_new_session=True)\n")
+        (root / "bin" / "uname").chmod(0o755)
+        release = root / "release"
+        try:
+            result, _, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=("--tool-deadline", "2"),
+                                         env={"PATH": f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                                              "RUNNER_VERIFY_RELEASE": str(release)})
+        finally:
+            release.write_text("")
+        assert result.returncode == 2 and "error: uname -m did not finish within 2 seconds and was stopped" in result.stderr, (
+            result.returncode, result.stderr)
+        assert "Traceback" not in result.stderr and runs[0][:2] == ("stalling", "holder"), (result.stderr, runs)
+        assert gone(runs[0][2]), runs
+
+    def a_member_that_forks_while_the_session_is_listed_is_killed_too(root):
+        # A ps placed first on PATH holds the runner's first listing until the helper has started a late member,
+        # which that listing therefore misses.
+        repo, tools = make_repo(root)
+        fork, record = root / "fork", root / "record.txt"
+        (root / "bin").mkdir()
+        (root / "bin" / "ps").write_text(
+            "#!/bin/sh\nlisting=$(/bin/ps \"$@\")\n"
+            f"if [ ! -e '{fork}' ]; then\n  touch '{fork}'\n"
+            f"  until grep -q \"'late'\" '{record}'; do sleep 0.05; done\nfi\nprintf '%s\\n' \"$listing\"\n")
+        (root / "bin" / "ps").chmod(0o755)
+        edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_STALL_BEFORE"}]
+        result, _, runs = run_runner(root, repo, tools, [{"name": "config", "edits": edits}], extra=("--tool-deadline", "2"),
+                                     env={"PATH": f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                                          "RUNNER_VERIFY_FORK": str(fork)})
+        assert result.returncode == 2 and "did not finish within 2 seconds" in result.stderr, (result.returncode, result.stderr)
+        roles = sorted(r[1] for r in runs if r[0] == "stalling")
+        assert roles == ["helper", "late", "tool"], f"the late member never started: {runs}"
+        assert all_gone([r[2] for r in runs if r[0] == "stalling"]), f"a member outlived the stop: {runs}"
+
+    def a_session_that_cannot_be_listed_in_time_still_stops_the_run(root):
+        # The listing that finds the session's members is bounded by the same deadline: a ps placed first on PATH
+        # hangs, fails, or takes longer than what is left of the deadline after one listing.
+        stand_ins = {
+            "hangs": "while not os.path.exists(release) and time.monotonic() < give_up:\n    time.sleep(0.05)\n",
+            "fails": "sys.exit('ps: cannot list processes')\n",
+            "slow": "time.sleep(1.5)\nos.execv('/bin/ps', ['ps', *sys.argv[1:]])\n",
+        }
+        for behavior, body in stand_ins.items():
+            base = root / behavior
+            repo, tools = make_repo(base)
+            (base / "bin").mkdir()
+            release = base / "release"
+            (base / "bin" / "ps").write_text(
+                f"#!{sys.executable}\nimport os, sys, time\nrelease, give_up = {str(release)!r}, time.monotonic() + 60\n" + body)
+            (base / "bin" / "ps").chmod(0o755)
+            edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_STALL_BEFORE"}]
+            try:
+                result, _, runs = run_runner(base, repo, tools, [{"name": "config", "edits": edits}],
+                                             extra=("--tool-deadline", "2"),
+                                             env={"PATH": f"{base / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                                                  "RUNNER_VERIFY_RELEASE": str(release)})
+            finally:
+                release.write_text("")  # what the runner could not confirm stopped may end now, before this case ends
+                recorded = [ast.literal_eval(line) for line in (base / "record.txt").read_text().splitlines()]
+                all_gone([r[2] for r in recorded if r[0] == "stalling"])
+            assert result.returncode == 2, (behavior, result.returncode, result.stderr)
+            assert ("did not finish within 2 seconds and was stopped; not every process in its session could be "
+                    "confirmed stopped") in result.stderr, (behavior, result.stderr)
+            assert "Traceback" not in result.stderr, (behavior, result.stderr)
+            tool = next(r[2] for r in runs if r[:2] == ("stalling", "tool"))
+            assert gone(tool), f"{behavior}: the stopped tool itself is still running: {runs}"
+
+    def a_deadline_that_cannot_bound_a_run_is_refused(root):
+        repo, tools = make_repo(root)
+        for option in ("--test-deadline", "--tool-deadline"):
+            for value in ("0", "-1", "nan", "inf", "soon"):
+                result, _, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=(option, value))
+                assert result.returncode == 2 and option in result.stderr, (option, value, result.returncode, result.stderr)
+                assert "Traceback" not in result.stderr and runs == [], (option, value, result.stderr, runs)
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=("--tool-deadline", "7.5"))
+        report = json.loads((out / "results.json").read_text())
+        assert result.returncode == 0 and report["deadlines"] == {"test_run": 1800, "short_tool": 7.5}, report
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")], out=out)
+        report = json.loads((out / "results.json").read_text())
+        assert report["deadlines"] == {"test_run": 1800, "short_tool": 60}, f"the documented deadlines are not the defaults: {report}"
+
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
@@ -1190,7 +1428,15 @@ def end_to_end_cases():
               a_terminal_interrupt_during_generation_before_a_test_run_lets_it_finish,
               a_terminal_interrupt_during_regeneration_after_a_restore_lets_it_finish,
               a_terminal_interrupt_during_the_architecture_query_is_an_interrupt,
-              a_terminal_signal_still_reaches_the_test_tool, a_failed_regeneration_after_a_restore_stops_the_run)
+              a_terminal_signal_still_reaches_the_test_tool, a_failed_regeneration_after_a_restore_stops_the_run,
+              a_test_run_past_its_deadline_is_stopped_and_left_unjudged,
+              a_test_run_that_ignores_the_stop_is_killed_and_left_unjudged, a_control_past_its_deadline_refuses,
+              a_test_run_within_its_deadline_is_judged,
+              a_short_tool_past_its_deadline_is_killed_with_its_session_and_stops_the_run,
+              a_short_tool_whose_output_outlives_it_is_stopped_at_its_deadline,
+              a_member_that_forks_while_the_session_is_listed_is_killed_too,
+              a_session_that_cannot_be_listed_in_time_still_stops_the_run,
+              a_deadline_that_cannot_bound_a_run_is_refused)
     for check in checks:
         case(check.__name__, check)
     return failures, len(checks)

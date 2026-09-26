@@ -96,7 +96,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, and NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, and NB42 from NB35's review on 2026-09-26. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -106,7 +106,7 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 #### S3 — Make mutation campaign lock ownership explicit
 
-**Design proposal; structure validated by source inspection at `8c80839`, 2026-09-26.** `claim_output` returns a raw file descriptor that `main` leaves open until process exit; the CLI's current lock lifetime is intentional, but acquisition and release are not a scoped resource that can be exercised repeatedly within one process. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction:** give output ownership an explicit scope, such as a context manager, covering acquisition before destructive work through restoration and final report writing, with release on normal return and exceptional exits. Preserve existing CLI verdicts, diagnostics, output protection, and signal behavior, including which tools a terminal's signals reach ([NB33](completed_work/NB33.md)); tool deadlines remain NB35's work. **Acceptance:** direct tests demonstrate release after success and failure, including a refusal after acquisition, and subsequent reacquisition without exiting the test process; the live two-run case still proves exclusion throughout the campaign; applicable mutations detect early release and missing cleanup. **Dependencies:** none; builds on completed NB36 and NB33, and may inform NB35 without requiring it. Recording this proposal does not authorize implementation.
+**Design proposal; structure validated by source inspection at `8c80839`, 2026-09-26.** `claim_output` returns a raw file descriptor that `main` leaves open until process exit; the CLI's current lock lifetime is intentional, but acquisition and release are not a scoped resource that can be exercised repeatedly within one process. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction:** give output ownership an explicit scope, such as a context manager, covering acquisition before destructive work through restoration and final report writing, with release on normal return and exceptional exits. Preserve existing CLI verdicts, diagnostics, output protection, and signal behavior, including which tools a terminal's signals reach ([NB33](completed_work/NB33.md)) and the deadline on each tool run ([NB35](completed_work/NB35.md)). **Acceptance:** direct tests demonstrate release after success and failure, including a refusal after acquisition, and subsequent reacquisition without exiting the test process; the live two-run case still proves exclusion throughout the campaign; applicable mutations detect early release and missing cleanup. **Dependencies:** none; builds on completed NB36, NB33, and NB35. Recording this proposal does not authorize implementation.
 
 #### S4 — Make mutation verifier cases independently runnable
 
@@ -138,11 +138,7 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 #### NB34 — A test that crashes, exits, or times out reads as `FAILED-UNNAMED`
 
-**Reported by S2's review, 2026-09-25, from real Xcode 27.0 runs; not independently validated.** `fatalError` or `exit` inside a test, and a test exceeding its execution allowance, each ended in `** TEST FAILED **` with no `error: -[…]` line, so `classify` returned `FAILED-UNNAMED` and the run exited 0, although Xcode printed `Failing tests:` naming the test. README and `classify`'s docstring describe `FAILED-UNNAMED` as a failure naming no test, such as a crash between tests. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py), README. **Direction/acceptance:** read the named failures a failed run reports for crashes and timeouts, or treat `FAILED-UNNAMED` as unjudged and document how to resolve it; README and the docstring then match real logs, and a verifier case holds the chosen reading.
-
-#### NB35 — Nothing bounds a hanging mutant
-
-**Reported by S2's review, 2026-09-25, with a real hang run; not independently validated.** `run-mutants.py` starts `xcodebuild test` without test timeouts, so a mutant that deadlocks blocks the runner until it is interrupted, which ends the campaign with exit 2 and no verdict for that mutant. **Paths:** [runner](run-mutants.py), README. **Direction/acceptance:** bound each mutant's test run (for example `-test-timeouts-enabled YES` with a documented allowance, which NB34's reading then names) or document the hang and its recovery. Since [NB33](completed_work/NB33.md), XcodeGen and `uname -m` run in sessions of their own, so a terminal's Ctrl-C no longer stops one that hangs either.
+**Reported by S2's review, 2026-09-25, from real Xcode 27.0 runs; not independently validated.** `fatalError` or `exit` inside a test, and a test exceeding its execution allowance, each ended in `** TEST FAILED **` with no `error: -[…]` line, so `classify` returned `FAILED-UNNAMED` and the run exited 0, although Xcode printed `Failing tests:` naming the test. README and `classify`'s docstring describe `FAILED-UNNAMED` as a failure naming no test, such as a crash between tests. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py), README. **Direction/acceptance:** read the named failures a failed run reports for crashes and timeouts, or treat `FAILED-UNNAMED` as unjudged and document how to resolve it; README and the docstring then match real logs, and a verifier case holds the chosen reading. [NB35](completed_work/NB35.md) reproduced the timeout case on 2026-09-26 with Xcode 27.0; the runner leaves Xcode's test timeouts off and stops a hung run with a deadline of its own, which reads as `NO-VERDICT`, so a timeout reaches this reading only if a scheme or test plan enables Xcode's.
 
 #### NB39 — A mutant write that fails partway can leave the copy mutated
 
@@ -155,6 +151,10 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 #### NB41 — Nothing holds the runner's refusal of an OS error before the control
 
 **Reported by S2's review, 2026-09-26; not independently validated.** `run-mutants.py` refuses an `OSError` raised before the control, such as a mistyped spec path or an `--out` that cannot be created, with `error:` and exit 2, but removing `OSError` from that `except` survives the verifier. The reviewer showed that a nonexistent spec path then ends with a traceback and exit 1, which README reserves for an unjudged mutant; no verdict or copy state is affected. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction/acceptance:** a case passing a nonexistent spec path asserts exit 2, an `error:` diagnostic, no traceback, and no test run, and the mutant fails it.
+
+#### NB42 — A deadline too large for a subprocess timeout ends the runner with a traceback
+
+**Reported by NB35's review, 2026-09-26; not independently validated.** `run-mutants.py`'s `positive_seconds` accepts any finite positive number, but `run_shielded` passes the short-tool deadline to `communicate()`, which raised `OverflowError` for `--tool-deadline 1e308`; the reviewer's scratch run then ended with a traceback and exit 1 and a `results.json` recording an unexpected exception before the control, although README reserves exit 1 for unjudged mutants. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction/acceptance:** refuse a deadline the subprocess timeout cannot represent, or report the overflow as a refusal with exit 2; a verifier case passing such a value asserts exit 2, an `error:` diagnostic, and no traceback, and the mutant restoring today's acceptance fails it.
 
 ### Nits
 
@@ -170,6 +170,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB35](completed_work/NB35.md) — Fixed: each test run and each short tool the mutation runner starts has a deadline, and a stopped test run is `NO-VERDICT`.
 - [NB33](completed_work/NB33.md) — Fixed: a terminal's Ctrl-C no longer kills the runner's short tools, and a failed regeneration after a restore stops the run.
 - [NB38](completed_work/NB38.md) — Done by user instruction: the runner's copy is one walk of the index, each path mirrored from the working tree.
 - [NB37](completed_work/S2.md) — Fixed in S2 by user decision: `results.json` records how its run ended and identifies its inputs.
