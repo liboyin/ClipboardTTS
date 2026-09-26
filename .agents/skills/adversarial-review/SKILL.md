@@ -13,8 +13,8 @@ Return a reviewer-triaged report without changing the repository. The reviewer M
 
 2. **Dispatch one reviewer.** Tell it to read this skill but execute only step 3 and return the defined report; the main agent owns steps 1, 2, and 4. Launch the reviewer agent without inherited conversation history using the applicable supported harness:
 
-   - **Codex:** spawn the reviewer as a native subagent with `spawn_agent`, using `fork_turns: "none"` and explicit `model: "gpt-5.6-sol"` and `reasoning_effort: "high"` overrides. Native subagents inherit the current Full Access environment; no sandbox configuration is required.
-   - **Claude Code:** dispatch the reviewer with `codex exec --dangerously-bypass-approvals-and-sandbox -m gpt-5.6-sol -c model_reasoning_effort=high --skip-git-repo-check -C <scratch directory> -o <report file> - < <prompt file>`, run as a tracked background task so its exit is reported. The Codex plugin's `--write` sandbox cannot run hosted XCTest, so bypassing it is the default by user decision on 2026-09-24. Never resume an earlier Codex session.
+   - **Codex:** spawn the reviewer as a native subagent with `spawn_agent`, using `fork_turns: "none"` and explicit `model: "gpt-6-sol"` and `reasoning_effort: "high"` overrides. Native subagents inherit the current Full Access environment; no sandbox configuration is required.
+   - **Claude Code:** dispatch the reviewer with `codex exec --dangerously-bypass-approvals-and-sandbox -m gpt-6-sol -c model_reasoning_effort=high --skip-git-repo-check -C <scratch directory> -o <report file> - < <prompt file>`, run as a tracked background task so its exit is reported. The Codex plugin's `--write` sandbox cannot run hosted XCTest, so bypassing it is the default by user decision on 2026-09-24. Never resume an earlier Codex session.
 
    (The reviewer needs filesystem write access only to create and test a scratch copy outside the repository. Native Codex receives that access from the inherited environment; Claude Code's reviewer runs without a sandbox. Regardless of harness, the dispatch MUST tell the reviewer to treat the repository as strictly read-only, to build and test only in its scratch copy, and to remove that copy at exit. Construct the scratch copy from the tracked target state, apply only the in-scope staged and unstaged changes, and copy only explicitly identified in-scope untracked files. Never recursively copy ignored or out-of-scope content. If the reviewer cannot create the scratch copy, it returns a `Review blocked` verdict. The reviewer is trusted to follow this read-only contract. Step 1's snapshot and step 4's comparison detect accidental repository mutations; they are not a security boundary.)
 
@@ -28,7 +28,7 @@ Return a reviewer-triaged report without changing the repository. The reviewer M
 
    The reviewer MAY ask for further information when missing context could affect a finding or verdict. Reply with the minimum factual context and record the exchange under **Assumptions**.
 
-   If `gpt-5.6-sol` or the applicable dispatch mechanism is unavailable, stop and ask the user. Do not substitute or issue a verdict.
+   If `gpt-6-sol` or the applicable dispatch mechanism is unavailable, stop and ask the user. Do not substitute or issue a verdict.
 
 3. **Review.** The reviewer:
 
