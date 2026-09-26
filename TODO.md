@@ -96,13 +96,21 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark streamlining work the user requested on 2026-09-24 rather than review findings. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, and NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, and NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
 No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Non-blocking
+
+#### S3 — Make mutation campaign lock ownership explicit
+
+**Design proposal; structure validated by source inspection at `8c80839`, 2026-09-26.** `claim_output` returns a raw file descriptor that `main` leaves open until process exit; the CLI's current lock lifetime is intentional, but acquisition and release are not a scoped resource that can be exercised repeatedly within one process. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction:** give output ownership an explicit scope, such as a context manager, covering acquisition before destructive work through restoration and final report writing, with release on normal return and exceptional exits. Preserve existing CLI verdicts, diagnostics, output protection, and signal behavior; subprocess cancellation and deadlines remain NB33/NB35's work. **Acceptance:** direct tests demonstrate release after success and failure, including a refusal after acquisition, and subsequent reacquisition without exiting the test process; the live two-run case still proves exclusion throughout the campaign; applicable mutations detect early release and missing cleanup. **Dependencies:** none; builds on completed NB36, and may inform NB33/NB35 without requiring them. Recording this proposal does not authorize implementation.
+
+#### S4 — Make mutation verifier cases independently runnable
+
+**Design proposal; structure validated by source inspection at `8c80839`, 2026-09-26.** Integration cases are nested inside `end_to_end_cases`, and the verifier's entry point runs every classification, selector, and integration case with no case-selection interface. **Paths:** [verifier](verify-mutation-runner.py), [runner's pure helpers](run-mutants.py), [verification procedure](README.md). **Direction:** expose stable case names and allow focused selection while retaining the full suite as the default; exercise pure spec validation and edit planning directly where this avoids unnecessary subprocess fixtures, retaining end-to-end coverage of wiring, copying, locks, processes, restoration, and reports. No generic mutation framework or runner redesign is needed. **Acceptance:** a named selection runs only its requested cases, unknown names fail explicitly, and the default still runs the complete suite; failures retain named attribution and nonzero exits, and scratch/process ownership survives failures. Preserve existing behavioral coverage and demonstrate equivalent mutation detection before replacing integration assertions with direct tests, following AGENTS' coverage-removal rule. **Dependencies:** none; independent of S3 and NB38. NB18 concerns Swift test dependencies and does not own this Python verifier work. Recording this proposal does not authorize implementation.
 
 #### NB17 — Test teardown does not own every queued audio action
 
