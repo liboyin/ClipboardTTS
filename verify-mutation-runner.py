@@ -1013,6 +1013,50 @@ def end_to_end_cases():
         assert result.returncode == 2 and "control did not pass" in result.stderr, (result.returncode, result.stderr)
         assert len(runs) == 1, runs
 
+    def every_indexed_path_is_copied_as_the_working_tree_holds_it(root):
+        # Neither HEAD, Git's view of what changed, nor an export attribute may decide the copy.
+        repo, tools = make_repo(root)
+        git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
+        (repo / ".gitattributes").write_text("Sources/Exported.swift export-ignore\nSources/Subst.swift export-subst\n")
+        (repo / "Sources" / "Exported.swift").write_text("exported\n")
+        (repo / "Sources" / "Subst.swift").write_text("$Format:%H$\n")
+        (repo / "Sources" / "Assumed.swift").write_text("committed\n")
+        git("add", ".gitattributes", "Sources/Exported.swift", "Sources/Subst.swift", "Sources/Assumed.swift")
+        git("-c", "user.name=v", "-c", "user.email=v@v", "commit", "-qm", "attributes")
+        (repo / "Sources" / "Assumed.swift").write_text("edited while Git assumes it unchanged\n")
+        git("update-index", "--assume-unchanged", "Sources/Assumed.swift")
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")])
+        assert result.returncode == 0, (result.returncode, result.stderr)
+        copy = out / "copy" / "Sources"
+        assert (copy / "Exported.swift").read_text() == "exported\n", "an export-ignored file left the copy"
+        assert (copy / "Subst.swift").read_text() == "$Format:%H$\n", "an export substitution reached the copy"
+        assert (copy / "Assumed.swift").read_text() == "edited while Git assumes it unchanged\n", "HEAD's content was copied"
+
+    def a_tracked_submodule_is_refused(root):
+        repo, tools = make_repo(root)
+        git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True)
+        head = git("rev-parse", "HEAD").stdout.strip()
+        git("update-index", "--add", "--cacheinfo", f"160000,{head},Sources/Sub")
+        git("-c", "user.name=v", "-c", "user.email=v@v", "commit", "-qm", "submodule")
+        (repo / "Sources" / "Sub").mkdir()  # as an uninitialized submodule leaves it
+        (repo / "Sources" / "Sub" / "Inner.swift").write_text("another repository's file\n")
+        result, out, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")])
+        assert result.returncode == 2 and "neither a file nor a symlink" in result.stderr, (result.returncode, result.stderr)
+        assert runs == [] and not (out / "copy" / "Sources" / "Sub" / "Inner.swift").exists(), runs
+
+    def an_unmerged_path_is_copied_once(root):
+        # The index lists an unmerged path once per stage; the working tree holds one entry for it.
+        repo, tools = make_repo(root)
+        git = lambda *a, **k: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True, **k)
+        blob = git("hash-object", "-w", "--stdin", input="Target.swift").stdout.strip()
+        git("update-index", "--index-info",
+            input="".join(f"120000 {blob} {stage}\tSources/Conflict.swift\n" for stage in (1, 2, 3)))
+        (repo / "Sources" / "Conflict.swift").symlink_to("Target.swift")
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")])
+        assert result.returncode == 0, (result.returncode, result.stderr)
+        link = out / "copy" / "Sources" / "Conflict.swift"
+        assert link.is_symlink() and os.readlink(link) == "Target.swift", "an unmerged path did not reach the copy"
+
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
@@ -1045,7 +1089,8 @@ def end_to_end_cases():
               a_tracked_symlink_replaced_by_a_file_is_not_written_through, an_output_path_that_is_a_file_refuses,
               a_signal_during_the_control_stops_it, a_runner_outside_a_repository_refuses,
               paths_git_quotes_reach_the_copy, an_empty_or_new_nested_output_directory_is_accepted,
-              a_mutant_that_skips_a_selected_test_is_unjudged)
+              a_mutant_that_skips_a_selected_test_is_unjudged, every_indexed_path_is_copied_as_the_working_tree_holds_it,
+              a_tracked_submodule_is_refused, an_unmerged_path_is_copied_once)
     for check in checks:
         case(check.__name__, check)
     return failures, len(checks)

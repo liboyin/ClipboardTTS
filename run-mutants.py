@@ -191,7 +191,7 @@ def git(repo, *args, **kwargs):
 
 
 def build_copy(repo, copy, untracked):
-    """Copies the tracked target state and the named untracked files, never ignored content.
+    """Copies every indexed path as the working tree holds it and the named untracked files, never ignored content.
 
     Nothing is generated here: edits are planned against this target state alone. Before testing,
     run_tests also checks that regeneration preserved the edit targets, including tracked outputs.
@@ -199,22 +199,16 @@ def build_copy(repo, copy, untracked):
     if copy.exists():
         shutil.rmtree(copy)
     copy.mkdir(parents=True)
-    archive = git(repo, "archive", "HEAD").stdout
-    subprocess.run(["tar", "-x", "-C", str(copy)], input=archive, check=True)
-    # Each changed path is copied from the working tree rather than patched in: `git apply` run in
-    # the copy would discover any repository around --out and could skip paths it thinks are outside.
-    changed = git(repo, "diff", "HEAD", "--name-only", "--no-renames", "-z").stdout.decode().split("\0")
-    indexed = set(git(repo, "ls-files", "--cached", "-z").stdout.decode().split("\0")) - {""}
-    # A path no longer in the index is deleted in the target state even if a file remains on disk,
-    # possibly ignored; it comes back only through the named untracked files. Beneath a working-tree
-    # symlink, Git also sees a tracked path as deleted, and following the link would bring in whatever
-    # it points at instead.
-    operations = [(path, None if path not in indexed or under_symlink(repo, path) else repo / path)
-                  for path in filter(None, changed)]
-    # Removals go first: on a case-insensitive volume a case-only rename names one file twice, and
-    # removing the old spelling after copying the new one would delete both.
-    for path, source in sorted(operations, key=lambda operation: operation[1] is not None):
-        mirror(source, copy / path, path)
+    # One walk of the index copies clean and changed paths alike from the working tree, so neither HEAD,
+    # Git's view of what changed, nor an export attribute decides what the tests see. A path no longer
+    # in the index is deleted in the target state even if a file remains on disk, possibly ignored; it
+    # comes back only through the named untracked files. An unmerged path is listed once per stage.
+    indexed = dict.fromkeys(filter(None, git(repo, "ls-files", "--cached", "-z").stdout.decode().split("\0")))
+    for path in indexed:
+        # Beneath a working-tree symlink Git sees a tracked path as deleted, and following the link
+        # would bring in whatever it points at instead.
+        if not under_symlink(repo, path):
+            mirror(repo / path, copy / path, path)
     listed = set(git(repo, "ls-files", "--others", "--exclude-standard", "-z").stdout.decode().split("\0")) - {""}
     for path in untracked:
         if path not in listed:
@@ -238,13 +232,7 @@ def under_symlink(root, path):
 
 
 def mirror(source, destination, path):
-    """Makes destination what the working tree holds at source: a file, a symlink, or nothing (None)."""
-    if destination.is_symlink() or destination.is_file():
-        destination.unlink()
-    elif destination.exists():
-        shutil.rmtree(destination)
-    if source is None:
-        return
+    """Gives the new destination what the working tree holds at source: a file, a symlink, or nothing."""
     if source.is_symlink():
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.symlink(os.readlink(source), destination)
@@ -252,7 +240,7 @@ def mirror(source, destination, path):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     elif source.exists():
-        raise RunnerError(f"{path} changed but is neither a file nor a symlink")
+        raise RunnerError(f"{path} is in the index but is neither a file nor a symlink, such as a submodule")
 
 
 def describe(error):
