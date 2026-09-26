@@ -1391,6 +1391,27 @@ def end_to_end_cases():
         report = json.loads((out / "results.json").read_text())
         assert report["deadlines"] == {"test_run": 1800, "short_tool": 60}, f"the documented deadlines are not the defaults: {report}"
 
+    def a_short_tool_deadline_no_wait_can_represent_is_refused(root):
+        # A short tool is waited for in poll(), whose timeout is a C int of milliseconds; nothing may start or lock first.
+        repo, tools = make_repo(root)
+        for value in ("2147484", "1e10", "1e308"):
+            out = root / f"out-{value}"
+            result, _, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=("--tool-deadline", value),
+                                         out=out)
+            assert result.returncode == 2 and "error:" in result.stderr and "--tool-deadline" in result.stderr, (
+                value, result.returncode, result.stderr)
+            assert "Traceback" not in result.stderr and runs == [] and not out.exists(), (value, result.stderr, runs)
+
+    def the_longest_deadlines_a_wait_can_represent_are_accepted(root):
+        # The short tools' limit is whole seconds below poll()'s; a test run's wait sleeps in steps and takes any finite deadline.
+        repo, tools = make_repo(root)
+        longest = 1.7976931348623157e308
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")],
+                                    extra=("--tool-deadline", "2147483", "--test-deadline", repr(longest)))
+        assert result.returncode == 0 and "Traceback" not in result.stderr, (result.returncode, result.stderr)
+        report = json.loads((out / "results.json").read_text())
+        assert report["deadlines"] == {"test_run": longest, "short_tool": 2147483}, report
+
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
@@ -1436,7 +1457,8 @@ def end_to_end_cases():
               a_short_tool_whose_output_outlives_it_is_stopped_at_its_deadline,
               a_member_that_forks_while_the_session_is_listed_is_killed_too,
               a_session_that_cannot_be_listed_in_time_still_stops_the_run,
-              a_deadline_that_cannot_bound_a_run_is_refused)
+              a_deadline_that_cannot_bound_a_run_is_refused, a_short_tool_deadline_no_wait_can_represent_is_refused,
+              the_longest_deadlines_a_wait_can_represent_are_accepted)
     for check in checks:
         case(check.__name__, check)
     return failures, len(checks)

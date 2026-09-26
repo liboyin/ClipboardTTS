@@ -68,6 +68,10 @@ OWNED_CHILDREN = ("copy", "derived-data", "logs", "results.json")
 TEST_DEADLINE = 1800
 # XcodeGen generates this project in about 30 ms, and uname answers at once.
 TOOL_DEADLINE = 60
+# communicate() waits for a short tool in poll(), whose timeout is a C int of milliseconds, so it raises
+# OverflowError past 2**31 - 1 ms, about 24.8 days; whole seconds stay below that however the time left
+# rounds. A test run is waited for by wait(), which sleeps in short steps and takes any finite deadline.
+TOOL_DEADLINE_LIMIT = (2**31 - 1) // 1000
 
 
 class RunnerError(Exception):
@@ -131,6 +135,15 @@ def positive_seconds(text):
     value = float(text)
     if not 0 < value < float("inf"):
         raise argparse.ArgumentTypeError(f"{text!r} is not a positive number of seconds")
+    return value
+
+
+def tool_seconds(text):
+    """Parses a short tool's deadline, refusing one longer than communicate() can wait for."""
+    value = positive_seconds(text)
+    if value > TOOL_DEADLINE_LIMIT:
+        raise argparse.ArgumentTypeError(f"{text!r} is longer than the {TOOL_DEADLINE_LIMIT} seconds a short tool "
+                                         "can be waited for")
     return value
 
 
@@ -519,7 +532,7 @@ def main(argv=None):
                         help="stop a test run, build included, still going after this long (default %(default)g)")
     parser.add_argument("--xcodebuild", default="xcodebuild", help=argparse.SUPPRESS)
     parser.add_argument("--xcodegen", default="xcodegen", help=argparse.SUPPRESS)
-    parser.add_argument("--tool-deadline", type=positive_seconds, default=TOOL_DEADLINE, help=argparse.SUPPRESS)
+    parser.add_argument("--tool-deadline", type=tool_seconds, default=TOOL_DEADLINE, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     here = pathlib.Path(__file__).resolve().parent

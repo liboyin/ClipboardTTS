@@ -152,10 +152,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 **Reported by S2's review, 2026-09-26; not independently validated.** `run-mutants.py` refuses an `OSError` raised before the control, such as a mistyped spec path or an `--out` that cannot be created, with `error:` and exit 2, but removing `OSError` from that `except` survives the verifier. The reviewer showed that a nonexistent spec path then ends with a traceback and exit 1, which README reserves for an unjudged mutant; no verdict or copy state is affected. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction/acceptance:** a case passing a nonexistent spec path asserts exit 2, an `error:` diagnostic, no traceback, and no test run, and the mutant fails it.
 
-#### NB42 — A deadline too large for a subprocess timeout ends the runner with a traceback
-
-**Reported by NB35's review, 2026-09-26; not independently validated.** `run-mutants.py`'s `positive_seconds` accepts any finite positive number, but `run_shielded` passes the short-tool deadline to `communicate()`, which raised `OverflowError` for `--tool-deadline 1e308`; the reviewer's scratch run then ended with a traceback and exit 1 and a `results.json` recording an unexpected exception before the control, although README reserves exit 1 for unjudged mutants. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py). **Direction/acceptance:** refuse a deadline the subprocess timeout cannot represent, or report the overflow as a refusal with exit 2; a verifier case passing such a value asserts exit 2, an `error:` diagnostic, and no traceback, and the mutant restoring today's acceptance fails it. By user decision on 2026-09-26, NB42 is to be fixed.
-
 ### Nits
 
 #### N7 — The automatic-playback prebuffer closure draws an implicit-strong-capture warning
@@ -170,6 +166,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB42](completed_work/NB42.md) — Fixed: a short-tool deadline longer than `communicate()` can wait for is refused before anything runs.
 - [NB35](completed_work/NB35.md) — Fixed: each test run and each short tool the mutation runner starts has a deadline, and a stopped test run is `NO-VERDICT`.
 - [NB33](completed_work/NB33.md) — Fixed: a terminal's Ctrl-C no longer kills the runner's short tools, and a failed regeneration after a restore stops the run.
 - [NB38](completed_work/NB38.md) — Done by user instruction: the runner's copy is one walk of the index, each path mirrored from the working tree.
