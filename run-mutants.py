@@ -38,6 +38,7 @@ killed and stops the run with exit 2.
 """
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -471,12 +472,15 @@ def lies_within(path, root):
     return any(candidate.exists() and os.path.samefile(candidate, root) for candidate in (path, *path.parents))
 
 
+@contextlib.contextmanager
 def claim_output(out):
-    """Takes ownership of --out before anything in it is deleted or written, returning the held lock.
+    """Owns --out for the duration of the with block, taking it before anything in it is deleted or written.
 
     The runner deletes and rewrites fixed children of --out, so it accepts only a directory that is
     new, empty, or already marked as its own and not in use by another run, and refuses a child that
-    is a symlink, which would carry those deletions and writes somewhere else.
+    is a symlink, which would carry those deletions and writes somewhere else. The lock is released
+    however the block ends, and on a refusal made after it was taken, so one process can claim the
+    same directory again.
     """
     marker = out / OWNERSHIP_MARKER
     if out.exists():
@@ -487,23 +491,26 @@ def claim_output(out):
             raise RunnerError(f"--out {out} is not empty and was not created by this runner; use a new or empty directory")
     else:
         out.mkdir(parents=True)
-    # A run holds this lock until it exits, so a second run cannot rebuild the copy, logs, or results
-    # beneath it. A symlinked marker never gets here: it is not ownership, and it makes --out non-empty.
+    # The block holds this lock, so a second run cannot rebuild the copy, logs, or results beneath it.
+    # A symlinked marker never gets here: it is not ownership, and it makes --out non-empty. Closing
+    # the only descriptor releases the lock; no child inherits it.
     lock = os.open(marker, os.O_RDWR | os.O_CREAT, 0o644)
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RunnerError(f"--out {out} is in use by another run") from None
+        # The earlier results go first, so no later refusal can leave them looking like this run's.
+        results = out / "results.json"
+        if results.is_symlink():
+            raise RunnerError(f"{results} is a symlink; refusing to delete or write through it")
+        results.unlink(missing_ok=True)
+        for name in OWNED_CHILDREN:
+            if (out / name).is_symlink():
+                raise RunnerError(f"{out / name} is a symlink; refusing to delete or write through it")
+        yield
+    finally:
         os.close(lock)
-        raise RunnerError(f"--out {out} is in use by another run") from None
-    # The earlier results go first, so no later refusal can leave them looking like this run's.
-    results = out / "results.json"
-    if results.is_symlink():
-        raise RunnerError(f"{results} is a symlink; refusing to delete or write through it")
-    results.unlink(missing_ok=True)
-    for name in OWNED_CHILDREN:
-        if (out / name).is_symlink():
-            raise RunnerError(f"{out / name} is a symlink; refusing to delete or write through it")
-    return lock
 
 
 class Interrupts:
@@ -537,93 +544,95 @@ def main(argv=None):
 
     here = pathlib.Path(__file__).resolve().parent
     out = pathlib.Path(args.out).resolve()
-    try:
-        repo = pathlib.Path(git(here, "rev-parse", "--show-toplevel", text=True).stdout.strip()).resolve()
-        if lies_within(out, repo):
-            raise RunnerError("--out must lie outside the repository")
-        # The reverse matters too: rebuilding the copy deletes what lies inside --out.
-        if lies_within(repo, out):
-            raise RunnerError("--out must not contain the repository")
-        # Artifacts from an earlier invocation must never read as this one's evidence. The lock is
-        # released only when the runner exits.
-        lock = claim_output(out)  # never read: holding it is the point
-        if (out / "logs").exists():
-            shutil.rmtree(out / "logs")
-        spec_bytes = pathlib.Path(args.spec).read_bytes()
-        spec = load_spec(spec_bytes)
-        mutants = spec["mutants"]
-        if args.only is not None:
-            unknown = set(args.only) - {m["name"] for m in mutants}
-            if unknown:
-                raise RunnerError(f"unknown mutants: {', '.join(sorted(unknown))}")
-            mutants = [m for m in mutants if m["name"] in args.only]
-        tests = spec.get("tests") or ["ClipboardTTSAppTests"]
-        copy, derived_data, logs = out / "copy", out / "derived-data", out / "logs"
-        logs.mkdir(parents=True, exist_ok=True)
-        build_copy(repo, copy, spec.get("untracked", []))
-        # The target state is identified before generation adds files or any mutant is written.
-        report = {"complete": False, "exit": 1, "error": "the runner raised an unexpected exception",
-                  "head": git(repo, "rev-parse", "HEAD", text=True).stdout.strip(),
-                  "spec_sha256": hashlib.sha256(spec_bytes).hexdigest(), "target_sha256": tree_digest(copy),
-                  "tests": tests, "selected": [m["name"] for m in mutants],
-                  "deadlines": {"test_run": args.test_deadline, "short_tool": args.tool_deadline},
-                  "control": None, "mutants": []}
-        plans = plan_edits(copy, mutants)
-    except (RunnerError, subprocess.CalledProcessError, ValueError, OSError) as error:
-        print(f"error: {describe(error)}", file=sys.stderr)
-        return 2
+    # --out is owned from its claim, before anything in it is deleted, until results.json is written:
+    # leaving this block by any path, a refusal, a return, or an exception, releases it.
+    with contextlib.ExitStack() as ownership:
+        try:
+            repo = pathlib.Path(git(here, "rev-parse", "--show-toplevel", text=True).stdout.strip()).resolve()
+            if lies_within(out, repo):
+                raise RunnerError("--out must lie outside the repository")
+            # The reverse matters too: rebuilding the copy deletes what lies inside --out.
+            if lies_within(repo, out):
+                raise RunnerError("--out must not contain the repository")
+            # Artifacts from an earlier invocation must never read as this one's evidence.
+            ownership.enter_context(claim_output(out))
+            if (out / "logs").exists():
+                shutil.rmtree(out / "logs")
+            spec_bytes = pathlib.Path(args.spec).read_bytes()
+            spec = load_spec(spec_bytes)
+            mutants = spec["mutants"]
+            if args.only is not None:
+                unknown = set(args.only) - {m["name"] for m in mutants}
+                if unknown:
+                    raise RunnerError(f"unknown mutants: {', '.join(sorted(unknown))}")
+                mutants = [m for m in mutants if m["name"] in args.only]
+            tests = spec.get("tests") or ["ClipboardTTSAppTests"]
+            copy, derived_data, logs = out / "copy", out / "derived-data", out / "logs"
+            logs.mkdir(parents=True, exist_ok=True)
+            build_copy(repo, copy, spec.get("untracked", []))
+            # The target state is identified before generation adds files or any mutant is written.
+            report = {"complete": False, "exit": 1, "error": "the runner raised an unexpected exception",
+                      "head": git(repo, "rev-parse", "HEAD", text=True).stdout.strip(),
+                      "spec_sha256": hashlib.sha256(spec_bytes).hexdigest(), "target_sha256": tree_digest(copy),
+                      "tests": tests, "selected": [m["name"] for m in mutants],
+                      "deadlines": {"test_run": args.test_deadline, "short_tool": args.tool_deadline},
+                      "control": None, "mutants": []}
+            plans = plan_edits(copy, mutants)
+        except (RunnerError, subprocess.CalledProcessError, ValueError, OSError) as error:
+            print(f"error: {describe(error)}", file=sys.stderr)
+            return 2
 
-    interrupts = Interrupts()
-    signal.signal(signal.SIGINT, interrupts)
-    signal.signal(signal.SIGTERM, interrupts)
-    touched = sorted({target for plan in plans.values() for target in plan})
-    deadlines = (args.test_deadline, args.tool_deadline)
-    pristine = digest(touched)
-    try:
-        verdict, details = run_tests(copy, derived_data, tests, logs / "control.log", args.xcodebuild, args.xcodegen,
-                                     interrupts, pristine, deadlines)
-        report["control"] = {"verdict": verdict, "details": details}
-        print(f"control: {verdict} {'; '.join(details)}".rstrip(), flush=True)
-        if interrupts.received:
-            raise RunnerError(f"interrupted by signal {interrupts.received[0]}")
-        if verdict != "SURVIVED":
-            raise RunnerError("the unmutated control did not pass, so no mutant verdict can be trusted")
-        unmatched = selectors_without_tests((logs / "control.log").read_text(errors="replace"), tests)
-        if unmatched:
-            raise RunnerError(f"the control ran no test for {', '.join(unmatched)}")
-        for mutant in mutants:
-            originals = {}
-            try:
-                apply_plan(plans[mutant["name"]], originals)
-                verdict, details = run_tests(copy, derived_data, tests, logs / f"{mutant['name']}.log",
-                                             args.xcodebuild, args.xcodegen, interrupts, digest(touched), deadlines)
-            finally:
-                for target, original in originals.items():
-                    target.write_bytes(original)
-                # A mutant of a generator input leaves generated files behind unless they are rebuilt, and
-                # a regeneration that fails for any reason leaves them unknown, so its failure stops the run.
-                run_shielded([args.xcodegen, "generate"], args.tool_deadline, cwd=copy)
-                if digest(touched) != pristine:
-                    raise RunnerError(f"the copy was not restored after {mutant['name']}")
+        interrupts = Interrupts()
+        signal.signal(signal.SIGINT, interrupts)
+        signal.signal(signal.SIGTERM, interrupts)
+        touched = sorted({target for plan in plans.values() for target in plan})
+        deadlines = (args.test_deadline, args.tool_deadline)
+        pristine = digest(touched)
+        try:
+            verdict, details = run_tests(copy, derived_data, tests, logs / "control.log", args.xcodebuild, args.xcodegen,
+                                         interrupts, pristine, deadlines)
+            report["control"] = {"verdict": verdict, "details": details}
+            print(f"control: {verdict} {'; '.join(details)}".rstrip(), flush=True)
             if interrupts.received:
-                raise RunnerError(f"interrupted by signal {interrupts.received[0]}; the copy was restored")
-            if verdict == "SURVIVED":
-                # As for the control: a selector none of whose tests ran says nothing about this mutant.
-                log = (logs / f"{mutant['name']}.log").read_text(errors="replace")
-                unmatched = selectors_without_tests(log, tests)
-                if unmatched:
-                    verdict, details = "NO-TESTS", [f"no test ran for {selector}" for selector in unmatched]
-            report["mutants"].append({"name": mutant["name"], "verdict": verdict, "details": details})
-            print(f"{mutant['name']}: {verdict} {'; '.join(details)}".rstrip(), flush=True)
-        unjudged = any(r["verdict"] in ("NO-VERDICT", "NO-TESTS") for r in report["mutants"])
-        report.update(complete=True, exit=1 if unjudged else 0, error=None)
-    except (RunnerError, subprocess.CalledProcessError, OSError) as error:
-        report.update(exit=2, error=describe(error))
-        print(f"error: {report['error']}", file=sys.stderr)
-    finally:
-        # Written however the runner ends once the control began, except by a signal it does not handle.
-        (out / "results.json").write_text(json.dumps(report, indent=2) + "\n")
-    return report["exit"]
+                raise RunnerError(f"interrupted by signal {interrupts.received[0]}")
+            if verdict != "SURVIVED":
+                raise RunnerError("the unmutated control did not pass, so no mutant verdict can be trusted")
+            unmatched = selectors_without_tests((logs / "control.log").read_text(errors="replace"), tests)
+            if unmatched:
+                raise RunnerError(f"the control ran no test for {', '.join(unmatched)}")
+            for mutant in mutants:
+                originals = {}
+                try:
+                    apply_plan(plans[mutant["name"]], originals)
+                    verdict, details = run_tests(copy, derived_data, tests, logs / f"{mutant['name']}.log",
+                                                 args.xcodebuild, args.xcodegen, interrupts, digest(touched), deadlines)
+                finally:
+                    for target, original in originals.items():
+                        target.write_bytes(original)
+                    # A mutant of a generator input leaves generated files behind unless they are rebuilt, and
+                    # a regeneration that fails for any reason leaves them unknown, so its failure stops the run.
+                    run_shielded([args.xcodegen, "generate"], args.tool_deadline, cwd=copy)
+                    if digest(touched) != pristine:
+                        raise RunnerError(f"the copy was not restored after {mutant['name']}")
+                if interrupts.received:
+                    raise RunnerError(f"interrupted by signal {interrupts.received[0]}; the copy was restored")
+                if verdict == "SURVIVED":
+                    # As for the control: a selector none of whose tests ran says nothing about this mutant.
+                    log = (logs / f"{mutant['name']}.log").read_text(errors="replace")
+                    unmatched = selectors_without_tests(log, tests)
+                    if unmatched:
+                        verdict, details = "NO-TESTS", [f"no test ran for {selector}" for selector in unmatched]
+                report["mutants"].append({"name": mutant["name"], "verdict": verdict, "details": details})
+                print(f"{mutant['name']}: {verdict} {'; '.join(details)}".rstrip(), flush=True)
+            unjudged = any(r["verdict"] in ("NO-VERDICT", "NO-TESTS") for r in report["mutants"])
+            report.update(complete=True, exit=1 if unjudged else 0, error=None)
+        except (RunnerError, subprocess.CalledProcessError, OSError) as error:
+            report.update(exit=2, error=describe(error))
+            print(f"error: {report['error']}", file=sys.stderr)
+        finally:
+            # Written however the runner ends once the control began, except by a signal it does not handle.
+            (out / "results.json").write_text(json.dumps(report, indent=2) + "\n")
+        return report["exit"]
 
 if __name__ == "__main__":
     sys.exit(main())

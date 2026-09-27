@@ -6,6 +6,9 @@ the two that mislead an exit-code or summary reading. The end-to-end cases run t
 inside a throwaway git repository whose `xcodebuild` and `xcodegen` are stand-ins: the stand-in
 test run reads the scratch copy and prints the log a real run would print for what it finds, so
 each case proves which state the copy was in when the tests ran and after the runner finished.
+Two ownership cases instead claim an output directory and run the runner repeatedly within one
+process, so a claim is shown released however it ends without the process exit that would
+release it anyway.
 """
 
 import ast
@@ -220,6 +223,53 @@ while not os.path.exists(os.environ.get("RUNNER_VERIFY_RELEASE", "")) and time.m
 # What a terminal's Ctrl-C does, sent from inside a stand-in tool that the runner started: signal the runner's
 # whole process group, which holds the tool too unless the runner started it outside that group.
 GROUP_SIGINT = "kill -s INT -- -$(ps -o pgid= -p $PPID | tr -d ' ')\n"
+# Runs the fixture's runner several times in one process, one way of ending after another, and notes after each run
+# whether that process can claim its output again. Every serialization of a report, which happens only as a run
+# writes its results.json, also notes whether the claim was still held then.
+IN_PROCESS_RUNS = r'''
+import importlib.util, json, pathlib, sys, types
+sys.dont_write_bytecode = True
+runner_path, out, tools, spec, broken_spec, result = sys.argv[1:]
+module_spec = importlib.util.spec_from_file_location("run_mutants", runner_path)
+runner = importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(runner)
+
+def claimable():
+    try:
+        with runner.claim_output(pathlib.Path(out)):
+            return True
+    except runner.RunnerError as error:
+        return str(error)
+
+held_while_reporting = []
+def dumps(*args, **kwargs):
+    held_while_reporting.append(claimable())
+    return json.dumps(*args, **kwargs)
+runner.json = types.SimpleNamespace(loads=json.loads, dumps=dumps)
+
+class Unexpected(Exception):
+    pass
+def unexpected(log):
+    raise Unexpected("raised inside the campaign")
+
+runs = []
+def run(label, spec, *extra):
+    try:
+        code = runner.main([spec, "--out", out, "--xcodebuild", f"{tools}/xcodebuild", "--xcodegen", f"{tools}/xcodegen",
+                            *extra])
+    except Unexpected:
+        code = "raised"
+    runs.append([label, code, claimable()])
+
+run("refused after the claim", spec, "--only", "nope")
+run("failed in the campaign", broken_spec)
+classify, runner.classify = runner.classify, unexpected
+run("raised in the campaign", spec)
+runner.classify = classify
+run("succeeded", spec)
+run("succeeded again", spec)
+pathlib.Path(result).write_text(json.dumps({"runs": runs, "held_while_reporting": held_while_reporting}))
+'''
 
 
 def load_runner():
@@ -460,6 +510,73 @@ def end_to_end_cases():
             stdout, stderr = first.communicate(timeout=60)
         assert first.returncode == 0 and "kill: KILLED" in stdout, (first.returncode, stderr)
         assert json.loads((out / "results.json").read_text())["complete"]
+
+    def an_output_claim_is_released_however_it_ends(root):
+        runner = load_runner()
+        out = root / "out"
+
+        def claimable():
+            """Whether this process can claim out now; a claim it takes is released again at once."""
+            try:
+                with runner.claim_output(out):
+                    return True
+            except runner.RunnerError as error:
+                assert "in use by another run" in str(error), error
+                return False
+
+        def open_descriptors():
+            return len(os.listdir("/dev/fd"))
+
+        descriptors = open_descriptors()
+        with runner.claim_output(out):
+            (out / "copy").mkdir()  # so that only the ownership marker lets the directory be claimed again
+            assert not claimable(), "a claim did not exclude another while it was held"
+        assert claimable(), "a claim whose block returned was not released"
+
+        class Failure(Exception):
+            pass
+
+        try:
+            with runner.claim_output(out):
+                raise Failure()
+        except Failure:
+            pass
+        assert claimable(), "a claim whose block raised was not released"
+        # The earlier results go only once the lock is taken, so their removal shows the refusal came after it.
+        (out / "results.json").write_text("{}\n")
+        (out / "logs").symlink_to(root)
+        try:
+            with runner.claim_output(out):
+                raise AssertionError("a symlinked child was accepted")
+        except runner.RunnerError as error:
+            assert "is a symlink" in str(error), error
+        assert not (out / "results.json").exists(), "the refusal came before the lock was taken"
+        (out / "logs").unlink()
+        assert claimable(), "a claim refused after it took the lock was not released"
+        assert open_descriptors() == descriptors, "a claim left a descriptor open"
+
+    def a_run_releases_its_output_however_it_ends_within_one_process(root):
+        repo, tools = make_repo(root)
+        specs = {}
+        for name, mutants in (("spec", [mutant("kill", "KILL")]), ("broken", [
+                {"name": "broken", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_BROKEN"}]}])):
+            specs[name] = root / f"{name}.json"
+            specs[name].write_text(json.dumps({"tests": ["ClipboardTTSAppTests/ASuite"], "untracked": ["Tests/New.swift"],
+                                               "mutants": mutants}))
+        out, noted = root / "out", root / "noted.json"
+        result = subprocess.run([sys.executable, "-c", IN_PROCESS_RUNS, str(repo / "run-mutants.py"), str(out), str(tools),
+                                 str(specs["spec"]), str(specs["broken"]), str(noted)],
+                                capture_output=True, text=True, timeout=60,
+                                env=dict(os.environ, RUNNER_VERIFY_RECORD=str(root / "record.txt")))
+        assert result.returncode == 0 and noted.exists(), (result.returncode, result.stdout, result.stderr)
+        runs = json.loads(noted.read_text())
+        assert runs["runs"] == [["refused after the claim", 2, True], ["failed in the campaign", 2, True],
+                                ["raised in the campaign", "raised", True], ["succeeded", 0, True],
+                                ["succeeded again", 0, True]], (runs, result.stderr)
+        assert "unknown mutants: nope" in result.stderr and "SPEC_BROKEN is not a valid spec" in result.stderr, result.stderr
+        # Four runs reached their report; each was still the output's owner while writing it.
+        assert len(runs["held_while_reporting"]) == 4, runs
+        assert all("in use by another run" in str(held) for held in runs["held_while_reporting"]), runs
 
     def only_selects(root):
         repo, tools = make_repo(root)
@@ -1414,6 +1531,7 @@ def end_to_end_cases():
 
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
+              an_output_claim_is_released_however_it_ends, a_run_releases_its_output_however_it_ends_within_one_process,
               a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
               ambiguous_edit_refuses_before_building, missing_edit_refuses_before_building,
               out_inside_repository_refuses, ignored_file_cannot_be_named, malformed_specs_refuse,
