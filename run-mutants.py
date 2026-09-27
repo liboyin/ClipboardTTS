@@ -27,8 +27,9 @@ DIR must lie outside the repository, must not contain it, and must be new, empty
 runner created. The copy, derived data, per-mutant logs, and a results.json are written there, and
 the copy stays for inspection. results.json records whether the run completed, its exit code,
 HEAD, digests of the spec and of the copied target state, the deadlines it ran under, the control's
-verdict, and each judged mutant; a run refused before its control writes none. Exit 0 means every mutant received a
-verdict, whatever it was; 1 means a mutant got no verdict or ran no test for some selector; 2
+verdict, and each finished mutant's result, an unjudged one included; a run refused before its
+control writes none. Exit 0 means every mutant received a verdict, whatever it was; 1 means a mutant
+got no verdict, from a run cut short or a failure naming no test, or ran no test for some selector; 2
 means the runner refused the run or was interrupted by SIGINT or SIGTERM once the control began.
 Either signal before then ends the runner by that signal, before any mutant is applied; any other
 signal, such as SIGHUP, ends it at once and can leave the copy mutated until the next run rebuilds
@@ -55,6 +56,11 @@ TERMINAL_MARKERS = ("** TEST SUCCEEDED **", "** TEST FAILED **")
 BUILD_FAILURE_MARKERS = ("** BUILD FAILED **", "Testing cancelled because the build failed",
                          "The following build commands failed:")
 NAMED_FAILURE = re.compile(r"error: -\[([^\s\]]+) ([^\s\]]+)\]")
+# Xcode 27 ends a failed run's log with this heading, one tab-indented "Suite.test()" line per failing test,
+# which omits the module, and a blank line above the final marker. It lists a test that crashed, exited, or
+# exceeded an enabled execution allowance, which no "error: -[…]" line names.
+SUMMARY_HEADING = "Failing tests:"
+SUMMARY_ENTRY = re.compile(r"\t(\S+)\.([^.\s]+)\(\)")
 # Xcode 27 writes "Executed 3 tests, with 2 tests skipped and 0 failures" when any test skipped; the
 # executed count includes the skipped ones.
 EXECUTED = re.compile(r"Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?\d+ failures?")
@@ -82,25 +88,29 @@ class RunnerError(Exception):
 def classify(log):
     """Returns (verdict, details) for one xcodebuild test log.
 
-    `KILLED` names every test the log reports failing, `SURVIVED` requires the run to have
-    finished successfully having executed at least one test that was not skipped, `NO-TESTS` is a
-    success that executed none (a selector that matched nothing), `BUILD-FAILED` carries the first
-    build errors, `NO-VERDICT` covers a log with no terminal marker (still being written, or cut
-    short), and `FAILED-UNNAMED` covers a finished failing run that names no test, such as a crash
-    between tests.
+    `KILLED` names every test a failed run reports failing, in an `error: -[…]` line or in Xcode's
+    `Failing tests:` summary, which alone names a test that crashed, exited, or exceeded an enabled
+    execution allowance. `SURVIVED` requires the run to have finished successfully having executed
+    at least one test that was not skipped, `NO-TESTS` is a success that executed none (a selector
+    that matched nothing), `BUILD-FAILED` carries the first build errors, `NO-VERDICT` covers a log
+    with no terminal marker (still being written, or cut short), and `FAILED-UNNAMED` covers a
+    finished failing run that names no test, such as a crash in a suite's class-level setUp or
+    tearDown; like `NO-VERDICT`, it leaves a mutant unjudged.
     """
+    lines = log.splitlines()
     # Only a standalone marker line counts, and the last one decides: test output can contain the
     # marker's text, and an earlier marker can precede the run's real end.
-    markers = [line.strip() for line in log.splitlines() if line.strip() in TERMINAL_MARKERS]
+    markers = [index for index, line in enumerate(lines) if line.strip() in TERMINAL_MARKERS]
     if not markers:
         return "NO-VERDICT", []
-    if markers[-1] == "** TEST SUCCEEDED **":
+    if lines[markers[-1]].strip() == "** TEST SUCCEEDED **":
         # A passing run's output can contain failure-shaped text; only a failed run is read for it.
         # The last summary is the whole run's; per-suite summaries precede it. Skipped tests ran nothing.
         counts = EXECUTED.findall(log)
         ran = int(counts[-1][0]) - int(counts[-1][1] or 0) if counts else 0
         return ("SURVIVED", []) if ran > 0 else ("NO-TESTS", [])
-    named = sorted({f"{suite} {test}" for suite, test in NAMED_FAILURE.findall(log)})
+    named = {f"{suite} {test}" for suite, test in NAMED_FAILURE.findall(log)}
+    named = sorted(named | summarized_failures(log, lines[:markers[-1]]))
     if named:
         return "KILLED", named
     if any(marker in log for marker in BUILD_FAILURE_MARKERS):
@@ -112,6 +122,32 @@ def classify(log):
                     errors.append(text)
         return "BUILD-FAILED", errors[:5]
     return "FAILED-UNNAMED", []
+
+
+def summarized_failures(log, preceding):
+    """Names each test listed by the `Failing tests:` summary that ends preceding, as an `error: -[…]` line would.
+
+    preceding holds the log's lines above its final marker. Only a summary that ends them, blank
+    lines aside, is the run's own: test output can print the same text, but only while tests run,
+    and Xcode's own closing lines follow it. The summary omits the module, so each test takes the
+    module of its own start line; a test that no start line names keeps the summary's `Suite test`.
+    """
+    index = len(preceding)
+    while index and not preceding[index - 1].strip():
+        index -= 1
+    entries = []
+    while index and (entry := SUMMARY_ENTRY.fullmatch(preceding[index - 1].rstrip())):
+        entries.append(entry.groups())
+        index -= 1
+    if not index or preceding[index - 1].rstrip() != SUMMARY_HEADING:
+        return set()
+    modules = {}
+    for module, suite, test in STARTED.findall(log):
+        modules.setdefault((suite, test), set()).add(module)
+    names = set()
+    for suite, test in entries:
+        names |= {f"{module}.{suite} {test}" for module in modules.get((suite, test), ())} or {f"{suite} {test}"}
+    return names
 
 
 def selectors_without_tests(log, tests):
@@ -624,7 +660,7 @@ def main(argv=None):
                         verdict, details = "NO-TESTS", [f"no test ran for {selector}" for selector in unmatched]
                 report["mutants"].append({"name": mutant["name"], "verdict": verdict, "details": details})
                 print(f"{mutant['name']}: {verdict} {'; '.join(details)}".rstrip(), flush=True)
-            unjudged = any(r["verdict"] in ("NO-VERDICT", "NO-TESTS") for r in report["mutants"])
+            unjudged = any(r["verdict"] in ("NO-VERDICT", "NO-TESTS", "FAILED-UNNAMED") for r in report["mutants"])
             report.update(complete=True, exit=1 if unjudged else 0, error=None)
         except (RunnerError, subprocess.CalledProcessError, OSError) as error:
             report.update(exit=2, error=describe(error))

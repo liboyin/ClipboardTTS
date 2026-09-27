@@ -31,6 +31,27 @@ RUNNER = HERE / "run-mutants.py"
 SUCCEEDED = "Test Suite 'All tests' passed.\n\t Executed 3 tests, with 0 failures (0 unexpected)\n** TEST SUCCEEDED **\n"
 NAMED = "/x/Tests/A.swift:9: error: -[ClipboardTTSAppTests.ASuite testGuard] : XCTAssertTrue failed\n"
 
+
+# Shapes of real Xcode 27.0 logs from NB34's probes, paths shortened: after its last test, a run prints its own closing
+# lines, then, if it failed, a `Failing tests:` summary spelling each test `Suite.test()` without the module, then the
+# final marker. A crash, an exit, or a test past an enabled execution allowance restarts the host with no error line.
+def started(test, suite="ProbeTests"):
+    return f"Test Case '-[ClipboardTTSAppTests.{suite} {test}]' started.\n"
+
+
+RESTARTED = ("\nRestarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.\n\n"
+             + started("testPasses") + "Test Case '-[ClipboardTTSAppTests.ProbeTests testPasses]' passed (0.001 seconds).\n"
+             "\t Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.002) seconds\n")
+CLOSING = ("2026-09-28 05:20:26.112 xcodebuild[97704:44609274] [MT] IDETestOperationsObserverDebug: 19.825 sec, +19.825 sec "
+           "-- end\n\nTest session results, code coverage, and logs:\n\t/x/Logs/Test/Test-ClipboardTTSApp.xcresult\n\n")
+SPOOF = "Failing tests:\n\tSpoofSuite.testSpoofed()\n"  # what a test itself printed
+
+
+def failed_run(body, *summary):
+    listed = "Failing tests:\n" + "".join(f"\t{entry}\n" for entry in summary) + "\n" if summary else ""
+    return body + CLOSING + listed + "** TEST FAILED **\n\nTesting started\n"
+
+
 CLASSIFY_CASES = [
     ("a passing run survives", SUCCEEDED, ("SURVIVED", [])),
     ("an expected failure in a passing run is not a kill",
@@ -88,6 +109,67 @@ CLASSIFY_CASES = [
     ("a finished failure that names no test is not a kill",
      "Restarting after unexpected exit, crash, or test timeout\n** TEST FAILED **\n",
      ("FAILED-UNNAMED", [])),
+    ("a test that crashes is killed by the summary naming it (Xcode 27's fatalError log)",
+     failed_run(started("testFatalError") + "ClipboardTTSAppTests/ProbeTests.swift:11: Fatal error: probe fatalError\n"
+                + RESTARTED, "ProbeTests.testFatalError()"),
+     ("KILLED", ["ClipboardTTSAppTests.ProbeTests testFatalError"])),
+    ("a test that exits is killed by the summary naming it (Xcode 27's exit log)",
+     failed_run(started("testExits") + RESTARTED, "ProbeTests.testExits()"),
+     ("KILLED", ["ClipboardTTSAppTests.ProbeTests testExits"])),
+    ("a test past an enabled allowance is killed by the summary naming it (Xcode 27's timeout log)",
+     failed_run(started("testHangs") + "Test Case '-[ClipboardTTSAppTests.ProbeTests testHangs]' exceeded execution time "
+                "allowance of 1 minute. The test may have hung; check Xcode's test report for additional diagnostics.\n"
+                + RESTARTED, "ProbeTests.testHangs()"),
+     ("KILLED", ["ClipboardTTSAppTests.ProbeTests testHangs"])),
+    ("a failure named by its error line and the summary is reported once (Xcode 27's assertion log)",
+     failed_run(started("testAssertionFails") + "/x/Tests/ProbeTests.swift:7: error: -[ClipboardTTSAppTests.ProbeTests "
+                "testAssertionFails] : failed - probe assertion\n", "ProbeTests.testAssertionFails()"),
+     ("KILLED", ["ClipboardTTSAppTests.ProbeTests testAssertionFails"])),
+    ("every test the summary lists joins those error lines name, and a summary a test printed does not "
+     "(Xcode 27's log of several suites)",
+     failed_run(started("testOtherAssertionFails", "ProbeOtherTests") + "/x/Tests/ProbeTests.swift:37: error: "
+                "-[ClipboardTTSAppTests.ProbeOtherTests testOtherAssertionFails] : failed - probe other assertion\n"
+                + started("testOtherFatalError", "ProbeOtherTests") + RESTARTED + started("testAssertionFails")
+                + "/x/Tests/ProbeTests.swift:7: error: -[ClipboardTTSAppTests.ProbeTests testAssertionFails] : failed\n"
+                + started("testExits") + RESTARTED + started("testFatalError") + RESTARTED
+                + started("testPrintsSpoofedSummary") + SPOOF,
+                "ProbeOtherTests.testOtherAssertionFails()", "ProbeOtherTests.testOtherFatalError()",
+                "ProbeTests.testAssertionFails()", "ProbeTests.testExits()", "ProbeTests.testFatalError()"),
+     ("KILLED", ["ClipboardTTSAppTests.ProbeOtherTests testOtherAssertionFails",
+                 "ClipboardTTSAppTests.ProbeOtherTests testOtherFatalError", "ClipboardTTSAppTests.ProbeTests testAssertionFails",
+                 "ClipboardTTSAppTests.ProbeTests testExits", "ClipboardTTSAppTests.ProbeTests testFatalError"])),
+    ("a summary a test printed in a failed run without one of its own is not a kill",
+     failed_run(started("testPrintsSpoofedSummary") + SPOOF + "ClipboardTTSAppTests/ProbeClassTests.swift:7: Fatal error: "
+                "probe class tearDown\n" + RESTARTED),
+     ("FAILED-UNNAMED", [])),
+    ("a summary a test printed above a marker it printed is not the run's",
+     failed_run(started("testPrintsSpoofedSummary") + SPOOF + "\n** TEST FAILED **\nClipboardTTSAppTests/ProbeClassTests.swift:7: "
+                "Fatal error: probe class tearDown\n" + RESTARTED),
+     ("FAILED-UNNAMED", [])),
+    ("a summary a test printed in a passing run is not a kill (Xcode 27's log)",
+     started("testPrintsSpoofedSummary") + SPOOF + SUCCEEDED, ("SURVIVED", [])),
+    ("a summary directly above a success marker is not a kill",
+     "\t Executed 3 tests, with 0 failures (0 unexpected)\n\nFailing tests:\n\tASuite.testGuard()\n\n** TEST SUCCEEDED **\n",
+     ("SURVIVED", [])),
+    ("summary-shaped lines without the summary's heading are not a summary",
+     started("testExits") + RESTARTED + CLOSING + "\tProbeTests.testExits()\n\n** TEST FAILED **\n", ("FAILED-UNNAMED", [])),
+    ("a summarized test takes the module of its own start line, not another test's",
+     failed_run(started("testGuard", "ASuite") + started("testOther") + "Test Case '-[OtherTests.ProbeTests testExits]' "
+                "started.\n" + RESTARTED, "ProbeTests.testExits()"),
+     ("KILLED", ["OtherTests.ProbeTests testExits"])),
+    ("a summarized test that no start line names keeps the summary's spelling",
+     failed_run(RESTARTED, "ProbeTests.testNeverStarted()"), ("KILLED", ["ProbeTests testNeverStarted"])),
+    ("a crash in a suite's class-level setUp names no test (Xcode 27's log)",
+     "Test Suite 'ProbeClassSetUpTests' started at 2026-09-28 05:24:22.614.\n"
+     "ClipboardTTSAppTests/ProbeClassTests.swift:18: Fatal error: probe class setUp\n" + CLOSING
+     + "Testing failed:\n\tRun test suite ProbeClassSetUpTests encountered an error (Exceeded max restart count of 2. "
+     "(Underlying Error: Crash: ClipboardTTSApp at -[XCTContext _runActivityNamed:type:block:]))\n\n** TEST FAILED **\n",
+     ("FAILED-UNNAMED", [])),
+    ("a lint failure stays a build failure (Xcode 27's log, whose Testing failed block precedes the marker)",
+     "/x/Tests/ProbeClassTests.swift:6:5: error: Static Over Final Class Violation (static_over_final_class)\n" + CLOSING
+     + "Testing failed:\n\tStatic Over Final Class Violation (static_over_final_class)\n\tTesting cancelled because the "
+     "build failed.\n\n** TEST FAILED **\n\n\nThe following build commands failed:\n\tPhaseScriptExecution SwiftLint\n",
+     ("BUILD-FAILED", ["/x/Tests/ProbeClassTests.swift:6:5: error: Static Over Final Class Violation (static_over_final_class)"])),
 ]
 
 FAKE_XCODEBUILD = r'''#!/usr/bin/env python3
@@ -133,6 +215,11 @@ else:
 assert not pathlib.Path("ignored.log").exists(), "ignored content was copied"
 if "CONTROL_FAILS" in target:
     print("/x/Tests/A.swift:1: error: -[S testControl] : failed\n** TEST FAILED **")
+elif "SUMMARIZED" in target:  # a test crashes, which only Xcode's own summary names
+    print("Test Case '-[ClipboardTTSAppTests.ASuite testCrashes]' started.\nA.swift:9: Fatal error: crashed\n\n"
+          "Restarting after unexpected exit, crash, or test timeout; summary will include totals from previous launches.\n\n"
+          "Test session results, code coverage, and logs:\n\t/x/Test.xcresult\n\nFailing tests:\n\tASuite.testCrashes()\n\n"
+          "** TEST FAILED **")
 elif "CRASH" in target:
     print("Restarting after unexpected exit, crash, or test timeout\n** TEST FAILED **")
 elif "KILL" in target:
@@ -432,10 +519,26 @@ def end_to_end_cases():
     def every_judged_verdict_exits_zero(root):
         repo, tools = make_repo(root)
         result, _, _ = run_runner(root, repo, tools, [mutant("kill", "KILL"), mutant("survive", "SURVIVOR"),
-                                                       mutant("build", "BUILD"), mutant("crash", "CRASH")])
-        assert result.returncode == 0, f"a build failure or an unnamed failure is a verdict: {result.returncode}"
+                                                       mutant("build", "BUILD"), mutant("summarized", "SUMMARIZED")])
+        assert result.returncode == 0, f"a build failure or a kill only the summary names is a verdict: {result.returncode}"
         lines = dict(line.split(":", 1) for line in result.stdout.splitlines())
-        assert lines["build"].strip().startswith("BUILD-FAILED") and lines["crash"].strip() == "FAILED-UNNAMED", lines
+        assert lines["build"].strip().startswith("BUILD-FAILED"), lines
+        assert lines["summarized"].strip() == "KILLED ClipboardTTSAppTests.ASuite testCrashes", lines
+
+    def a_failure_that_names_no_test_is_unjudged(root):
+        # D23: a crash outside any test, which Xcode's summary does not name, says nothing about the mutant.
+        repo, tools = make_repo(root)
+        result, out, runs = run_runner(root, repo, tools, [mutant("crash", "CRASH"), mutant("later", "KILL")])
+        assert result.returncode == 1, f"an unnamed failure is unjudged: {result.returncode}: {result.stderr}"
+        assert result.stdout == "control: SURVIVED\ncrash: FAILED-UNNAMED\nlater: KILLED ClipboardTTSAppTests.ASuite testGuard\n", (
+            result.stdout)
+        assert result.stderr == "" and [r[0] for r in runs] == ["let value = ORIGINAL", "let value = CRASH", "let value = KILL"], (
+            result.stderr, runs)
+        report = json.loads((out / "results.json").read_text())
+        assert report["complete"] and report["exit"] == 1 and report["error"] is None, report
+        assert [(r["name"], r["verdict"], r["details"]) for r in report["mutants"]] == [
+            ("crash", "FAILED-UNNAMED", []), ("later", "KILLED", ["ClipboardTTSAppTests.ASuite testGuard"])], report
+        assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL\n"
 
     def omitted_tests_and_untracked_take_their_defaults(root):
         repo, tools = make_repo(root)
@@ -1651,7 +1754,8 @@ def end_to_end_cases():
         report = json.loads((out / "results.json").read_text())
         assert report["deadlines"] == {"test_run": longest, "short_tool": 2147483}, report
 
-    checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
+    checks = (verdicts_and_restore, every_judged_verdict_exits_zero, a_failure_that_names_no_test_is_unjudged,
+              omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               an_output_claim_is_released_however_it_ends, a_run_releases_its_output_however_it_ends_within_one_process,
               a_mutant_of_two_files_is_tested_and_restored_whole,
