@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import resource
 import shutil
 import signal
 import subprocess
@@ -325,7 +326,8 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
 
 
 def run_runner(root, repo, tools, mutants, extra=(), out=None, untracked=("Tests/New.swift",),
-               tests=("ClipboardTTSAppTests/ASuite",), ignore_sigint=False, own_session=False, env=None):
+               tests=("ClipboardTTSAppTests/ASuite",), ignore_sigint=False, own_session=False, env=None,
+               file_size_limit=None):
     spec = root / "spec.json"
     spec.write_text(json.dumps({"tests": list(tests), "untracked": list(untracked),
                                 "mutants": mutants}))
@@ -339,13 +341,16 @@ def run_runner(root, repo, tools, mutants, extra=(), out=None, untracked=("Tests
             signal.signal(signal.SIGINT, signal.SIG_IGN)
         if own_session:  # a hangup's default action, as a terminal's job has, even if this verifier runs under nohup
             signal.signal(signal.SIGHUP, signal.SIG_DFL)
+        if file_size_limit:  # a write past it stores what fits and then fails with EFBIG, as on a full disk
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (file_size_limit, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
 
     # own_session starts the runner as a terminal starts a job, as its own process group, which the stand-ins can
     # then signal as the terminal would without reaching this verifier.
     result = subprocess.run([sys.executable, str(repo / "run-mutants.py"), str(spec), "--out", str(out),
                              "--xcodebuild", str(tools / "xcodebuild"), "--xcodegen", str(tools / "xcodegen"), *extra],
                             capture_output=True, text=True, env=env, timeout=60, start_new_session=own_session,
-                            preexec_fn=prepare if ignore_sigint or own_session else None)
+                            preexec_fn=prepare if ignore_sigint or own_session or file_size_limit else None)
     runs = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     return result, out, runs
 
@@ -439,6 +444,33 @@ def end_to_end_cases():
         assert "PROJECT: name: SPEC_TWO" in (out / "logs" / "two.files_a.log").read_text(), "the first file's edit was not applied"
         for path in ("project.yml", "Sources/Target.swift"):
             assert (out / "copy" / path).read_bytes() == (repo / path).read_bytes(), f"{path} was not restored"
+
+    def a_mutant_whose_write_fails_partway_is_restored_and_stops_the_run(root):
+        # The later target cannot be written once the earlier one has been: it is read-only, or its write stops at the
+        # file size limit partway through, as on a full disk. The copy stays for inspection, so neither may be left
+        # mutated, and the run stops with no verdict for the mutant, as for any refusal after the control.
+        for failure, reason in (("read-only", "Permission denied"), ("size-limit", "File too large")):
+            base = root / failure
+            repo, tools = make_repo(base)
+            new, limit = "KILL", None
+            if failure == "read-only":
+                (repo / "Sources" / "Target.swift").chmod(0o444)  # the copy keeps the mode
+            else:
+                limit = 1 << 20
+                new = "KILL " + "x" * (2 * limit)
+            two = {"name": "two", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_TWO"},
+                                            {"path": "Sources/Target.swift", "old": "ORIGINAL", "new": new}]}
+            result, out, runs = run_runner(base, repo, tools, [two, mutant("later", "SURVIVOR")], file_size_limit=limit)
+            for path in ("project.yml", "Sources/Target.swift"):
+                assert (out / "copy" / path).read_bytes() == (repo / path).read_bytes(), f"{failure}: {path} was left mutated"
+            assert result.returncode == 2 and "error: [Errno" in result.stderr and reason in result.stderr, (
+                failure, result.returncode, result.stderr)
+            assert "Traceback" not in result.stderr and result.stdout == "control: SURVIVED\n", (failure, result.stdout)
+            assert [r[0] for r in runs] == ["let value = ORIGINAL"], f"{failure}: a mutant was tested: {runs}"
+            assert (out / "copy" / "Generated.txt").read_text() == "name: SPEC_ORIGINAL\n", failure
+            report = json.loads((out / "results.json").read_text())
+            assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], (failure, report)
+            assert reason in report["error"] and report["control"] == {"verdict": "SURVIVED", "details": []}, (failure, report)
 
     def results_identify_their_run(root):
         repo, tools = make_repo(root)
@@ -1532,7 +1564,9 @@ def end_to_end_cases():
     checks = (verdicts_and_restore, every_judged_verdict_exits_zero, omitted_tests_and_untracked_take_their_defaults,
               results_identify_their_run, a_second_run_on_a_directory_in_use_is_refused,
               an_output_claim_is_released_however_it_ends, a_run_releases_its_output_however_it_ends_within_one_process,
-              a_mutant_of_two_files_is_tested_and_restored_whole, only_selects, interrupted_run_restores, failing_control_refuses,
+              a_mutant_of_two_files_is_tested_and_restored_whole,
+              a_mutant_whose_write_fails_partway_is_restored_and_stops_the_run, only_selects, interrupted_run_restores,
+              failing_control_refuses,
               ambiguous_edit_refuses_before_building, missing_edit_refuses_before_building,
               out_inside_repository_refuses, ignored_file_cannot_be_named, malformed_specs_refuse,
               edit_paths_stay_inside_the_copy, edits_apply_in_order_as_specified, a_mutant_that_runs_no_test_is_unjudged,
