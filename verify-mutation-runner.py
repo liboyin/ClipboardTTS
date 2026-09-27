@@ -262,8 +262,8 @@ runner.json = types.SimpleNamespace(loads=json.loads, dumps=dumps)
 
 class Unexpected(Exception):
     pass
-def unexpected(log):
-    raise Unexpected("raised inside the campaign")
+def unexpected(*_):
+    raise Unexpected("raised by a stand-in for a bug in the runner")
 
 runs = []
 def run(label, spec, *extra):
@@ -275,6 +275,10 @@ def run(label, spec, *extra):
     runs.append([label, code, claimable()])
 
 run("refused after the claim", spec, "--only", "nope")
+# Only the errors the runner expects before the control are refusals; any other exception there is a bug to surface.
+load_spec, runner.load_spec = runner.load_spec, unexpected
+run("raised before the control", spec)
+runner.load_spec = load_spec
 run("failed in the campaign", broken_spec)
 classify, runner.classify = runner.classify, unexpected
 run("raised in the campaign", spec)
@@ -617,7 +621,8 @@ def end_to_end_cases():
                                 env=dict(os.environ, RUNNER_VERIFY_RECORD=str(root / "record.txt")))
         assert result.returncode == 0 and noted.exists(), (result.returncode, result.stdout, result.stderr)
         runs = json.loads(noted.read_text())
-        assert runs["runs"] == [["refused after the claim", 2, True], ["failed in the campaign", 2, True],
+        assert runs["runs"] == [["refused after the claim", 2, True], ["raised before the control", "raised", True],
+                                ["failed in the campaign", 2, True],
                                 ["raised in the campaign", "raised", True], ["succeeded", 0, True],
                                 ["succeeded again", 0, True]], (runs, result.stderr)
         assert "unknown mutants: nope" in result.stderr and "SPEC_BROKEN is not a valid spec" in result.stderr, result.stderr
@@ -1247,6 +1252,31 @@ def end_to_end_cases():
         assert result.returncode == 2 and "is not a directory" in result.stderr, (result.returncode, result.stderr)
         assert runs == [] and out.read_text() == "keep\n"
 
+    def an_os_error_before_the_control_is_a_refusal(root):
+        # A spec that is missing or unreadable, met once --out is claimed, and an --out that cannot be created, met while
+        # claiming it: each is refused as a bad input is, not ended with a traceback and the exit an unjudged mutant has.
+        repo, tools = make_repo(root)
+        spec, record = root / "spec.json", root / "record.txt"
+        spec.write_text(json.dumps({"tests": ["ClipboardTTSAppTests/ASuite"], "untracked": ["Tests/New.swift"],
+                                    "mutants": [mutant("kill", "KILL")]}))
+        unreadable = root / "unreadable.json"
+        unreadable.write_bytes(spec.read_bytes())
+        unreadable.chmod(0)
+        (root / "file").write_text("")
+        for spec_path, out, cause, reason in (
+                (root / "missing.json", root / "out-missing", "missing.json", "No such file or directory"),
+                (unreadable, root / "out-unreadable", "unreadable.json", "Permission denied"),
+                (spec, root / "file" / "out", "file/out", "Not a directory")):
+            record.write_text("")
+            result = subprocess.run([sys.executable, str(repo / "run-mutants.py"), str(spec_path), "--out", str(out),
+                                     "--xcodebuild", str(tools / "xcodebuild"), "--xcodegen", str(tools / "xcodegen")],
+                                    capture_output=True, text=True, timeout=60,
+                                    env=dict(os.environ, RUNNER_VERIFY_RECORD=str(record)))
+            assert result.returncode == 2 and result.stderr.startswith("error: "), (cause, result.returncode, result.stderr)
+            assert reason in result.stderr and cause in result.stderr and "Traceback" not in result.stderr, (
+                cause, result.stderr)
+            assert record.read_text() == "" and not (out / "results.json").exists(), (cause, record.read_text())
+
     def a_signal_during_the_control_stops_it(root):
         for marker, signal_name in (("INTERRUPT", "SIGTERM"), ("CTRLC", "SIGINT")):
             repo, tools = make_repo(root / marker, f"let value = ORIGINAL // {marker}\n")
@@ -1657,8 +1687,8 @@ def end_to_end_cases():
               a_tracked_file_replaced_by_a_directory_refuses, a_staged_rename_leaves_no_old_path,
               a_rerun_rebuilds_the_copy_from_the_current_target,
               a_tracked_symlink_replaced_by_a_file_is_not_written_through, an_output_path_that_is_a_file_refuses,
-              a_signal_during_the_control_stops_it, a_runner_outside_a_repository_refuses,
-              paths_git_quotes_reach_the_copy, an_empty_or_new_nested_output_directory_is_accepted,
+              an_os_error_before_the_control_is_a_refusal, a_signal_during_the_control_stops_it,
+              a_runner_outside_a_repository_refuses, paths_git_quotes_reach_the_copy, an_empty_or_new_nested_output_directory_is_accepted,
               a_mutant_that_skips_a_selected_test_is_unjudged, every_indexed_path_is_copied_as_the_working_tree_holds_it,
               a_tracked_submodule_is_refused, an_unmerged_path_is_copied_once,
               a_terminal_interrupt_during_generation_before_a_test_run_lets_it_finish,
