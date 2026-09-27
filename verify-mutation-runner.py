@@ -102,9 +102,21 @@ for selector in (t.split(":", 1)[1] for t in tests):
     if "Nope" not in selector:  # a misspelled selector matches nothing, as in a real run
         parts = selector.split("/")
         case = (parts + ["DefaultSuite", "testOne"])[:3] if len(parts) < 3 else parts
-        print(f"Test Case '-[{case[0]}.{case[1]} {case[2].removesuffix('()')}]' started.")
+        started = f"Test Case '-[{case[0]}.{case[1]} {case[2].removesuffix('()')}]' started.\n".encode()
+        if "GARBLE_B" in target:  # a test whose name the output spells with a byte that is not UTF-8
+            started = started.replace(b"BSuite", b"B\xffSuite")
+        sys.stdout.flush()
+        sys.stdout.buffer.write(started)
+        sys.stdout.flush()
         if "Skipped" in selector or ("SKIP_B" in target and "BSuite" in selector):  # skips as XCTSkip reports it
             print(f"Test Case '-[{case[0]}.{case[1]} {case[2].removesuffix('()')}]' skipped (0.001 seconds).")
+if "UNDECODABLE" in target:  # test output need not be UTF-8, and a test's name need not be ASCII
+    sys.stdout.flush()
+    sys.stdout.buffer.write(b"printed: \xff\n")
+    if "KILL" in target:
+        sys.stdout.buffer.write("/x/Tests/A.swift:9: error: -[ClipboardTTSAppTests.ÉtéSuite ".encode()
+                                + b"test\xffOne] : failed\n")
+    sys.stdout.flush()
 print("PROJECT:", pathlib.Path("project.yml").read_text().strip())
 if "HOLD" in target:  # holds the run open until the case releases it, so another run can meet it
     # A runner killed by a case's timeout leaves this orphaned, after which no release can reach it.
@@ -309,6 +321,9 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
         "#!/bin/sh\n"
         "if grep -q PRELAUNCH project.yml; then kill -TERM $PPID; fi\n"
         "if grep -q SPEC_BROKEN project.yml; then echo 'SPEC_BROKEN is not a valid spec' >&2; exit 1; fi\n"
+        # A message that is not UTF-8: 'é' in UTF-8, then 0xff, which no UTF-8 text holds.
+        "if grep -q SPEC_UNDECODABLE project.yml; then\n"
+        "  printf 'SPEC_UNDECODABLE: caf\\303\\251 \\377 is not a valid spec\\n' >&2; exit 1\nfi\n"
         "if grep -q INTERRUPT Generated.txt 2>/dev/null && ! grep -q INTERRUPT project.yml; then\n"
         "  kill -TERM $PPID\n  sleep 1\nfi\n"
         # A terminal's Ctrl-C, before a mutant's test run or while regenerating over it after its restore.
@@ -1143,6 +1158,51 @@ def end_to_end_cases():
                                                                                               result.stderr)
         assert (out / "copy" / "project.yml").read_text() == "name: SPEC_ORIGINAL\n"
 
+    def a_generator_message_that_is_not_utf8_is_reported_decoded(root):
+        repo, tools = make_repo(root)
+        bad = {"name": "bad", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_UNDECODABLE"}]}
+        result, out, runs = run_runner(root, repo, tools, [bad, mutant("later", "KILL")])
+        message = "SPEC_UNDECODABLE: café � is not a valid spec"
+        assert result.returncode == 2 and "error: " in result.stderr and message in result.stderr, (
+            result.returncode, result.stderr)
+        assert "Traceback" not in result.stderr and result.stdout == "control: SURVIVED\n" and len(runs) == 1, (
+            result.stdout, result.stderr, runs)
+        report = json.loads((out / "results.json").read_text())
+        assert not report["complete"] and report["exit"] == 2 and report["mutants"] == [], report
+        assert message in report["error"], report
+        assert (out / "copy" / "project.yml").read_text() == "name: SPEC_ORIGINAL\n"
+
+    def test_output_that_is_not_utf8_is_still_judged(root):
+        # Every run's output holds 0xff, and the killing run also names a test that is not ASCII, in the selected suite,
+        # whose name holds 0xff too: the report shows where the byte was rather than a name the log never spelled.
+        repo, tools = make_repo(root, "let value = ORIGINAL // UNDECODABLE\n")
+        result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL"), mutant("survive", "SURVIVOR")],
+                                    tests=("ClipboardTTSAppTests/ÉtéSuite",))
+        assert result.returncode == 0 and "Traceback" not in result.stderr, (result.returncode, result.stderr)
+        assert result.stdout == ("control: SURVIVED\n"
+                                 "kill: KILLED ClipboardTTSAppTests.ASuite testGuard; ClipboardTTSAppTests.ÉtéSuite test�One\n"
+                                 "survive: SURVIVED\n"), result.stdout
+        for name in ("control", "kill", "survive"):
+            assert b"\xff" in (out / "logs" / f"{name}.log").read_bytes(), f"{name}'s test output was UTF-8"
+        report = json.loads((out / "results.json").read_text())
+        assert report["complete"] and report["exit"] == 0 and report["error"] is None, report
+        assert [(r["name"], r["verdict"]) for r in report["mutants"]] == [("kill", "KILLED"), ("survive", "SURVIVED")], report
+        assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL // UNDECODABLE\n"
+
+    def a_test_name_spelled_with_a_byte_that_is_not_utf8_runs_no_selected_test(root):
+        # The log spells BSuite's test as B\xffSuite: dropping the byte would make it the selected suite's test.
+        tests = ("ClipboardTTSAppTests/ASuite", "ClipboardTTSAppTests/BSuite")
+        repo, tools = make_repo(root / "control", "let value = ORIGINAL // GARBLE_B\n")
+        result, _, runs = run_runner(root / "control", repo, tools, [mutant("kill", "KILL")], tests=tests)
+        assert result.returncode == 2 and "error: the control ran no test for ClipboardTTSAppTests/BSuite\n" in result.stderr, (
+            result.returncode, result.stderr)
+        assert "Traceback" not in result.stderr and len(runs) == 1, (result.stderr, runs)
+        repo, tools = make_repo(root / "mutant")
+        result, _, _ = run_runner(root / "mutant", repo, tools, [mutant("garble", "GARBLE_B")], tests=tests)
+        assert result.returncode == 1 and "Traceback" not in result.stderr, (result.returncode, result.stderr)
+        assert result.stdout == "control: SURVIVED\ngarble: NO-TESTS no test ran for ClipboardTTSAppTests/BSuite\n", (
+            result.stdout)
+
     def a_staged_rename_leaves_no_old_path(root):
         repo, tools = make_repo(root)
         git = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
@@ -1590,7 +1650,10 @@ def end_to_end_cases():
               a_case_only_rename_survives_the_copy,
               a_control_that_runs_no_test_refuses, a_control_that_fails_without_naming_a_test_refuses,
               a_changed_symlink_is_copied_as_a_link_not_followed, a_directory_replaced_by_a_file_becomes_that_file,
-              a_generation_failure_reports_the_generator_message, a_symlinked_ownership_marker_is_not_ownership,
+              a_generation_failure_reports_the_generator_message,
+              a_generator_message_that_is_not_utf8_is_reported_decoded, test_output_that_is_not_utf8_is_still_judged,
+              a_test_name_spelled_with_a_byte_that_is_not_utf8_runs_no_selected_test,
+              a_symlinked_ownership_marker_is_not_ownership,
               a_tracked_file_replaced_by_a_directory_refuses, a_staged_rename_leaves_no_old_path,
               a_rerun_rebuilds_the_copy_from_the_current_target,
               a_tracked_symlink_replaced_by_a_file_is_not_written_through, an_output_path_that_is_a_file_refuses,
