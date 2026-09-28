@@ -111,10 +111,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Non-blocking
 
-#### S4 — Make mutation verifier cases independently runnable
-
-**Design proposal; structure validated by source inspection at `8c80839`, 2026-09-26.** Integration cases are nested inside `end_to_end_cases`, and the verifier's entry point runs every classification, selector, and integration case with no case-selection interface. **Paths:** [verifier](verify-mutation-runner.py), [runner's pure helpers](run-mutants.py), [verification procedure](README.md). **Direction:** expose stable case names and allow focused selection while retaining the full suite as the default; exercise pure spec validation and edit planning directly where this avoids unnecessary subprocess fixtures, retaining end-to-end coverage of wiring, copying, locks, processes, restoration, and reports. No generic mutation framework or runner redesign is needed. **Acceptance:** a named selection runs only its requested cases, unknown names fail explicitly, and the default still runs the complete suite; failures retain named attribution and nonzero exits, and scratch/process ownership survives failures. Preserve existing behavioral coverage and demonstrate equivalent mutation detection before replacing integration assertions with direct tests, following AGENTS' coverage-removal rule. **Dependencies:** none; independent of the completed [S3](completed_work/S3.md) and [NB38](completed_work/NB38.md). NB18 concerns Swift test dependencies and does not own this Python verifier work. D22 authorizes implementation.
-
 #### NB17 — Test teardown does not own every queued audio action
 
 **Validated — ownership trace.** Fixed waits remain in Services/audio/metadata tests. Draining a network delivery queue does not drain the player buffer queue, publications, or pending automatic start. This is a missing guarantee, not a claim the baseline observed an escaping callback. **Paths:** [Services tests](Tests/ServicesCoordinatorTests.swift), [audio tests](Tests/AudioPlayerManagerTests.swift), [test factory](Tests/TestNetworkSupport.swift), [audio owner](Sources/Managers/AudioPlayerManager.swift), metadata tests. **Direction/acceptance:** test-owned audio lifecycle, explicit processing/publication completion, cancelled scheduled work, unconditional teardown, and locally counted late work. Forced delayed callbacks cannot escape even after assertion timeouts. Preserve network scope accounting.
@@ -157,6 +153,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [S4](completed_work/S4.md) — Done: every mutation verifier case has a stable name and naming cases runs only those; a run with no name runs every case or refuses, and no run executes cases under Python's optimization.
 - [NB34](completed_work/NB34.md) — Fixed (D23): a test that crashes, exits, or exceeds an enabled execution allowance reads as `KILLED` by the test Xcode's `Failing tests:` summary names, and a failure naming no test is unjudged.
 - [NB41](completed_work/NB41.md) — Fixed: a verifier case holds that an OS error before the control, such as a missing spec or an `--out` that cannot be created, is refused with exit 2, and an unexpected exception there still propagates.
 - [NB40](completed_work/NB40.md) — Fixed: verifier cases hold that test output or a tool's error output that is not UTF-8 is read with U+FFFD at each of the runner's four decoding sites.
