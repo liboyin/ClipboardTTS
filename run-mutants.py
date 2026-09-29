@@ -29,8 +29,9 @@ the copy stays for inspection. results.json records whether the run completed, i
 HEAD, digests of the spec and of the copied target state, the deadlines it ran under, the control's
 verdict, and each finished mutant's result, an unjudged one included; a run refused before its
 control writes none. Exit 0 means every mutant received a verdict, whatever it was; 1 means a mutant
-got no verdict, from a run cut short or a failure naming no test, or ran no test for some selector; 2
-means the runner refused the run or was interrupted by SIGINT or SIGTERM once the control began.
+got no verdict, from a run cut short or a failure naming no test, or ran no test for some selector, or
+that the runner raised an exception it does not expect, which ends it with a traceback; 2 means the
+runner refused the run or was interrupted by SIGINT or SIGTERM once the control began.
 Either signal before then ends the runner by that signal, before any mutant is applied; any other
 signal, such as SIGHUP, ends it at once and can leave the copy mutated until the next run rebuilds
 it. A test run, build included, still going after --test-deadline seconds (default 1800) is stopped

@@ -143,10 +143,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 **Reported by the gap review on 2026-09-29; not independently validated.** A Codex `gpt-6-astra` review of `916f254..ee80eed` found that `verify-mutation-runner.py`'s short-tool deadline case makes several assertions before it confirms that its recorded helper processes are gone. When an earlier assertion fails, `run_case` reports the named failure and removes the case's temporary directory, but the helpers keep running. The reviewer reproduced this at `ee80eed` through `run_case`: `ps` was denied in its sandbox, which made an early assertion fail, and it then stopped the surviving helper itself. The fixture predates S4, but it leaves [S4](completed_work/S4.md)'s acceptance that process ownership survives failures unmet. **Paths:** [verifier](verify-mutation-runner.py). **Direction/acceptance:** every case that starts processes stops and confirms them in an unconditional cleanup that runs even when an earlier assertion fails; a case forced to fail early leaves no process running; and a mutant that moves the cleanup back behind the assertions fails a named case.
 
-#### NB45 — README's exit 1 omits an unexpected runner exception
-
-**Reported by the gap review on 2026-09-29, first observed by [NB41](completed_work/NB41.md); validated by probe.** README and `run-mutants.py`'s docstring say exit 1 means a mutant was unjudged or ran no tests. An exception the runner does not expect also ends it with Python's traceback and exit 1. Before the control, it leaves no `results.json`. After the control begins, `results.json` still records `complete: false`, `exit: 1`, and the error "the runner raised an unexpected exception". NB41 deliberately keeps such exceptions propagating rather than refusing them. **Paths:** README, [runner](run-mutants.py). **Direction/acceptance:** document this outcome where exit codes are described; the behaviour is unchanged.
-
 ### Nits
 
 #### N7 — The automatic-playback prebuffer closure draws an implicit-strong-capture warning
@@ -161,6 +157,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB45](completed_work/NB45.md) — Fixed: README and the runner's docstring say exit 1 also means the runner raised an exception it does not expect.
 - [S4](completed_work/S4.md) — Done: every mutation verifier case has a stable name and naming cases runs only those; a run with no name runs every case or refuses, and no run executes cases under Python's optimization.
 - [NB34](completed_work/NB34.md) — Fixed (D23): a test that crashes, exits, or exceeds an enabled execution allowance reads as `KILLED` by the test Xcode's `Failing tests:` summary names, and a failure naming no test is unjudged.
 - [NB41](completed_work/NB41.md) — Fixed: a verifier case holds that an OS error before the control, such as a missing spec or an `--out` that cannot be created, is refused with exit 2, and an unexpected exception there still propagates.
