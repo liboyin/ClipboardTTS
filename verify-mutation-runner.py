@@ -15,7 +15,9 @@ description, as in classify/a_passing_run_survives, and any other case is its fu
 cases to run only those, in the suite's order, or none to run them all; --list prints the names a
 run would take instead of running them, and an unknown name refuses the run with exit 2, as does
 running cases under Python's optimization, which removes the assertions they check with. A run
-exits 1 if any case it ran failed.
+exits 1 if any case it ran failed. However a case ends, cleanup stops its processes and confirms them
+gone before removing its directory; an unconfirmed process fails the case. If cleanup cannot finish,
+the failure explicitly reports unconfirmed processes and retains their ledger for recovery.
 """
 
 import argparse
@@ -25,6 +27,7 @@ import functools
 import hashlib
 import importlib.util
 import io
+import itertools
 import json
 import os
 import pathlib
@@ -184,6 +187,36 @@ CLASSIFY_CASES = [
      ("BUILD-FAILED", ["/x/Tests/ProbeClassTests.swift:6:5: error: Static Over Final Class Violation (static_over_final_class)"])),
 ]
 
+# How a stand-in notes its pid in the running case's ledger, so that run_case can stop it however the case ends.
+# RUNNER_VERIFY_PIDS names the ledger, open/pids in a directory of the case's own, and every process a case starts
+# inherits it; write_stand_in makes this the first act of every stand-in the verifier writes. The cleanup closes the
+# ledger by renaming its open directory, once and for good, before reading it, so the path never resolves again,
+# through the directory's removal and after. A stand-in that finds that path gone once it has noted itself exits with
+# LATE_EXIT instead of running: a pid noted while the path still resolved is in the cleanup's reading and is stopped.
+# So does one that cannot note itself while the path still resolves, as when the ledger cannot be written, since
+# nothing would then stop it.
+LATE_EXIT = 75
+OWN_PY = ('ledger = os.environ["RUNNER_VERIFY_PIDS"]\n'
+          'try:\n    with open(ledger, "a") as owned:\n        owned.write(f"{os.getpid()}\\n")\n'
+          'except FileNotFoundError:  # closed, as the check below finds\n    pass\n'
+          f'except OSError:  # not noted, so nothing would stop it\n    os._exit({LATE_EXIT})\n'
+          f'if not os.path.isdir(os.path.dirname(ledger)):\n    os._exit({LATE_EXIT})\n')
+OWN_SH = (f'if ! {{ echo $$ >> "$RUNNER_VERIFY_PIDS"; }} 2>/dev/null && [ -d "${{RUNNER_VERIFY_PIDS%/*}}" ]; then '
+          f'exit {LATE_EXIT}; fi\n'  # not noted, so nothing would stop it
+          f'[ -d "${{RUNNER_VERIFY_PIDS%/*}}" ] || exit {LATE_EXIT}\n')
+
+
+def write_stand_in(path, text):
+    """Writes text as an executable stand-in whose first act, after its interpreter line, notes its pid.
+
+    Every stand-in, the fixture's tools and any a case writes for itself, is written here, so none can be
+    left out of its case's ledger. A shell stand-in is one whose interpreter line ends in "sh".
+    """
+    shebang, body = text.split("\n", 1)
+    note = OWN_SH if shebang.endswith("sh") else "import os\n" + OWN_PY
+    path.write_text(f"{shebang}\n{note}{body}")
+    path.chmod(0o755)
+
 FAKE_XCODEBUILD = r'''#!/usr/bin/env python3
 import os, pathlib, signal, sys, time
 target = pathlib.Path("Sources/Target.swift").read_text()
@@ -306,7 +339,7 @@ PASSED_ONLY_LOG = "Test Case '-[ClipboardTTSAppTests.ASuite testGuard]' passed (
 # to a process group of its own but stays in the tool's session and, once a fork is requested, starts a late member
 # there too; both note their pids and wait to be killed, even once orphaned. A holder, which a tool starts in a
 # session of its own, keeps that tool's output open after the tool has finished, until it is released. Whatever
-# waits gives up after a minute, so a case that failed leaves nothing running for long.
+# waits gives up after a minute, if its case's cleanup has not stopped it first.
 STALLING_TOOL = r'''#!/usr/bin/env python3
 import os, signal, subprocess, sys, time
 role = sys.argv[1] if len(sys.argv) > 1 else "tool"
@@ -417,11 +450,16 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
     (repo / "ignored.log").write_text("must not be copied\n")
     tools = root / "tools"
     tools.mkdir()
-    (tools / "xcodebuild").write_text(FAKE_XCODEBUILD)
-    (tools / "stall").write_text(STALLING_TOOL)
+    write_stand_in(tools / "xcodebuild", FAKE_XCODEBUILD)
+    write_stand_in(tools / "stall", STALLING_TOOL)
+    # The ownership case needs a longer pause, but a leaked nap must still give up after a minute.
+    # Ordinary regeneration cases keep their brief pause while the runner handles the interrupt.
+    write_stand_in(tools / "nap", "#!/bin/sh\n"
+                   'if [ -n "$RUNNER_VERIFY_NAP_HOLD" ]; then exec sleep 60; fi\n'
+                   "exec sleep 1\n")
     # Stands in for generation: the generated file mirrors the project spec it was generated from. When
     # it regenerates over a mutant's INTERRUPT state, it signals the runner mid-cleanup first.
-    (tools / "xcodegen").write_text(
+    write_stand_in(tools / "xcodegen",
         "#!/bin/sh\n"
         "if grep -q PRELAUNCH project.yml; then kill -TERM $PPID; fi\n"
         "if grep -q SPEC_BROKEN project.yml; then echo 'SPEC_BROKEN is not a valid spec' >&2; exit 1; fi\n"
@@ -429,7 +467,7 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
         "if grep -q SPEC_UNDECODABLE project.yml; then\n"
         "  printf 'SPEC_UNDECODABLE: caf\\303\\251 \\377 is not a valid spec\\n' >&2; exit 1\nfi\n"
         "if grep -q INTERRUPT Generated.txt 2>/dev/null && ! grep -q INTERRUPT project.yml; then\n"
-        "  kill -TERM $PPID\n  sleep 1\nfi\n"
+        "  kill -TERM $PPID\n  \"$(dirname \"$0\")/nap\"\nfi\n"
         # A terminal's Ctrl-C, before a mutant's test run or while regenerating over it after its restore.
         "if grep -q SPEC_CTRLC_BEFORE project.yml || { grep -q SPEC_CTRLC_AFTER Generated.txt 2>/dev/null &&\n"
         "    ! grep -q SPEC_CTRLC_AFTER project.yml; }; then\n  " + GROUP_SIGINT + "fi\n"
@@ -439,8 +477,6 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
         "if grep -q SPEC_STALL_BEFORE project.yml || { grep -q SPEC_STALL_AFTER Generated.txt 2>/dev/null &&\n"
         "    ! grep -q SPEC_STALL_AFTER project.yml; }; then\n  exec \"$(dirname \"$0\")/stall\"\nfi\n"
         "cp project.yml Generated.txt\n")
-    for tool in ("xcodebuild", "xcodegen", "stall"):
-        (tools / tool).chmod(0o755)
     return repo, tools
 
 
@@ -684,6 +720,17 @@ def results_identify_their_run(root):
     assert "interrupted" in report["error"] and [r["name"] for r in report["mutants"]] == ["kill"], report
 
 
+def communicate_or_kill(process, timeout):
+    """Returns process's output once it finishes; one still running at timeout is killed and reaped, then TimeoutExpired
+    is raised. process is a child of this verifier, which no ledger can reap, so its case owns it here."""
+    try:
+        return process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+
+
 @case
 def a_second_run_on_a_directory_in_use_is_refused(root):
     repo, tools = make_repo(root, "let value = ORIGINAL // HOLD\n")
@@ -711,7 +758,7 @@ def a_second_run_on_a_directory_in_use_is_refused(root):
         assert records[1].read_text() == "" and (out / "logs" / "control.log").exists(), "the second run touched it"
     finally:
         release.write_text("")
-        stdout, stderr = first.communicate(timeout=60)
+        stdout, stderr = communicate_or_kill(first, 60)
     assert first.returncode == 0 and "kill: KILLED" in stdout, (first.returncode, stderr)
     assert json.loads((out / "results.json").read_text())["complete"]
 
@@ -1693,10 +1740,9 @@ def a_terminal_interrupt_during_the_architecture_query_is_an_interrupt(root):
     (root / "bin").mkdir()
     # Unlike the shell stand-ins, which cannot undo a SIGINT they inherit as ignored, this one takes the
     # default action back, as a tool that handles Ctrl-C itself would, so only its process group shields it.
-    (root / "bin" / "uname").write_text(
+    write_stand_in(root / "bin" / "uname",
         f"#!{sys.executable}\nimport os, signal, sys\nsignal.signal(signal.SIGINT, signal.SIG_DFL)\n"
         "os.killpg(os.getpgid(os.getppid()), signal.SIGINT)\nos.execv('/usr/bin/uname', ['uname', *sys.argv[1:]])\n")
-    (root / "bin" / "uname").chmod(0o755)
     result, out, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], own_session=True,
                                    env={"PATH": f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}"})
     assert result.returncode == 2 and "error: interrupted by signal 2" in result.stderr, (result.returncode, result.stderr)
@@ -1828,8 +1874,7 @@ def a_short_tool_past_its_deadline_is_killed_with_its_session_and_stops_the_run(
         env = None
         if site == "uname":
             (base / "bin").mkdir()
-            (base / "bin" / "uname").write_text(f"#!/bin/sh\nexec '{tools / 'stall'}'\n")
-            (base / "bin" / "uname").chmod(0o755)
+            write_stand_in(base / "bin" / "uname", f"#!/bin/sh\nexec '{tools / 'stall'}'\n")
             env = {"PATH": f"{base / 'bin'}{os.pathsep}{os.environ['PATH']}"}
         edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": site}]
         result, out, runs = run_runner(base, repo, tools, [{"name": "config", "edits": edits}, mutant("later", "KILL")],
@@ -1853,10 +1898,9 @@ def a_short_tool_whose_output_outlives_it_is_stopped_at_its_deadline(root):
     # The tool has finished, so its session holds nothing left to kill, and the stop must still end the wait.
     repo, tools = make_repo(root)
     (root / "bin").mkdir()
-    (root / "bin" / "uname").write_text(
+    write_stand_in(root / "bin" / "uname",
         f"#!{sys.executable}\nimport subprocess, sys\n"
         f"subprocess.Popen([sys.executable, {str(tools / 'stall')!r}, 'holder'], start_new_session=True)\n")
-    (root / "bin" / "uname").chmod(0o755)
     release = root / "release"
     try:
         result, _, runs = run_runner(root, repo, tools, [mutant("kill", "KILL")], extra=("--tool-deadline", "2"),
@@ -1877,11 +1921,10 @@ def a_member_that_forks_while_the_session_is_listed_is_killed_too(root):
     repo, tools = make_repo(root)
     fork, record = root / "fork", root / "record.txt"
     (root / "bin").mkdir()
-    (root / "bin" / "ps").write_text(
+    write_stand_in(root / "bin" / "ps",
         "#!/bin/sh\nlisting=$(/bin/ps \"$@\")\n"
         f"if [ ! -e '{fork}' ]; then\n  touch '{fork}'\n"
         f"  until grep -q \"'late'\" '{record}'; do sleep 0.05; done\nfi\nprintf '%s\\n' \"$listing\"\n")
-    (root / "bin" / "ps").chmod(0o755)
     edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_STALL_BEFORE"}]
     result, _, runs = run_runner(root, repo, tools, [{"name": "config", "edits": edits}], extra=("--tool-deadline", "2"),
                                  env={"PATH": f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}",
@@ -1906,9 +1949,8 @@ def a_session_that_cannot_be_listed_in_time_still_stops_the_run(root):
         repo, tools = make_repo(base)
         (base / "bin").mkdir()
         release = base / "release"
-        (base / "bin" / "ps").write_text(
+        write_stand_in(base / "bin" / "ps",
             f"#!{sys.executable}\nimport os, sys, time\nrelease, give_up = {str(release)!r}, time.monotonic() + 60\n" + body)
-        (base / "bin" / "ps").chmod(0o755)
         edits = [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_STALL_BEFORE"}]
         try:
             result, _, runs = run_runner(base, repo, tools, [{"name": "config", "edits": edits}],
@@ -1968,17 +2010,128 @@ def the_longest_deadlines_a_wait_can_represent_are_accepted(root):
     assert report["deadlines"] == {"test_run": longest, "short_tool": 2147483}, report
 
 
-def run_case(name, check):
-    """Runs one case in a temporary directory of its own, returning its failure, or None, rather than raising."""
-    failure = None
+STOP_BOUND = 5  # seconds for a case's cleanup to confirm its processes gone, as gone() allows one pid
+
+
+def noted_pids(text):
+    """Reads a ledger's text as the pids its ended lines name, and the ended lines that name no process.
+
+    Only a positive decimal pid that a signal can carry names a process: 0 and -1 would signal a whole
+    process group or every process this user may signal. The last line, while it has no newline, is not
+    read at all: a stand-in writes its pid and its newline in one write, so such a line is no stand-in's
+    pid, and reading it could name some other process.
+    """
+    pids, malformed = set(), []
+    for line in text.split("\n")[:-1]:
+        if re.fullmatch(r"[1-9][0-9]{0,9}", line) and int(line) < 2 ** 31:
+            pids.add(int(line))
+        else:
+            malformed.append(line)
+    return sorted(pids), malformed
+
+
+def stop_noted(ledger):
+    """SIGKILLs every process noted in the closed ledger until none is left, returning those still there after
+    STOP_BOUND seconds, and the ledger lines that name no process, which stop no other.
+
+    One reading is enough once the ledger is closed: a stand-in that notes itself later exits by itself (OWN_PY).
+    A process is confirmed gone only once its pid names no process. A zombie never reaped still does, and so
+    does a process this user may not signal, so neither is ever confirmed.
+    """
+    end = time.monotonic() + STOP_BOUND
+    pids, malformed = noted_pids(ledger.read_bytes().decode(errors="replace"))  # a byte no text holds is malformed
+    while True:
+        running = []
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:  # gone
+                continue
+            except PermissionError:  # its pid still names a process, one this user may not signal
+                pass
+            running.append(pid)
+        if not running or time.monotonic() >= end:
+            return running, malformed
+        time.sleep(0.05)
+
+
+@contextlib.contextmanager
+def owned_processes():
+    """Gives the case run inside it a ledger of its own, and stops every process noted there however the case ends.
+
+    Stand-ins note themselves in the ledger RUNNER_VERIFY_PIDS names (write_stand_in), which every process the
+    case starts inherits; a case run inside another case gets its own and leaves the outer one's processes alone.
+    Stopping runs even when the case raised: the ledger is closed, so a stand-in that notes itself from then on,
+    while the ledger's directory is removed included, exits by itself, and every process noted until then is
+    killed. Once the case has finished without raising, a process not confirmed gone within STOP_BOUND, or a
+    ledger line that names no process, raises OSError, which run_case reports. An unexpected failure closing,
+    reading, or stopping retains the ledger and reports its location with an explicit unconfirmed warning.
+    """
+    previous = os.environ.get("RUNNER_VERIFY_PIDS")
+    ledger_dir = tempfile.mkdtemp()
+    retain = False
     try:
-        with tempfile.TemporaryDirectory() as tmp:
+        opened, closed = pathlib.Path(ledger_dir) / "open", pathlib.Path(ledger_dir) / "closed"
+        opened.mkdir()
+        (opened / "pids").write_text("")
+        os.environ["RUNNER_VERIFY_PIDS"] = str(opened / "pids")
+        try:
+            yield
+        finally:
+            if previous is None:
+                del os.environ["RUNNER_VERIFY_PIDS"]
+            else:
+                os.environ["RUNNER_VERIFY_PIDS"] = previous
+            try:
+                opened.rename(closed)  # before the ledger is read, so no stand-in can start unseen after it (OWN_PY)
+                running, malformed = stop_noted(closed / "pids")
+            except Exception as error:
+                retain = True
+                raise OSError(f"processes not confirmed stopped; ledger retained at {ledger_dir}; "
+                              f"{type(error).__name__}: {error}") from error
+    finally:
+        if not retain:
+            shutil.rmtree(ledger_dir)
+    problems = [f"processes still running after {STOP_BOUND} seconds: {running}"] if running else []
+    problems += [f"ledger lines that name no process: {malformed}"] if malformed else []
+    if problems:
+        raise OSError("; ".join(problems))
+
+
+def run_case(name, check):
+    """Runs one case in a temporary directory of its own, returning its failure, or None, rather than raising.
+
+    Whatever the case does, cleanup attempts to stop and confirm its processes before removing its directory.
+    An unconfirmed process or cleanup error fails the case too; unexpected stopping failures retain the ledger
+    for recovery and explicitly report unconfirmed processes. An interrupt, such as a Ctrl-C, is held until that cleanup has run, then raised again, so
+    that it still ends the run; what the cleanup could not do is then said on stderr, as no failure is returned.
+    A Ctrl-C that arrives during the cleanup waits for it too, and then acts as it would have on arrival.
+    """
+    failure = cleanup = interrupt = None
+    held, holding = [], False
+    try:
+        with tempfile.TemporaryDirectory() as tmp, owned_processes():
             try:
                 check(pathlib.Path(tmp))
             except Exception as error:  # a crash is this case's failure, not the whole verifier's
                 failure = f"{name}: {type(error).__name__}: {error}"
-    except OSError as error:  # so is a process the runner left behind, still writing where the case cleans up
-        failure = failure or f"{name}: cleanup failed: {error}"
+            except BaseException as error:  # held, so that no error in the cleanup below can replace it
+                interrupt = error
+            finally:  # from here on a SIGINT is held, since acting on it would cut short the cleanup the with runs
+                previous, holding = signal.signal(signal.SIGINT, lambda signum, _frame: held.append(signum)), True
+    except Exception as error:  # a cleanup that fails or crashes is this case's failure too, not the whole verifier's
+        cleanup = f"cleanup failed: {type(error).__name__}: {error}"
+    finally:
+        if holding:
+            signal.signal(signal.SIGINT, previous)
+    if interrupt is not None or held:
+        if cleanup:
+            print(f"{name}: {cleanup}", file=sys.stderr)
+        if interrupt is not None:
+            raise interrupt
+        signal.raise_signal(signal.SIGINT)  # the handler it arrived under acts on it now, raising, ignoring, or exiting
+    if cleanup:  # beside the case's own failure, which must not hide a process left running
+        failure = f"{failure}; {cleanup}" if failure else f"{name}: {cleanup}"
     return failure
 
 
@@ -2132,6 +2285,585 @@ def every_case_has_a_distinct_name_that_selects_it_alone(_root):
     for name in names:
         assert re.fullmatch(r"[a-z0-9_]+(/[a-z0-9_]+)?", name), f"{name!r} is not one plain argument"
         assert run_main(["--list", name], CASES) == (0, f"{name}\n", ""), name
+
+
+def start_orphan(root, script, *args):
+    """Starts script under Python as an orphan, as every stand-in is once the runner that started it has gone.
+
+    Returns its pid. It records what it notes, if anything, in root's record.txt.
+    """
+    started = subprocess.run([sys.executable, "-c", "import subprocess, sys\nprint(subprocess.Popen(sys.argv[1:], "
+                              "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).pid)", sys.executable, str(script),
+                              *args], capture_output=True, text=True, check=True, timeout=60,
+                             env=dict(os.environ, RUNNER_VERIFY_RECORD=str(root / "record.txt")))
+    return int(started.stdout)
+
+
+def noted(pid):
+    """Waits until pid has noted itself in the running case's ledger, and returns it."""
+    ledger = pathlib.Path(os.environ["RUNNER_VERIFY_PIDS"])
+    for _ in range(200):
+        if str(pid) in ledger.read_text().split():
+            return pid
+        time.sleep(0.05)
+    raise AssertionError(f"{pid} never noted itself")
+
+
+def running(pid):
+    """Whether a signal can still reach pid, at once, without waiting for it to exit."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@case
+def a_case_stops_the_processes_it_started_however_it_ends_and_only_those(root):
+    # Each case below runs inside this one, through the run_case every case runs in, and starts the fixture's holder,
+    # which waits a minute; this case's own holder must outlive them all, and its ledger must stay in place. Each also
+    # ends its ledger with this case's holder's pid on a line not yet ended, as a pid still being written would be.
+    stall, ledger = root / "stall", os.environ["RUNNER_VERIFY_PIDS"]
+    write_stand_in(stall, STALLING_TOOL)
+    bystander = noted(start_orphan(root, stall, "holder"))
+    for outcome, raised, expected in (("fails", AssertionError("failed early"), "fails: AssertionError: failed early"),
+                                      ("crashes", KeyError("crashes"), "crashes: KeyError: 'crashes'"),
+                                      ("interrupted", KeyboardInterrupt(), "interrupted"),  # as by a Ctrl-C
+                                      ("passes", None, None)):
+        started = []
+
+        def check(_root, raised=raised, started=started):
+            started.append(noted(start_orphan(root, stall, "holder")))
+            with open(os.environ["RUNNER_VERIFY_PIDS"], "a") as unended:
+                unended.write(str(bystander))
+            if raised is not None:
+                raise raised
+
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                failure = run_case(outcome, check)
+        except KeyboardInterrupt:
+            failure = "interrupted"
+        assert failure == expected, (outcome, failure)
+        assert stderr.getvalue() == "", f"{outcome}: {stderr.getvalue()}"
+        assert started and not running(started[0]), f"{outcome}: a process the case started outlived it: {started}"
+        assert os.environ["RUNNER_VERIFY_PIDS"] == ledger, f"{outcome}: the case left its own ledger in place"
+    assert running(bystander), "a case stopped a process it had not started"
+
+
+@case
+def the_fixture_stops_its_processes_even_when_what_it_wraps_raises(root):
+    # run_case holds every exception inside the fixture, so this drives the fixture directly, as an interrupt arriving
+    # outside that hold would.
+    stall = root / "stall"
+    write_stand_in(stall, STALLING_TOOL)
+    started = []
+    try:
+        with owned_processes():
+            started.append(noted(start_orphan(root, stall, "holder")))
+            raise KeyboardInterrupt()
+    except KeyboardInterrupt:
+        pass
+    assert started and not running(started[0]), f"a process outlived the fixture it was noted in: {started}"
+
+
+@case
+def a_process_its_case_cannot_confirm_stopped_fails_that_case_within_a_bound(root):
+    # A child this process never reaps stays a zombie once killed, which a signal still reaches, so it is never confirmed
+    # gone. The case's own failure is reported beside it, or, past an interrupt, which must still end the run, the
+    # process is named on stderr; the cleanup still ends.
+    def overran(*_):
+        raise TimeoutError("the cleanup did not end within its bound")
+
+    for raised in (AssertionError("failed early"), KeyboardInterrupt()):
+        children = []
+
+        def check(_root, raised=raised, children=children):
+            child = subprocess.Popen([sys.executable, "-c", "import os, time\n" + OWN_PY + "time.sleep(60)\n"])
+            children.append(child)
+            noted(child.pid)
+            raise raised
+
+        failure, stderr = "interrupted", io.StringIO()  # what run_case returning would replace
+        previous = signal.signal(signal.SIGALRM, overran)
+        signal.setitimer(signal.ITIMER_REAL, STOP_BOUND + 10)
+        try:
+            with contextlib.redirect_stderr(stderr):
+                failure = run_case("unconfirmed", check)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+            for child in children:
+                child.kill()
+                child.wait()
+        unconfirmed = f"processes still running after {STOP_BOUND} seconds: [{children[0].pid}]"
+        if isinstance(raised, KeyboardInterrupt):
+            assert failure == "interrupted", f"the interrupt did not end the run: {failure}"
+            assert stderr.getvalue() == f"unconfirmed: cleanup failed: OSError: {unconfirmed}\n", stderr.getvalue()
+        else:
+            assert failure == f"unconfirmed: AssertionError: failed early; cleanup failed: OSError: {unconfirmed}", failure
+            assert stderr.getvalue() == "", stderr.getvalue()
+
+
+@case
+def a_process_its_case_may_not_signal_is_never_confirmed_stopped(root):
+    # A pid that a SIGKILL may not reach still names a process, such as another user's that has since taken it, so a
+    # case that otherwise passed fails as for any process it cannot confirm stopped, and one noted beside it is still
+    # stopped. The denial is simulated for one of the case's own processes, which this case then stops itself, and the
+    # cleanup is bounded here too, since a denial lasts as long as the cleanup keeps trying.
+    stall, real_kill, started = root / "stall", os.kill, []
+    write_stand_in(stall, STALLING_TOOL)
+
+    def denying_kill(pid, signum):
+        if pid == started[0] and signum == signal.SIGKILL:
+            raise PermissionError("Operation not permitted")
+        real_kill(pid, signum)
+
+    def check(_root):
+        started.extend(noted(start_orphan(root, stall, "holder")) for _ in range(2))
+        os.kill = denying_kill
+
+    def overran(*_):
+        raise TimeoutError("the cleanup did not end within its bound")
+
+    previous = signal.signal(signal.SIGALRM, overran)
+    signal.setitimer(signal.ITIMER_REAL, STOP_BOUND + 10)
+    try:
+        failure = run_case("denied", check)
+        os.kill = real_kill
+        alive = [running(pid) for pid in started]
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        os.kill = real_kill
+        for pid in started:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+        # The nested case already removed its ledger, so this case must confirm its own final stop.
+        left = [pid for pid in started if not gone(pid)]
+        assert not left, f"denial probe cleanup left processes running: {left}"
+    unconfirmed = f"processes still running after {STOP_BOUND} seconds: [{started[0]}]"
+    assert failure == f"denied: cleanup failed: OSError: {unconfirmed}", failure
+    assert alive == [True, False], f"denied, then beside it: {list(zip(started, alive))}"
+
+
+@case
+def a_ledger_line_that_names_no_process_is_reported_and_every_noted_process_still_stopped(root):
+    # The line cannot stop the processes noted beside it, and an interrupt still ends the run, however the cleanup ends.
+    stall = root / "stall"
+    write_stand_in(stall, STALLING_TOOL)
+    cleanup = "cleanup failed: OSError: ledger lines that name no process: ['garbled', '\ufffd']"
+    for raised in (AssertionError("failed early"), KeyboardInterrupt()):
+        started = []
+
+        def check(_root, raised=raised, started=started):
+            started.append(noted(start_orphan(root, stall, "holder")))
+            with open(os.environ["RUNNER_VERIFY_PIDS"], "ab") as ledger:
+                ledger.write(b"garbled\n\xff\n")  # as no stand-in writes, the second not even text
+            raise raised
+
+        failure, stderr = "interrupted", io.StringIO()  # what run_case returning would replace
+        try:
+            with contextlib.redirect_stderr(stderr):
+                failure = run_case("garbled", check)
+        except KeyboardInterrupt:
+            pass
+        if isinstance(raised, KeyboardInterrupt):
+            assert failure == "interrupted", f"the interrupt did not end the run: {failure}"
+            assert stderr.getvalue() == f"garbled: {cleanup}\n", stderr.getvalue()
+        else:
+            assert failure == f"garbled: AssertionError: failed early; {cleanup}", failure
+            assert stderr.getvalue() == "", stderr.getvalue()
+        assert not running(started[0]), f"a process noted beside the line outlived its case: {started}"
+
+
+@case
+def a_cleanup_that_crashes_fails_its_case_and_an_interrupt_still_ends_the_run(root):
+    # A real ledger read failure and a fault in stopping must preserve recovery evidence. Each nested case
+    # starts a live holder; this outer case independently stops it after observing the failed cleanup.
+    global stop_noted
+    real_stop, real_read = stop_noted, pathlib.Path.read_bytes
+    stall = root / "stall"
+    write_stand_in(stall, STALLING_TOOL)
+
+    def crashes(_ledger):
+        raise RuntimeError("the cleanup crashed")
+
+    def unreadable(path):
+        if path.name == "pids" and path.parent.name == "closed":
+            raise PermissionError("the ledger cannot be read")
+        return real_read(path)
+
+    for fault, detail in (("crash", "RuntimeError: the cleanup crashed"),
+                          ("read", "PermissionError: the ledger cannot be read")):
+        for outcome in ("passes", "fails", "interrupted"):
+            started, ledgers = [], []
+
+            def check(_root):
+                ledgers.append(pathlib.Path(os.environ["RUNNER_VERIFY_PIDS"]).parent.parent)
+                started.append(noted(start_orphan(root, stall, "holder")))
+                if outcome == "fails":
+                    raise AssertionError("failed early")
+                if outcome == "interrupted":
+                    raise KeyboardInterrupt()
+
+            stderr = io.StringIO()
+            try:
+                stop_noted = crashes if fault == "crash" else real_stop
+                pathlib.Path.read_bytes = unreadable if fault == "read" else real_read
+                try:
+                    with contextlib.redirect_stderr(stderr):
+                        failure = run_case(outcome, check)
+                except KeyboardInterrupt:
+                    failure = "interrupted"
+                cleanup = (f"cleanup failed: OSError: processes not confirmed stopped; ledger retained at "
+                           f"{ledgers[0]}; {detail}")
+                expected = (f"fails: AssertionError: failed early; {cleanup}" if outcome == "fails"
+                            else f"passes: {cleanup}" if outcome == "passes" else "interrupted")
+                assert failure == expected, (fault, outcome, failure)
+                assert stderr.getvalue() == (f"interrupted: {cleanup}\n" if outcome == "interrupted" else ""), (
+                    fault, outcome, stderr.getvalue())
+                assert running(started[0]), "the probe did not exercise an unconfirmed live holder"
+                assert not (ledgers[0] / "open").exists(), "the failed cleanup reopened registration"
+                assert str(started[0]) in real_read(ledgers[0] / "closed" / "pids").decode().splitlines(), (
+                    "the failed cleanup discarded its recovery evidence")
+            finally:
+                stop_noted, pathlib.Path.read_bytes = real_stop, real_read
+                for pid in started:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                left = [pid for pid in started if not gone(pid)]
+                assert not left, f"cleanup-failure probe left processes running: {left}"
+                for ledger in ledgers:
+                    if ledger.exists():
+                        shutil.rmtree(ledger)
+
+    # Directory teardown is outside the stopping-error wrapper. It can still raise a non-OSError;
+    # the case must report that crash and preserve an active interrupt too.
+    real_rmtree = shutil.rmtree
+
+    def teardown_crashes(path, *args, **kwargs):
+        real_rmtree(path, *args, **kwargs)
+        raise RuntimeError("directory teardown crashed")
+
+    for outcome in ("passes", "interrupted"):
+        def check(_root):
+            if outcome == "interrupted":
+                raise KeyboardInterrupt()
+
+        stderr = io.StringIO()
+        try:
+            shutil.rmtree = teardown_crashes
+            try:
+                with contextlib.redirect_stderr(stderr):
+                    failure = run_case(outcome, check)
+            except KeyboardInterrupt:
+                failure = "interrupted"
+        finally:
+            shutil.rmtree = real_rmtree
+        cleanup = "cleanup failed: RuntimeError: directory teardown crashed"
+        assert failure == (f"passes: {cleanup}" if outcome == "passes" else "interrupted"), failure
+        assert stderr.getvalue() == (f"interrupted: {cleanup}\n" if outcome == "interrupted" else ""), stderr.getvalue()
+
+
+def start_held(command, env=None):
+    """Starts a parent that execs command only once released by closing its stdin, so the case decides when command's
+    first instruction runs. Returns the parent, which then is command's own process."""
+    return subprocess.Popen([sys.executable, "-c", "import os, sys\nsys.stdin.read()\nos.execv(sys.argv[1], sys.argv[1:])",
+                             *command], stdin=subprocess.PIPE, env=env)
+
+
+@case
+def a_stand_in_that_starts_once_its_cleanup_has_begun_exits_before_running(root):
+    # A stand-in launched just before its case fails can start after the cleanup has read the ledger, too late to be
+    # stopped. Each stand-in here is held before its first instruction and released once the cleanup has closed the
+    # ledger, or once the ledger is gone, so no reading of the ledger can have seen it; it must exit before its body.
+    global stop_noted
+    real, record, ran = stop_noted, root / "record.txt", root / "ran"
+    write_stand_in(root / "stall", STALLING_TOOL)  # its holder notes that it started, then waits a minute
+    write_stand_in(root / "shell", f"#!/bin/sh\ntouch '{ran}'\nexec sleep 60\n")
+    stand_ins = {"python": [sys.executable, str(root / "stall"), "holder"], "shell": [str(root / "shell")]}
+    for (kind, command), release in itertools.product(stand_ins.items(), ("as the cleanup begins", "after the case")):
+        held, codes = [], []
+
+        def check(_root, command=command, held=held):
+            held.append(start_held(command, env=dict(os.environ, RUNNER_VERIFY_RECORD=str(record))))
+            raise AssertionError("failed at once")
+
+        def release_held(held=held, codes=codes):
+            held[0].stdin.close()
+            try:
+                codes.append(held[0].wait(timeout=10))
+            except subprocess.TimeoutExpired:
+                codes.append("still running")
+
+        def released(ledger, release_held=release_held):
+            release_held()
+            return real(ledger)
+
+        stop_noted = released if release == "as the cleanup begins" else real
+        try:
+            failure = run_case("late", check)
+            if release == "after the case":
+                release_held()
+            began = record.exists() and record.read_text() or ran.exists()
+        finally:
+            stop_noted = real
+            for process in held:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+        assert failure == "late: AssertionError: failed at once", (kind, release, failure)
+        assert codes == [LATE_EXIT] and not began, f"{kind}, released {release}: {codes}, its body ran: {bool(began)}"
+
+
+@case
+def a_stand_in_released_while_its_ledger_is_torn_down_exits_before_running(root):
+    # The ledger's directory is removed one entry at a time here, as rmtree would in whatever order, and a held stand-in
+    # is released after each removal, and again once the case has ended, so each one meets a different stage of the
+    # teardown; none may run its body.
+    real_rmtree, record, ran = shutil.rmtree, root / "record.txt", root / "ran"
+    write_stand_in(root / "stall", STALLING_TOOL)  # its holder notes that it started, then waits a minute
+    write_stand_in(root / "shell", f"#!/bin/sh\ntouch '{ran}'\nexec sleep 60\n")
+    stand_ins = {"python": [sys.executable, str(root / "stall"), "holder"], "shell": [str(root / "shell")]}
+    for kind, command in stand_ins.items():
+        held, codes, stages, ledger_dir = [], [], [], []
+
+        def check(_root, command=command, held=held, ledger_dir=ledger_dir):
+            ledger_dir.append(pathlib.Path(os.environ["RUNNER_VERIFY_PIDS"]).parent.parent)
+            held.extend(start_held(command, env=dict(os.environ, RUNNER_VERIFY_RECORD=str(record))) for _ in range(4))
+            raise AssertionError("failed at once")
+
+        def release_next(stage, held=held, codes=codes, stages=stages):
+            process = held[len(codes)]
+            process.stdin.close()
+            try:
+                codes.append(process.wait(timeout=10))
+            except subprocess.TimeoutExpired:
+                codes.append("still running")
+            stages.append(stage)
+
+        def stepwise(path, *args, ledger_dir=ledger_dir, release_next=release_next, **kwargs):
+            if not ledger_dir or pathlib.Path(path) != ledger_dir[0]:
+                return real_rmtree(path, *args, **kwargs)
+            for directory, _, files in os.walk(path, topdown=False):
+                for name in files:
+                    os.unlink(os.path.join(directory, name))
+                    release_next(f"{name} removed")
+                os.rmdir(directory)
+                release_next(f"{os.path.basename(directory)} removed")
+            return None
+
+        shutil.rmtree = stepwise
+        try:
+            failure = run_case("torn", check)
+            release_next("the case ended")
+            began = record.exists() and record.read_text() or ran.exists()
+        finally:
+            shutil.rmtree = real_rmtree
+            for process in held:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+        assert failure == "torn: AssertionError: failed at once", (kind, failure)
+        assert len(stages) == len(codes) == len(held) and set(codes) == {LATE_EXIT} and not began, (
+            f"{kind}: {list(zip(stages, codes))}, its body ran: {bool(began)}")
+
+
+@case
+def a_stand_in_that_cannot_note_itself_exits_before_running(root):
+    # The ledger is still open but cannot be written, so a stand-in started now could not be stopped; it must not run.
+    ran, record = root / "ran", root / "record.txt"
+    write_stand_in(root / "stall", STALLING_TOOL)  # its holder notes that it started, then waits a minute
+    write_stand_in(root / "shell", f"#!/bin/sh\ntouch '{ran}'\nexec sleep 60\n")
+    for kind, command in (("python", [sys.executable, str(root / "stall"), "holder"]), ("shell", [str(root / "shell")])):
+        children, codes = [], []
+
+        def check(_root, command=command, children=children, codes=codes):
+            os.chmod(os.environ["RUNNER_VERIFY_PIDS"], 0o444)
+            children.append(subprocess.Popen(command, env=dict(os.environ, RUNNER_VERIFY_RECORD=str(record)),
+                                             stderr=subprocess.DEVNULL))
+            try:
+                codes.append(children[0].wait(timeout=10))
+            except subprocess.TimeoutExpired:
+                codes.append("still running")
+
+        try:
+            failure = run_case("unwritable", check)
+            began = record.exists() and record.read_text() or ran.exists()
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+        assert failure is None, (kind, failure)
+        assert codes == [LATE_EXIT] and not began, f"{kind}: {codes}, its body ran: {bool(began)}"
+
+
+@case
+def a_ctrl_c_during_the_cleanup_waits_for_it_then_acts_as_it_would_have(root):
+    # The SIGINT arrives as the cleanup begins, sent by the process to itself, under the handler the case began with:
+    # Python's, which raises, or none, which ignores it; either way the noted holder is still stopped.
+    global stop_noted
+    real = stop_noted
+    write_stand_in(root / "stall", STALLING_TOOL)
+
+    def interrupted(ledger):
+        os.kill(os.getpid(), signal.SIGINT)
+        return real(ledger)
+
+    for disposition, expected in ((signal.default_int_handler, "interrupted"), (signal.SIG_IGN, None)):
+        started = []
+
+        def check(_root, started=started):
+            started.append(noted(start_orphan(root, root / "stall", "holder")))
+
+        before, stop_noted = signal.signal(signal.SIGINT, disposition), interrupted
+        try:
+            try:
+                outcome = run_case("cleaned", check)
+            except KeyboardInterrupt:
+                outcome = "interrupted"
+            restored = signal.getsignal(signal.SIGINT) is disposition
+        finally:
+            stop_noted = real
+            signal.signal(signal.SIGINT, before)
+        assert outcome == expected, (disposition, outcome)
+        assert restored, f"the case's own SIGINT handler was not restored after its cleanup: {disposition}"
+        assert not running(started[0]), f"a Ctrl-C during the cleanup left a noted process running: {started}"
+    # A SIGINT during the check itself still acts at once, under a handler this case sets, so that one held past the
+    # check cannot reach the case running this one.
+    reached = []
+
+    def interrupted_check(_root):
+        os.kill(os.getpid(), signal.SIGINT)
+        reached.append("the check went on")
+
+    before = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        try:
+            outcome = run_case("interrupted", interrupted_check)
+        except KeyboardInterrupt:
+            outcome = "interrupted"
+    finally:
+        signal.signal(signal.SIGINT, before)
+    assert (outcome, reached) == ("interrupted", []), (outcome, reached)
+
+
+@case
+def a_ledger_line_names_a_process_only_as_a_positive_decimal_pid(_root):
+    # 0 and -1 would signal a process group or every process this user may signal; the unended last line is unread.
+    text = "12\n0\n-1\n+5\n 7\n007\n12\ngarbled\n2147483648\n2147483647\n\n3"
+    assert noted_pids(text) == ([12, 2147483647], ["0", "-1", "+5", " 7", "007", "garbled", "2147483648", ""]), (
+        noted_pids(text))
+
+
+@case
+def every_stand_in_the_verifier_writes_notes_itself(_root):
+    # A stand-in is a file this verifier makes executable and then runs. Only write_stand_in may make one, so none can
+    # skip its note; a fixture repository's own file may still change mode, as a tracked change the copy must carry.
+    tree = ast.parse(pathlib.Path(__file__).read_text())
+    writer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "write_stand_in")
+    inside = {id(node) for node in ast.walk(writer)}
+    strays = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "chmod"):
+            continue
+        path, mode = (node.args[0], node.args[1]) if len(node.args) == 2 else (node.func.value, node.args[0])
+        executable = not (isinstance(mode, ast.Constant) and isinstance(mode.value, int) and not mode.value & 0o111)
+        if executable and id(node) not in inside and not ast.unparse(path).startswith("repo"):
+            strays.append(f"line {node.lineno}: {ast.unparse(node)}")
+    assert strays == [], f"made executable outside write_stand_in: {strays}"
+    assert len(inside) > 1 and any(isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "chmod"
+                                   for node in ast.walk(writer)), "write_stand_in no longer makes its stand-in executable"
+
+
+@case
+def a_child_a_case_waits_for_past_its_bound_is_killed_and_reaped(_root):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+    try:
+        try:
+            communicate_or_kill(child, 0.5)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError("the wait ended before its bound")
+        assert child.returncode == -signal.SIGKILL, f"the child was not killed and reaped: {child.returncode}"
+        assert not running(child.pid), "the child is still in the process table"
+    finally:
+        if child.returncode is None:
+            child.kill()
+            child.wait()
+
+
+@case
+def the_fixture_nap_bounds_its_hold_and_preserves_its_ordinary_pause(root):
+    _, tools = make_repo(root)
+    # Observe the actual sleep command instead of waiting for either duration to elapse.
+    write_stand_in(tools / "sleep", '#!/bin/sh\nprintf "%s\\n" "$@"\n')
+    for hold, duration in (("", "1"), ("1", "60")):
+        result = subprocess.run([str(tools / "nap")], capture_output=True, text=True, timeout=10,
+                                env=dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                                         RUNNER_VERIFY_NAP_HOLD=hold))
+        assert result.returncode == 0 and result.stdout == duration + "\n", (
+            f"nap hold={hold!r} must request sleep {duration}: {result.returncode}, {result.stdout!r}, {result.stderr!r}")
+
+
+@case
+def the_fixture_s_tools_are_stopped_with_the_case_that_started_them(root):
+    # Each tool is started as the runner starts it, by a parent that reaps it, and is still running when its case fails,
+    # so only that case's cleanup ends it. The stall tool waits until its parent has gone, starting a helper; the fake
+    # xcodebuild runs a slow test run; xcodegen waits on its nap's bounded one-minute hold.
+    _, tools = make_repo(root)
+    work = root / "work"
+    (work / "Sources").mkdir(parents=True)
+    (work / "Tests").mkdir()
+    for path, text in (("Sources/Target.swift", "let value = SLOW\n"), ("Sources/Dirty.swift", "uncommitted\n"),
+                       ("Tests/New.swift", "new\n"), ("project.yml", "name: SPEC_ORIGINAL\n"),
+                       ("Generated.txt", "name: SPEC_INTERRUPT\n")):
+        (work / path).write_text(text)
+    # Ignores the SIGTERM that xcodegen sends what started it, and reports its child's pid before waiting for it.
+    parent_script = ("import signal, subprocess, sys\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                     "child = subprocess.Popen(sys.argv[1:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                     "print(child.pid, flush=True)\nchild.wait()\n")
+    for tool, noting in (("stall", 2), ("xcodebuild", 1), ("xcodegen", 2)):  # the tool, and its helper or its nap
+        parents, noted_pids = [], []
+
+        def check(_root, tool=tool, noting=noting, parents=parents, noted_pids=noted_pids):
+            parent = subprocess.Popen([sys.executable, "-c", parent_script, str(tools / tool)], cwd=work,
+                                      stdout=subprocess.PIPE, text=True,
+                                      env=dict(os.environ, RUNNER_VERIFY_RECORD=str(root / f"{tool}.txt"),
+                                               RUNNER_VERIFY_NAP_HOLD="1"))
+            parents.append(parent)
+            pid = int(parent.stdout.readline())
+            ledger = pathlib.Path(os.environ["RUNNER_VERIFY_PIDS"])
+            for _ in range(200):
+                noted_pids[:] = [int(line) for line in ledger.read_text().split("\n")[:-1]]
+                if len(noted_pids) >= noting:
+                    break
+                time.sleep(0.05)
+            assert noted_pids[:1] == [pid] and len(noted_pids) == noting, f"{tool} noted {noted_pids}, not {pid} first"
+            assert all(running(noted) for noted in noted_pids), f"{tool} ended before its case failed: {noted_pids}"
+            raise AssertionError("failed early")
+
+        try:
+            failure = run_case(tool, check)
+            assert failure == f"{tool}: AssertionError: failed early", failure
+            left = [noted for noted in noted_pids if running(noted)]
+            assert not left, f"{tool}: a process its case started outlived it: {left}"
+        finally:
+            for parent in parents:
+                try:
+                    parent.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    parent.kill()
+                    parent.communicate()
 
 
 if __name__ == "__main__":
