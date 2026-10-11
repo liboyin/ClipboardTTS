@@ -2,13 +2,9 @@ import XCTest
 import AppKit
 @testable import ClipboardTTSApp
 
-/// Covers the About panel's metadata and the Settings control that presents it.
-///
-/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
-/// runs on the main actor.
-@MainActor
-final class SettingsAboutTests: MockURLProtocolTestCase {
-
+/// Covers the About panel's metadata, its options, and the action that presents them, with no
+/// manager, session, or hosted view.
+final class SettingsAboutTests: XCTestCase {
     func testDefaultBundleAboutMetadataReadsHostedApplicationInfoDictionary() throws {
         // WHY: The shipped About action must use the generated app bundle rather than a test-only
         // metadata source, so changing Info.plist metadata is reflected without source edits.
@@ -32,6 +28,43 @@ final class SettingsAboutTests: MockURLProtocolTestCase {
         XCTAssertEqual(metadata.applicationVersion, "9.4")
     }
 
+    func testAboutActionPassesInjectedBundleMetadataWithoutPresentingSystemUI() {
+        // WHY: The About command must route the bundle's marketing version to macOS's panel, not
+        // a second hard-coded string, while tests must never present an interactive AppKit panel.
+        // The Settings form's forwarding to this action is proven by the hosted About-button test.
+        let presenter = CapturingAboutPanelPresenter()
+        let action = AboutAction(
+            metadata: StaticAboutMetadata(applicationName: "Test Clipboard TTS", applicationVersion: "7.3"),
+            presenter: presenter
+        )
+
+        action.showAbout()
+
+        XCTAssertEqual(presenter.presentedApplicationName, "Test Clipboard TTS")
+        XCTAssertEqual(presenter.presentedApplicationVersion, "7.3")
+    }
+
+    func testStandardAboutPanelOptionsLinkToBundledLicense() throws {
+        // WHY: “LICENSE” in About credits must open the exact resource users receive, rather than
+        // leaving them with an unresolvable filename inside the app bundle.
+        let expectedLicenseURL = try XCTUnwrap(Bundle.main.url(forResource: "LICENSE", withExtension: nil))
+        let options = StandardAboutPanelPresenter().aboutPanelOptions(
+            applicationName: "Test Clipboard TTS",
+            applicationVersion: "7.3"
+        )
+        let credits = try XCTUnwrap(options[.credits] as? NSAttributedString)
+        let licenseRange = (credits.string as NSString).range(of: "LICENSE")
+
+        XCTAssertEqual(credits.attribute(.link, at: licenseRange.location, effectiveRange: nil) as? URL, expectedLicenseURL)
+    }
+}
+
+/// Covers the Settings control that presents About, which only a hosted form can prove reachable.
+///
+/// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
+/// runs on the main actor.
+@MainActor
+final class SettingsAboutButtonWiringTests: MockURLProtocolTestCase {
     func testSettingsFormExposesAboutButtonThatRoutesToPresenter() {
         // WHY: An injected action alone does not prove users can reach About; the rendered form
         // must keep the conventional control and route its click without opening AppKit UI in tests.
@@ -62,47 +95,6 @@ final class SettingsAboutTests: MockURLProtocolTestCase {
         XCTAssertEqual(presenter.presentedApplicationName, "Test Clipboard TTS")
         XCTAssertEqual(presenter.presentedApplicationVersion, "7.3")
         settings.release()
-    }
-
-    func testAboutActionPassesInjectedBundleMetadataWithoutPresentingSystemUI() {
-        // WHY: The About command must route the bundle's marketing version to macOS's panel, not
-        // a second hard-coded string, while tests must never present an interactive AppKit panel.
-        // `showAbout` reads no lifecycle-managed state, so it needs no SwiftUI host.
-        let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
-        let defaults = makeOwnedDefaults()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        let presenter = CapturingAboutPanelPresenter()
-        let view = SettingsView(
-            networkManager: networkManager,
-            audioPlayer: audioPlayer,
-            speechSession: SpeechSessionCoordinator(audioPlayer: audioPlayer, networkManager: networkManager),
-            secretStore: secretStore,
-            defaults: defaults,
-            aboutAction: AboutAction(
-                metadata: StaticAboutMetadata(applicationName: "Test Clipboard TTS", applicationVersion: "7.3"),
-                presenter: presenter
-            )
-        )
-
-        view.showAbout()
-
-        XCTAssertEqual(presenter.presentedApplicationName, "Test Clipboard TTS")
-        XCTAssertEqual(presenter.presentedApplicationVersion, "7.3")
-    }
-
-    func testStandardAboutPanelOptionsLinkToBundledLicense() throws {
-        // WHY: “LICENSE” in About credits must open the exact resource users receive, rather than
-        // leaving them with an unresolvable filename inside the app bundle.
-        let expectedLicenseURL = try XCTUnwrap(Bundle.main.url(forResource: "LICENSE", withExtension: nil))
-        let options = StandardAboutPanelPresenter().aboutPanelOptions(
-            applicationName: "Test Clipboard TTS",
-            applicationVersion: "7.3"
-        )
-        let credits = try XCTUnwrap(options[.credits] as? NSAttributedString)
-        let licenseRange = (credits.string as NSString).range(of: "LICENSE")
-
-        XCTAssertEqual(credits.attribute(.link, at: licenseRange.location, effectiveRange: nil) as? URL, expectedLicenseURL)
     }
 }
 

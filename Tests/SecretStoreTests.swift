@@ -1,7 +1,9 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class SecretStoreTests: MockURLProtocolTestCase {
+/// Covers the secret store contract, legacy-key migration and the startup key decision, using
+/// only owned in-memory stores and preferences.
+final class SecretStoreTests: XCTestCase {
     func testInMemorySecretStoreCreatesReadsUpdatesAndDeletesSecrets() throws {
         // WHY: Settings needs one store contract for all providers, so this proves an edit replaces
         // rather than duplicates a key and clearing the field removes it from future requests.
@@ -38,27 +40,6 @@ final class SecretStoreTests: MockURLProtocolTestCase {
             APIKeyMigrationService.failureMessage(for: .openAI),
             "Couldn't secure the saved OpenAI API key. It remains in Settings; check Keychain access and try again."
         )
-    }
-
-    func testStartupPublishesMigrationFailureWhilePreservingLegacySecret() {
-        // WHY: A retained legacy key is only recoverable if startup exposes a safe, actionable
-        // warning. Otherwise migration can fail silently and leave plaintext credentials behind.
-        let store = InMemorySecretStore()
-        let legacySecret = "test-legacy-custom-key"
-        let defaults = makeOwnedDefaults([
-            SettingsKeys.ttsProvider: "Custom",
-            SettingsKeys.legacyCustomAPIKey: legacySecret
-        ])
-        store.nextError = .unavailable
-
-        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults)
-
-        XCTAssertEqual(
-            manager.lastError,
-            "Couldn't secure the saved Custom API key. It remains in Settings; check Keychain access and try again."
-        )
-        XCTAssertEqual(defaults.string(forKey: SettingsKeys.legacyCustomAPIKey), legacySecret)
-        XCTAssertNil(try? store.secret(for: .custom))
     }
 
     func testPendingProvidersNameOnlyTheKeysAMigrationRetryStillHasToSecure() {
@@ -189,5 +170,30 @@ final class SecretStoreTests: MockURLProtocolTestCase {
 
         XCTAssertEqual(failed.apiKey, "")
         XCTAssertEqual(failed.errorMessage, "Couldn't read the saved Custom API key. Check Keychain access and try again.")
+    }
+}
+
+/// Covers what a manager publishes from its startup migration, so it builds one through
+/// `TestNetworkFactory` and runs under the mock-network test lifecycle.
+final class MigrationStartupWiringTests: MockURLProtocolTestCase {
+    func testStartupPublishesMigrationFailureWhilePreservingLegacySecret() {
+        // WHY: A retained legacy key is only recoverable if startup exposes a safe, actionable
+        // warning. Otherwise migration can fail silently and leave plaintext credentials behind.
+        let store = InMemorySecretStore()
+        let legacySecret = "test-legacy-custom-key"
+        let defaults = makeOwnedDefaults([
+            SettingsKeys.ttsProvider: "Custom",
+            SettingsKeys.legacyCustomAPIKey: legacySecret
+        ])
+        store.nextError = .unavailable
+
+        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults)
+
+        XCTAssertEqual(
+            manager.lastError,
+            "Couldn't secure the saved Custom API key. It remains in Settings; check Keychain access and try again."
+        )
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.legacyCustomAPIKey), legacySecret)
+        XCTAssertNil(try? store.secret(for: .custom))
     }
 }

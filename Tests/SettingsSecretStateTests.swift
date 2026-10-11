@@ -3,7 +3,7 @@ import XCTest
 
 /// Covers the Settings form's retained key storage: what it publishes about a storage failure,
 /// and what a user edit or a migration retry changes about the keys it holds.
-final class SettingsSecretStateTests: MockURLProtocolTestCase {
+final class SettingsSecretStateTests: XCTestCase {
     func testASuccessfulRetryWithdrawsTheReadFailureItJustDisproved() {
         // WHY: The form's guidance must describe the storage the user can see now. Reading the
         // secured key back proves the Keychain answers again, so leaving the mount-time read

@@ -119,10 +119,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 **Validated — ownership trace.** Fixed waits remain in Services/audio/metadata tests. Draining a network delivery queue does not drain the player buffer queue, publications, or pending automatic start. This is a missing guarantee, not a claim the baseline observed an escaping callback. **Paths:** [Services tests](Tests/ServicesCoordinatorTests.swift), [audio tests](Tests/AudioPlayerManagerTests.swift), [test factory](Tests/TestNetworkSupport.swift), [audio owner](Sources/Managers/AudioPlayerManager.swift), metadata tests. **Direction/acceptance:** test-owned audio lifecycle, explicit processing/publication completion, cancelled scheduled work, unconditional teardown, and locally counted late work. Forced delayed callbacks cannot escape even after assertion timeouts. Preserve network scope accounting.
 
-#### NB18 — Pure tests inherit heavyweight integration dependencies
-
-**Validated — construction trace.** Secret/state tests inherit the global network lifecycle; an About test creates audio/network managers solely to forward metadata. **Paths:** [SecretStoreTests](Tests/SecretStoreTests.swift), [SettingsSecretStateTests](Tests/SettingsSecretStateTests.swift), [SettingsAboutTests](Tests/SettingsAboutTests.swift), test support. **Direction/acceptance:** test pure units with owned memory dependencies and no audio/session resources; retain a small hosted wiring suite. Meaningful mutants must still detect protected behavior. Improved preferences ownership alone does not justify removing shared asynchronous safeguards.
-
 #### NB24 — Clipboard-presence console messages have no release purpose
 
 **Validated — print calls; legacy Task 46.** They disclose clipboard presence, not copied text. **Paths:** [TextExtractionManager](Sources/Managers/TextExtractionManager.swift), [text tests](Tests/TextExtractionManagerTests.swift), README if a diagnostic description changes. **Direction/acceptance:** implement D8 by removing the prints. Preserve populated/empty injected clipboard returns; introduce no new error or alternative logging; never use the shared pasteboard.
@@ -153,6 +149,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB18](completed_work/NB18.md) — Fixed: pure secret-store, Settings secret-state and About tests run on plain `XCTestCase`, and only two small wiring suites keep the mock-network lifecycle.
 - [NB31](completed_work/NB31.md) — Fixed (D21): a manager takes only a routing layer onto the production session policy, and the hosted-test startup graph refuses every request locally.
 - [NB44](completed_work/NB44.md) — Fixed: verifier cases own unconditional process cleanup, report unconfirmed processes, preserve interrupts, and retain recovery evidence when cleanup cannot finish.
 - [NB45](completed_work/NB45.md) — Fixed: README and the runner's docstring say exit 1 also means the runner raised an exception it does not expect.
