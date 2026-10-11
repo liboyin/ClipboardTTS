@@ -14,7 +14,9 @@ enum HostedTestProcess {
 ///
 /// The hosted XCTest app is initialized before individual test setup. It therefore receives a
 /// fresh defaults suite and in-memory secrets so no startup initializer can access, migrate, or
-/// delete a developer's configuration before the test's own isolation lifecycle starts.
+/// delete a developer's configuration before the test's own isolation lifecycle starts, and a
+/// manager whose session refuses every request locally, so nothing that graph is asked to speak
+/// can leave the machine.
 struct AppStartupDependencies {
     let defaults: UserDefaults
     let secretStore: SecretStoring
@@ -24,9 +26,20 @@ struct AppStartupDependencies {
     let speechSession: SpeechSessionCoordinator
     let servicesCoordinator: ServicesCoordinator
 
+    /// The routing production startup layers onto the manager's session policy: none.
+    ///
+    /// Named so a test can observe the production choice without building the unrouted session
+    /// it describes; `make` uses it as the default for its production branch.
+    static var productionSessionRouting: TTSNetworkManager.SessionRouting? { nil }
+
     /// Builds production dependencies or an entirely test-owned hosted-test dependency graph.
+    ///
+    /// The hosted-test branch always routes its manager through
+    /// `TTSNetworkManager.SessionRouting.refusingEveryRequest`; only the production branch's
+    /// routing is injectable, so a regression can drive that branch without an unrouted session.
     static func make(
         isHostedTest: Bool = HostedTestProcess.isActive,
+        productionSessionRouting: TTSNetworkManager.SessionRouting? = AppStartupDependencies.productionSessionRouting,
         // This is the composition root, and these two lines are the only place in the app that
         // names a defaults domain rather than being handed one. Everything downstream requires an
         // explicit store, which is what keeps the installed app's own preferences out of reach of
@@ -40,12 +53,15 @@ struct AppStartupDependencies {
     ) -> AppStartupDependencies {
         let defaults: UserDefaults
         let secretStore: SecretStoring
+        let sessionRouting: TTSNetworkManager.SessionRouting?
         if isHostedTest {
             defaults = testDefaults()
             secretStore = testSecretStore()
+            sessionRouting = .refusingEveryRequest
         } else {
             defaults = productionDefaults()
             secretStore = productionSecretStore()
+            sessionRouting = productionSessionRouting
         }
 
         let persistedProvider = APIKeyProvider(
@@ -61,7 +77,7 @@ struct AppStartupDependencies {
             ? persistedCustomSampleRate
             : AudioPlayerManager.defaultSampleRate
         let audioPlayer = AudioPlayerManager(sampleRate: initialSampleRate)
-        let networkManager = TTSNetworkManager(secretStore: secretStore, defaults: defaults)
+        let networkManager = TTSNetworkManager(routing: sessionRouting, secretStore: secretStore, defaults: defaults)
         // Built here so every entry point speaks through one session owner holding one manager
         // pair, rather than each surface pairing whichever instances it happens to be handed.
         let speechSession = SpeechSessionCoordinator(audioPlayer: audioPlayer, networkManager: networkManager)

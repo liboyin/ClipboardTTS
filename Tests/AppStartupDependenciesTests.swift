@@ -8,7 +8,10 @@ final class AppStartupDependenciesTests: XCTestCase {
         // speech into a pipeline the menu neither shows nor controls, and every entry-point and
         // coordinator test would still pass, because each of those builds its own correctly paired
         // owner rather than the one production composes here.
-        let dependencies = AppStartupDependencies.make(isHostedTest: true)
+        let dependencies = AppStartupDependencies.make(
+            isHostedTest: true,
+            productionSessionRouting: Self.productionBranchRouting
+        )
         defer { dependencies.networkManager.session.invalidateAndCancel() }
         let generationBeforeCancel = dependencies.networkManager.currentRequestGeneration()
         dependencies.audioPlayer.hasAudio = true
@@ -66,11 +69,12 @@ final class AppStartupDependenciesTests: XCTestCase {
         hostedValues.forEach { hostedDefaults.set($0.value, forKey: $0.key) }
         hostedDefaults.set(16_000.0, forKey: SettingsKeys.customSampleRate)
 
-        let defaultDependencies = AppStartupDependencies.make()
+        let defaultDependencies = AppStartupDependencies.make(productionSessionRouting: Self.productionBranchRouting)
         defer { defaultDependencies.networkManager.session.invalidateAndCancel() }
 
         let dependencies = AppStartupDependencies.make(
             isHostedTest: true,
+            productionSessionRouting: Self.productionBranchRouting,
             productionDefaults: {
                 productionDefaultsRequested = true
                 return developerDefaults
@@ -154,6 +158,7 @@ final class AppStartupDependenciesTests: XCTestCase {
 
         let dependencies = AppStartupDependencies.make(
             isHostedTest: false,
+            productionSessionRouting: Self.productionBranchRouting,
             productionDefaults: {
                 productionDefaultsRequested = true
                 return productionDefaults
@@ -195,6 +200,49 @@ final class AppStartupDependenciesTests: XCTestCase {
             )
         )
         XCTAssertEqual(dependencies.audioPlayer.sampleRate, 12_000)
+        XCTAssertEqual(
+            dependencies.networkManager.session.configuration.httpAdditionalHeaders?[Self.startupBranchHeader] as? String,
+            "production",
+            "The production branch must route its manager through the routing it was given."
+        )
+    }
+
+    func testHostedTestStartupManagersRefuseEveryRequestLocally() {
+        // WHY: XCTest builds the hosted app's own graph at launch and keeps it for the whole run,
+        // and its Services coordinator observes the process-wide notification center. A manager in
+        // that graph must therefore fail anything it is asked to send without leaving the machine,
+        // not merely hold settings no test happens to use. Both graphs here are built with the
+        // production branch's routing marked, so a hosted branch that took that routing instead of
+        // its own refusal is caught even though the marked routing refuses as well.
+        let automaticDependencies = AppStartupDependencies.make(productionSessionRouting: Self.productionBranchRouting)
+        defer { automaticDependencies.networkManager.session.invalidateAndCancel() }
+        let injectedDependencies = AppStartupDependencies.make(
+            isHostedTest: true,
+            productionSessionRouting: Self.productionBranchRouting,
+            testDefaults: { InMemoryDefaults() },
+            testSecretStore: { InMemorySecretStore() }
+        )
+        defer { injectedDependencies.networkManager.session.invalidateAndCancel() }
+
+        for (graph, dependencies) in [("automatic", automaticDependencies), ("injected", injectedDependencies)] {
+            let configuration = dependencies.networkManager.session.configuration
+            XCTAssertNil(
+                configuration.httpAdditionalHeaders?[Self.startupBranchHeader],
+                "The \(graph) hosted graph must not take the production branch's routing."
+            )
+            assertRefusesLoopbackRequestLocally(dependencies.networkManager, graph: graph)
+            assertClaimsOffMachineRequests(dependencies.networkManager, graph: graph)
+        }
+    }
+
+    func testProductionStartupLayersNoRouting() {
+        // WHY: Production must send speech requests through the system's own loading with the
+        // production policy alone. Observing the startup choice itself, rather than a manager built
+        // on it, keeps every test off an unrouted session.
+        XCTAssertNil(
+            AppStartupDependencies.productionSessionRouting,
+            "Production startup must layer no routing onto the manager's session policy."
+        )
     }
 
     func testStartupRegressionSettingsStayInTheStorageTheTestOwns() {
@@ -253,6 +301,60 @@ final class AppStartupDependenciesTests: XCTestCase {
         XCTAssertEqual(settings.model, expected.model, "Startup must request the persisted model.", file: file, line: line)
         XCTAssertEqual(settings.voice, expected.voice, "Startup must request the persisted voice.", file: file, line: line)
         XCTAssertEqual(settings.provider, expected.provider, "Startup must request as the persisted provider.", file: file, line: line)
+    }
+
+    /// Marks the routing these regressions hand the production branch, so a test can tell which
+    /// branch's routing a manager received. It refuses every request as well, so no startup test
+    /// builds an unrouted session whichever branch a regression selects.
+    private static let startupBranchHeader = "X-ClipboardTTS-Startup-Branch"
+    private static var productionBranchRouting: TTSNetworkManager.SessionRouting {
+        TTSNetworkManager.SessionRouting(
+            protocolClasses: [RefusingURLProtocol.self],
+            additionalHeaders: [startupBranchHeader: "production"]
+        )
+    }
+
+    /// Sends one request through a manager's own session and asserts the refusing protocol failed it.
+    ///
+    /// The target is a loopback literal with no listener expected, so even a session that lost its
+    /// routing sends nothing off the machine, and fails with a connection error this assertion
+    /// tells apart from the refusal.
+    private func assertRefusesLoopbackRequestLocally(_ manager: TTSNetworkManager,
+                                                     graph: String,
+                                                     file: StaticString = #filePath,
+                                                     line: UInt = #line) {
+        let completion = expectation(description: "The \(graph) graph's request completed")
+        let outcome = LockedValue<(code: Int, description: String)?>(nil)
+        let request = URLRequest(url: URL(string: "http://127.0.0.1:9/v1/audio/speech")!)
+        manager.session.dataTask(with: request) { _, _, error in
+            let nsError = error as NSError?
+            outcome.withValue { $0 = nsError.map { (code: $0.code, description: $0.localizedDescription) } }
+            completion.fulfill()
+        }.resume()
+        wait(for: [completion], timeout: 2.0)
+
+        XCTAssertEqual(
+            outcome.value?.code, URLError.Code.cannotLoadFromNetwork.rawValue,
+            "The \(graph) graph's request must fail locally.", file: file, line: line
+        )
+        XCTAssertEqual(
+            outcome.value?.description, RefusingURLProtocol.refusalDescription,
+            "The \(graph) graph's request must be failed by the refusing protocol.", file: file, line: line
+        )
+    }
+
+    /// Asserts the protocol a manager's session tries first claims off-machine requests, which the
+    /// loopback request cannot show: one it declined would load through the system's own HTTP
+    /// loader. Inspecting a `URLRequest` starts no task and resolves no name; nothing is sent.
+    private func assertClaimsOffMachineRequests(_ manager: TTSNetworkManager, graph: String) {
+        let routedProtocol = manager.session.configuration.protocolClasses?.first as? URLProtocol.Type
+        XCTAssertEqual(routedProtocol.map(ObjectIdentifier.init), ObjectIdentifier(RefusingURLProtocol.self))
+        let endpoints = [manager.requestSettingsSnapshot().baseURL, "https://api.openai.com/v1/models",
+                         "https://generativelanguage.googleapis.com/v1beta/models", "http://tts.example.com/v1/audio/speech"]
+        for endpoint in endpoints {
+            XCTAssertEqual(routedProtocol?.canInit(with: URLRequest(url: URL(string: endpoint)!)), true,
+                           "The \(graph) graph must refuse \(endpoint) rather than let it load.")
+        }
     }
 
     /// Creates test-owned settings storage that outlives no test and reaches no shared domain.

@@ -25,38 +25,14 @@ func requestBodyData(from request: URLRequest) -> Data? {
     return body
 }
 
-/// Creates mock-routed sessions and managers, and reads the production session policy without
-/// handing out a manager that could send a request through it.
+/// Creates mock-routed sessions and managers. Every manager it returns runs on the production
+/// session policy with MockURLProtocol routing layered on top, so no test holds a manager that
+/// could send a request off the machine.
 enum TestNetworkFactory {
-    enum ManagerSessionConfiguration {
-        /// The ordinary test policy, onto which this factory installs MockURLProtocol routing.
-        case ephemeral
-        /// A caller-owned policy, onto which this factory installs MockURLProtocol routing.
-        case provided(URLSessionConfiguration)
-        /// The manager builds its production default, which has no mock routing. Only this file can
-        /// create this case, and it hands out only the resulting policy.
-        case productionDefault(UnroutedSessionToken)
-    }
-
-    /// Restricts an unrouted manager to this file, which never returns one to a test.
-    struct UnroutedSessionToken {
-        fileprivate init() {}
-    }
-
-    /// Returns the policy of the session a manager builds for itself when given no configuration.
-    ///
-    /// That session has no mock routing, so the manager never leaves this function: a caller can
-    /// inspect the policy but holds nothing a request could be sent from. The manager is otherwise
-    /// built and torn down like every other factory manager.
-    static func productionDefaultSessionPolicy() -> URLSessionConfiguration {
-        makeManager(sessionConfiguration: .productionDefault(UnroutedSessionToken())).session.configuration
-    }
-
     /// Creates a mock-routed manager. `defaults` is fresh test-owned storage unless the caller
     /// passes its own, so a manager reads and migrates nothing the developer configured, and a test
     /// that must share one domain between the manager and a hosted form passes that domain here.
     static func makeManager(
-        sessionConfiguration: ManagerSessionConfiguration = .ephemeral,
         secretStore: SecretStoring = InMemorySecretStore(),
         defaults: UserDefaults = InMemoryDefaults(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
@@ -67,17 +43,8 @@ enum TestNetworkFactory {
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
-        let configuration: URLSessionConfiguration?
-        switch sessionConfiguration {
-        case .ephemeral:
-            configuration = makeConfiguration(testIdentifier: testIdentifier)
-        case let .provided(policy):
-            configuration = makeConfiguration(testIdentifier: testIdentifier, sessionConfiguration: policy)
-        case .productionDefault:
-            configuration = nil
-        }
         let manager = TTSNetworkManager(
-            configuration: configuration,
+            routing: mockRouting(testIdentifier: testIdentifier),
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
             sessionInvalidated: { MockURLProtocol.sessionDidInvalidate($0, forTestIdentifier: testIdentifier) },
             secretStore: secretStore,
@@ -129,9 +96,16 @@ enum TestNetworkFactory {
         return session
     }
 
-    private static func makeConfiguration(testIdentifier: String,
-                                          sessionConfiguration: URLSessionConfiguration? = nil) -> URLSessionConfiguration {
-        let configuration = sessionConfiguration ?? URLSessionConfiguration.ephemeral
+    /// Routes every request to MockURLProtocol, tagged with the test scope that owns it.
+    private static func mockRouting(testIdentifier: String) -> TTSNetworkManager.SessionRouting {
+        TTSNetworkManager.SessionRouting(
+            protocolClasses: [MockURLProtocol.self],
+            additionalHeaders: [MockURLProtocol.testIdentifierHeader: testIdentifier]
+        )
+    }
+
+    private static func makeConfiguration(testIdentifier: String) -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
         configuration.httpAdditionalHeaders = [
             MockURLProtocol.testIdentifierHeader: testIdentifier

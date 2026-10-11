@@ -117,7 +117,11 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Creates a manager, optionally observing the lifecycle of its underlying URL session, the
     /// request-state transaction a conditional revocation opens, and a retry's installation.
-    init(configuration: URLSessionConfiguration? = nil,
+    ///
+    /// The session always carries the production policy; `routing` can only layer request routing
+    /// onto it. It has no default, so every construction states its routing: production startup
+    /// passes `nil`, and nothing else does.
+    init(routing: SessionRouting?,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
          secretStore: SecretStoring = KeychainSecretStore(),
@@ -143,7 +147,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         self.callbackAuthority = callbackAuthority
 
         super.init()
-        self.session = URLSession(configuration: configuration ?? Self.productionSessionConfiguration(), delegate: self, delegateQueue: nil)
+        self.session = URLSession(configuration: Self.sessionConfiguration(routing: routing), delegate: self, delegateQueue: nil)
         sessionCreated?(self.session)
         if let errorMessage = secretStartupState.errorMessage { self.lastError = errorMessage }
         // Startup collapses its migration failures into the first provider's guidance, so the same
