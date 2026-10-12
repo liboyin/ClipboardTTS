@@ -92,6 +92,12 @@ N7 comes from NB12's gate run on 2026-09-18 at `6578dac`, which used Xcode 27.0 
 | D22 | Implement S3 and S4 alongside the mutation runner's open findings, one task per commit in this order: S3, NB39, NB40, NB41, NB34, S4. S3 goes first because it reshapes the acquisition-to-report structure NB39's restoration case tests, and S4 goes last so its case names cover the cases the others add. | S3, S4, NB39, NB40, NB41, NB34 |
 | D23 | A failed run's named failures include the tests Xcode's `Failing tests:` summary names, so a test that crashes, exits, or exceeds an enabled execution allowance reads as `KILLED` by that test. `FAILED-UNNAMED` remains only for a finished failure that names no test at all, and it becomes unjudged (exit 1) instead of a verdict. The reading is verified against real Xcode 27.0 logs before it lands. | NB34 |
 
+### Accepted user decisions — 2026-10-13
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D24 | Mutants that weaken network routing in tests may run through `run-mutants.py` when every request the selected tests issue targets a loopback literal and the main agent has inspected the spec and its selectors before the run. This is a standing approval of that isolation, replacing per-task approvals: the 2026-10-12 approval was given for NB31 alone, and NB46 had reused it without asking. Removing the test factory's mock routing stays excluded, because it would unroute every network suite, and those suites send to non-loopback mock hosts. | NB31, NB46, NB49, later routing work |
+
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
 ### Constraints that remain in force
@@ -135,19 +141,7 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 **Validated — probe, 2026-09-28, at `c100ba0` and `2500350`; recorded by user instruction.** `run-mutants.py` reads the control log, each mutant's log, and a test run's log for its verdict with `read_text(errors="replace")`, which decodes in the locale's preferred encoding, whereas it decodes the spec, edit targets, and a failed tool's stderr as UTF-8. Python 3.13.9 and 3.9.6 both decode UTF-8 under `en_US.UTF-8` and `C`, but ISO 8859-1 under `en_US.ISO8859-1`, where `é` written as UTF-8 reads back as `Ã©`. No byte then fails to decode and the verdict itself is unaffected, but a non-ASCII test name would be garbled in `KILLED`'s details and in `results.json`; by source inspection, the selector check reads the control log the same way, so a selector naming such a test would be compared against the garbled name. NB40's investigation found this and kept it out of its scope. Its verifier is also locale-dependent now: with `LANG` and `LC_ALL` set to `en_US.ISO8859-1` under Python 3.13.9, `verify-mutation-runner.py` passes 110/110 at `916f254` and 113/113 at `c100ba0` but only 51/116 at `2500350`, where most failing cases see the stand-in control read as `NO-VERDICT`. That is broader than [NB40](completed_work/NB40.md)'s record states, and its cause, somewhere in NB40's stand-in changes since the runner did not change, is not yet diagnosed. **Paths:** [runner](run-mutants.py), [verifier](verify-mutation-runner.py), README. **Direction/acceptance:** read test logs as UTF-8 whatever the locale, keeping NB40's lenient decoding; the verifier passes in full under a non-UTF-8 locale as it did before NB40; a case run under such a locale asserts that a non-ASCII test name survives in the verdict details and the selector check, and a mutant restoring the locale default fails it. **Dependencies:** builds on NB40.
 
-#### NB48 — Nothing in the repository protects NB46's quiescence step
-
-**Validated — source inspection, 2026-10-13, at `7c2eb2f`.** [NB46](completed_work/NB46.md)'s gate and barrier in `completionError` were exercised only by probe tests that existed in scratch copies. The helper's one call site never times out, so removing the gate, the barrier, or both passes every checked-in test and gate. **Paths:** [helper](Tests/QuiescentRequest.swift), [startup tests](Tests/AppStartupDependenciesTests.swift). **Direction/acceptance:** a checked-in, deterministic test drives the helper past its bounded wait with controlled scheduling rather than sleeps. It scopes the expected timeout with an `issueMatcher` and fails when the gate, the barrier, or both are removed, each demonstrated through `run-mutants.py`. **Dependencies:** NB46.
-
-#### NB49 — The request helper sends through any configuration it is handed
-
-**Validated — source inspection, 2026-10-13, at `7c2eb2f`.** `completionError(of:configuration:…)` builds its own `URLSession` from whatever configuration its caller passes, so `.default` or `TTSNetworkManager.sessionConfiguration(routing: nil)` would load the request through the system's own HTTP loader. README also says network tests create sessions only through `TestNetworkFactory`, which the helper contradicts. **Paths:** [helper](Tests/QuiescentRequest.swift), README. **Direction (user choice, 2026-10-13):** the helper asserts that the configuration is routed, meaning its first protocol class claims the request and is not one of the system's own, and records a failure and sends nothing when it is not. README states the helper's exception to the factory rule. **Acceptance:** an unrouted configuration fails the test with the helper's own message and creates no task; a routed one behaves as before; a mutant removing the check fails a test that issues its request only to a loopback literal. **Dependencies:** NB46; shares a candidate with NB48 and N8.
-
 ### Nits
-
-#### N8 — The request helper's name is too generic for an `XCTestCase` extension
-
-**Validated — source inspection, 2026-10-13.** `completionError` is added to every `XCTestCase` without saying what kind of request it serves. **Paths:** [helper](Tests/QuiescentRequest.swift) and its call site. **Direction/acceptance:** give it a name that states it sends one routed request and leaves no completion behind; behaviour unchanged. Shares a candidate with NB48 and NB49.
 
 #### N7 — The automatic-playback prebuffer closure draws an implicit-strong-capture warning
 
@@ -161,6 +155,9 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB48](completed_work/NB48.md) — Fixed: checked-in tests fail when the request helper's gate, barrier, or both are removed.
+- [NB49](completed_work/NB49.md) — Fixed: the request helper refuses, and sends nothing through, a configuration that is not routed.
+- [N8](completed_work/N8.md) — Fixed: the request helper is named `sendOneRoutedRequestLeavingNoCompletion`.
 - [N10](completed_work/N10.md) — Fixed: NB46's record links NB47.
 - [N9](completed_work/N9.md) — Fixed: README names both of NB31's unobserved startup seams.
 - [NB47](completed_work/NB47.md) — Fixed: a manager's session is read-only outside it, and a strict lint rule refuses an unrouted manager or startup graph in tests.

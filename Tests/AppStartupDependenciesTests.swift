@@ -317,16 +317,17 @@ final class AppStartupDependenciesTests: XCTestCase {
     /// Sends one request with a manager's own session configuration, so it carries the graph's
     /// routing, and asserts the refusing protocol failed it.
     ///
-    /// The target is a loopback literal with no listener expected, so even a session that lost its
-    /// routing sends nothing off the machine, and fails with a connection error this assertion
-    /// tells apart from the refusal. `completionError` owns the queue the request completes on and
-    /// leaves nothing able to write the outcome once it returns, so these assertions read it alone.
+    /// `sendOneRoutedRequestLeavingNoCompletion` refuses a configuration that lost its routing with
+    /// a failure of its own; were that check broken, the loopback literal, with no listener
+    /// expected, would still keep the request on the machine, failing with a connection error these
+    /// assertions tell apart from the refusal. The helper owns the queue the request completes on
+    /// and leaves nothing able to write the outcome once it returns, so these assertions read it alone.
     private func assertRefusesLoopbackRequestLocally(_ manager: TTSNetworkManager,
                                                      graph: String,
                                                      file: StaticString = #filePath,
                                                      line: UInt = #line) {
-        let outcome = completionError(
-            of: URLRequest(url: URL(string: "http://127.0.0.1:9/v1/audio/speech")!),
+        let outcome = sendOneRoutedRequestLeavingNoCompletion(
+            URLRequest(url: URL(string: "http://127.0.0.1:9/v1/audio/speech")!),
             configuration: manager.session.configuration,
             description: "The \(graph) graph's request completed",
             timeout: 2.0
