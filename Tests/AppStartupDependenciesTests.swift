@@ -314,31 +314,30 @@ final class AppStartupDependenciesTests: XCTestCase {
         )
     }
 
-    /// Sends one request through a manager's own session and asserts the refusing protocol failed it.
+    /// Sends one request with a manager's own session configuration, so it carries the graph's
+    /// routing, and asserts the refusing protocol failed it.
     ///
     /// The target is a loopback literal with no listener expected, so even a session that lost its
     /// routing sends nothing off the machine, and fails with a connection error this assertion
-    /// tells apart from the refusal.
+    /// tells apart from the refusal. `completionError` owns the queue the request completes on and
+    /// leaves nothing able to write the outcome once it returns, so these assertions read it alone.
     private func assertRefusesLoopbackRequestLocally(_ manager: TTSNetworkManager,
                                                      graph: String,
                                                      file: StaticString = #filePath,
                                                      line: UInt = #line) {
-        let completion = expectation(description: "The \(graph) graph's request completed")
-        let outcome = LockedValue<(code: Int, description: String)?>(nil)
-        let request = URLRequest(url: URL(string: "http://127.0.0.1:9/v1/audio/speech")!)
-        manager.session.dataTask(with: request) { _, _, error in
-            let nsError = error as NSError?
-            outcome.withValue { $0 = nsError.map { (code: $0.code, description: $0.localizedDescription) } }
-            completion.fulfill()
-        }.resume()
-        wait(for: [completion], timeout: 2.0)
+        let outcome = completionError(
+            of: URLRequest(url: URL(string: "http://127.0.0.1:9/v1/audio/speech")!),
+            configuration: manager.session.configuration,
+            description: "The \(graph) graph's request completed",
+            timeout: 2.0
+        ) as NSError?
 
         XCTAssertEqual(
-            outcome.value?.code, URLError.Code.cannotLoadFromNetwork.rawValue,
+            outcome?.code, URLError.Code.cannotLoadFromNetwork.rawValue,
             "The \(graph) graph's request must fail locally.", file: file, line: line
         )
         XCTAssertEqual(
-            outcome.value?.description, RefusingURLProtocol.refusalDescription,
+            outcome?.localizedDescription, RefusingURLProtocol.refusalDescription,
             "The \(graph) graph's request must be failed by the refusing protocol.", file: file, line: line
         )
     }
