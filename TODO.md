@@ -107,7 +107,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, and NB46 from the gap review of the NB31/NB18 group on 2026-10-12. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, and NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -149,6 +149,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB47](completed_work/NB47.md) — Fixed: a manager's session is read-only outside it, and a strict lint rule refuses an unrouted manager or startup graph in tests.
 - [NB46](completed_work/NB46.md) — Fixed: the startup refusal test owns its request's completion queue, and nothing can write its outcome or fulfil its expectation once it returns.
 - [NB18](completed_work/NB18.md) — Fixed: pure secret-store, Settings secret-state and About tests run on plain `XCTestCase`, and only two small wiring suites keep the mock-network lifecycle.
 - [NB31](completed_work/NB31.md) — Fixed (D21): a manager takes only a routing layer onto the production session policy, and the hosted-test startup graph refuses every request locally.

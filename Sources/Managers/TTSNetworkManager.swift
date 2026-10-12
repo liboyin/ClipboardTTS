@@ -32,7 +32,9 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// reader goes through an accessor below that takes the lock.
     private(set) var requestSettings: RequestSettings
 
-    var session: URLSession!
+    /// The manager's one session, built in `init` from the routing its caller stated. Read-only
+    /// outside the type, so no caller can replace it with a session that routing never reached.
+    private(set) var session: URLSession!
     /// Session-lifecycle and request-body seams used by production setup and focused tests.
     private let sessionInvalidated: ((URLSession) -> Void)?
     let requestBodyEncoder: (Data) throws -> Data

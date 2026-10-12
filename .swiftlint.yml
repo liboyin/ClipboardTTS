@@ -91,3 +91,22 @@ custom_rules:
       - string
     message: "A test-local @AppStorage can bind the process defaults store even when declared without a key, and a UserDefaults subclass reaches the default search list through super.init() or a nil suite name; use makeOwnedDefaults instead, or disable this rule on the one line with a reason."
     severity: error
+
+  # A test must not hold a manager without routing: production startup is the only construction that
+  # passes none. So in `Tests/` a manager is built only by `TestNetworkFactory` (its file is excluded),
+  # whether spelled `TTSNetworkManager(`, `.init`, or the contextual `.init(routing:`; and every
+  # `AppStartupDependencies.make` names `productionSessionRouting:`, never as `nil`. Swift puts that
+  # label before any closure argument, so the lookahead stops at the call's first `)`: an earlier
+  # argument containing one fails closed. Like the rules above it guards a habit, not a proof: a type
+  # alias, a spliced comment, or a nil routing reached through a variable still gets through.
+  test_routed_network_manager:
+    name: "Test Routed Network Manager"
+    included: ".*/Tests/.*\\.swift"
+    excluded: ".*/Tests/TestNetworkSupport\\.swift"
+    regex: "\\bTTSNetworkManager\\s*(\\(|\\.\\s*init\\b)|\\.\\s*init\\s*\\(\\s*routing\\s*:|\\bAppStartupDependencies\\s*\\.\\s*make\\b(?!\\s*\\([^)]*\\bproductionSessionRouting\\s*:)|\\bproductionSessionRouting\\s*:\\s*nil\\b"
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    message: "A test must not hold a manager whose session has no routing; build managers with TestNetworkFactory.makeManager, and pass AppStartupDependencies.make a non-nil productionSessionRouting: (a marked refusing routing)."
+    severity: error
