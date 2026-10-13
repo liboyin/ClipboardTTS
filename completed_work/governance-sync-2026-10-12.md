@@ -12,7 +12,7 @@ AGENTS now links grouped-task execution and completion-record ownership, explain
 
 The adversarial-review skill now includes review scope, a persistent independent reviewer, compact evidence records, stronger integrity inventories, explicit scratch execution containment, and evidence retention. The default reviewer changes from `gpt-6-sol` to upstream's `gpt-6.1-sol`, with high reasoning effort. Upstream's continued reviewer session supersedes the old instruction to start every review in a new session: it retains independent review context and outstanding findings across follow-ups. Each task/group still starts without the main agent's conversation, and fixes or rollback still require full gates and a fresh assessment/verdict. The previously accepted Claude CLI bypass dispatch remains subject to enforced platform permissions.
 
-The grouped-task skill is copied unchanged into `.agents/skills/grouped-task-execution/SKILL.md` and exposed to Claude through `.claude/skills/grouped-task-execution`. The existing Claude adversarial-review symlink and identical Claude model/effort settings require no change.
+The grouped-task skill is maintained in `.agents/skills/grouped-task-execution/SKILL.md` and exposed to Claude through `.claude/skills/grouped-task-execution`. The existing Claude adversarial-review symlink and identical Claude model/effort settings require no change.
 
 ## Local deviations
 
