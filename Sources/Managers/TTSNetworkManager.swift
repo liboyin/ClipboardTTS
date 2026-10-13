@@ -48,6 +48,16 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// after a retry's task is created and before that retry owns the pipeline, which is the window
     /// in which the attempt it continues has ended and it has not yet begun.
     let requestObservers: (revocationTransaction: @Sendable () -> Void, retryInstallation: @Sendable () -> Void)
+    /// Told how each metadata request's completion was handled, once that handling is final: after
+    /// the token guard has decided and, for a published list, after the `@Published` assignment has
+    /// returned. Each token a fetch mints is reported once while the manager lives, plus once for
+    /// each synthetic completion a test delivers for it; a fetch the source guard refuses mints no
+    /// token and reports nothing. A publication's handling is reported on the main queue, and an
+    /// abandonment's on the thread that abandoned it: the session's delegate queue for a finished
+    /// discovery task, or the caller's for a refusal decided before any task exists. It runs outside
+    /// `stateQueue`. Production does nothing here; it exists so a test can wait for a stale
+    /// completion to have been refused instead of waiting out elapsed time.
+    let metadataCompletionObserver: @Sendable (MetadataCompletion) -> Void
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     /// Delivers request-owned PCM in the same order that `stateQueue` accepts delegate callbacks.
@@ -118,7 +128,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Creates a manager, optionally observing the lifecycle of its underlying URL session, the
-    /// request-state transaction a conditional revocation opens, and a retry's installation.
+    /// request-state transaction a conditional revocation opens, a retry's installation, and how
+    /// each metadata completion was handled.
     ///
     /// The session always carries the production policy; `routing` can only layer request routing
     /// onto it. It has no default, so every construction states its routing: production startup
@@ -132,7 +143,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery"),
          callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
          revocationTransactionObserver: @escaping @Sendable () -> Void = {},
-         retryInstallationObserver: @escaping @Sendable () -> Void = {}) {
+         retryInstallationObserver: @escaping @Sendable () -> Void = {},
+         metadataCompletionObserver: @escaping @Sendable (MetadataCompletion) -> Void = { _ in }) {
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         let secretStartupState = APIKeyStartupState.load(
@@ -144,6 +156,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         self.requestBodyEncoder = requestBodyEncoder
         self.requestObservers = (revocationTransaction: revocationTransactionObserver,
                                  retryInstallation: retryInstallationObserver)
+        self.metadataCompletionObserver = metadataCompletionObserver
         self.sessionInvalidated = sessionInvalidated
         self.audioDeliveryQueue = audioDeliveryQueue
         self.callbackAuthority = callbackAuthority

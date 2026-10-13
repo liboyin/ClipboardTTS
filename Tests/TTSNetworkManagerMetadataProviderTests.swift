@@ -15,7 +15,7 @@ let documentedGeminiTTSVoices = [
     "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ]
 
-final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
+final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
     func testModelCatalogsReflectProviderCapabilities() {
         let manager = TestNetworkFactory.makeManager()
 
@@ -27,16 +27,16 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
+        let geminiModelsPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            "Gemini models published"
+        )
         manager.fetchAvailableModels(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "gemini-token",
             selectedProvider: "Gemini"
         )
-        let geminiModelsPublished = expectation(description: "Gemini models published")
-        DispatchQueue.main.async {
-            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
-            geminiModelsPublished.fulfill()
-        }
         wait(for: [geminiModelsPublished], timeout: 1.0)
 
         MockURLProtocol.installRequestHandler { request in
@@ -50,16 +50,16 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
+        let openAIModelsPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"]),
+            "OpenAI models published"
+        )
         manager.fetchAvailableModels(
             baseURL: "https://api.openai.com/v1/audio/speech",
             apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
-        let openAIModelsPublished = expectation(description: "OpenAI models published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["tts-1", "tts-1-hd"])
-            openAIModelsPublished.fulfill()
-        }
         wait(for: [openAIModelsPublished], timeout: 1.0)
     }
 
@@ -98,7 +98,8 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
     }
 
     func testVoiceCatalogsReflectProviderAndModelCapabilities() {
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
+        let openAIVoices = ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
         manager.updateSettings(
             baseURL: "https://api.openai.com/v1/audio/speech",
             apiKey: "openai-token",
@@ -106,18 +107,15 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
+        let openAIVoicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(provider: .openAI, values: openAIVoices),
+            "OpenAI voices published"
+        )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
             selectedProvider: "OpenAI"
         )
-        let openAIVoicesPublished = expectation(description: "OpenAI voices published")
-        DispatchQueue.main.async {
-            XCTAssertEqual(
-                manager.voiceSuggestions.values,
-                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-            )
-            openAIVoicesPublished.fulfill()
-        }
         wait(for: [openAIVoicesPublished], timeout: 1.0)
 
         manager.updateSettings(
@@ -127,18 +125,16 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
+        // The same list as before, so only a publication made after this point can satisfy it.
+        let openAIHDVoicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(provider: .openAI, values: openAIVoices),
+            "OpenAI HD voices published"
+        )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
             selectedProvider: "OpenAI"
         )
-        let openAIHDVoicesPublished = expectation(description: "OpenAI HD voices published")
-        DispatchQueue.main.async {
-            XCTAssertEqual(
-                manager.voiceSuggestions.values,
-                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-            )
-            openAIHDVoicesPublished.fulfill()
-        }
         wait(for: [openAIHDVoicesPublished], timeout: 1.0)
 
         manager.updateSettings(
@@ -148,21 +144,21 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "marin",
             selectedProvider: "OpenAI"
         )
+        let currentOpenAIVoicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(
+                provider: .openAI,
+                values: [
+                    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
+                    "shimmer", "verse", "marin", "cedar"
+                ]
+            ),
+            "Current OpenAI voices published"
+        )
         manager.fetchAvailableVoices(
             baseURL: "https://api.openai.com/v1/audio/speech",
             selectedProvider: "OpenAI"
         )
-        let currentOpenAIVoicesPublished = expectation(description: "Current OpenAI voices published")
-        DispatchQueue.main.async {
-            XCTAssertEqual(
-                manager.voiceSuggestions.values,
-                [
-                    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
-                    "shimmer", "verse", "marin", "cedar"
-                ]
-            )
-            currentOpenAIVoicesPublished.fulfill()
-        }
         wait(for: [currentOpenAIVoicesPublished], timeout: 1.0)
 
         manager.updateSettings(
@@ -172,20 +168,20 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
+        // WHY: Gemini has no discovery endpoint, so an omitted voice is simply unreachable for
+        // the user. Exact agreement with the documented table is the only check that catches a
+        // catalog that drifted from the provider contract, in either direction. Order is part
+        // of that agreement: presenting the voices in the guide's order is what makes the two
+        // comparable at a glance, so a deliberate reordering has to be restated here.
+        let geminiVoicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(provider: .gemini, values: documentedGeminiTTSVoices),
+            "Gemini voices published"
+        )
         manager.fetchAvailableVoices(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             selectedProvider: "Gemini"
         )
-        let geminiVoicesPublished = expectation(description: "Gemini voices published")
-        DispatchQueue.main.async {
-            // WHY: Gemini has no discovery endpoint, so an omitted voice is simply unreachable for
-            // the user. Exact agreement with the documented table is the only check that catches a
-            // catalog that drifted from the provider contract, in either direction. Order is part
-            // of that agreement: presenting the voices in the guide's order is what makes the two
-            // comparable at a glance, so a deliberate reordering has to be restated here.
-            XCTAssertEqual(manager.voiceSuggestions.values, documentedGeminiTTSVoices)
-            geminiVoicesPublished.fulfill()
-        }
         wait(for: [geminiVoicesPublished], timeout: 1.0)
 
         // WHY: A Custom endpoint has no discovery contract, so there is no catalog to offer and no
@@ -206,12 +202,12 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             baseURL: "https://custom.api/v1/audio/speech",
             selectedProvider: "Custom"
         )
-        let customVoicesRefused = expectation(description: "Custom publishes no voice catalog")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.voiceSuggestions, .unpublished)
-            customVoicesRefused.fulfill()
-        }
-        wait(for: [customVoicesRefused], timeout: 1.0)
+        // The refusal is decided before the call returns: its request is abandoned on this thread,
+        // so nothing is left queued that could still publish a catalog.
+        let refusal = completions.records.last?.completion
+        XCTAssertEqual(refusal?.kind, .voices)
+        XCTAssertEqual(refusal?.outcome, .abandoned, "Custom's voice refusal must be final before the call returns.")
+        XCTAssertEqual(manager.voiceSuggestions, .unpublished)
     }
 
     func testGeminiVoiceCatalogRefreshPreservesSavedVoiceInSpeechRequest() {
@@ -228,15 +224,15 @@ final class TTSNetworkManagerMetadataProviderTests: MockURLProtocolTestCase {
             voice: "Sulafat",
             selectedProvider: "Gemini"
         )
+        let voicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(provider: .gemini, values: documentedGeminiTTSVoices),
+            "Gemini catalog published before the request"
+        )
         manager.fetchAvailableVoices(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             selectedProvider: "Gemini"
         )
-        let voicesPublished = expectation(description: "Gemini catalog published before the request")
-        DispatchQueue.main.async {
-            XCTAssertEqual(manager.voiceSuggestions.values, documentedGeminiTTSVoices)
-            voicesPublished.fulfill()
-        }
         wait(for: [voicesPublished], timeout: 1.0)
 
         let requestStarted = expectation(description: "The saved Gemini voice survives the metadata refresh")

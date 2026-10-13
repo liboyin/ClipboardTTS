@@ -1,7 +1,7 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
+final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
     func testScopeChangesCancelThePendingModelRequest() {
         // WHY: Freshness guards prevent stale publication, but cancellation also matters because
         // abandoned metadata work must not continue consuming a provider connection after a switch.
@@ -129,24 +129,27 @@ final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
             return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
         }
 
+        let modelsPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .openAI, values: ["tts-1"]),
+            "The model list published"
+        )
+        let voicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(
+                provider: .openAI,
+                values: ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+            ),
+            "The voice catalog published"
+        )
+
         // The order `SettingsView.syncSettings` uses.
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
         wait(for: [modelsRequestStarted], timeout: 2.0)
         manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "OpenAI")
 
         releaseModelsResponse.signal()
-        wait(for: [modelsResponseReturned], timeout: 2.0)
-
-        let bothListsPublished = expectation(description: "Both suggestion lists published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["tts-1"])
-            XCTAssertEqual(
-                manager.voiceSuggestions.values,
-                ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-            )
-            bothListsPublished.fulfill()
-        }
-        wait(for: [bothListsPublished], timeout: 2.0)
+        wait(for: [modelsResponseReturned, modelsPublished, voicesPublished], timeout: 2.0)
     }
 
     func testAnAbandonedModelRequestCannotClearTheRequestThatReplacedIt() {
@@ -194,6 +197,12 @@ final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
             return
         }
 
+        // Observed before the replacement starts, because its response is not withheld.
+        let replacementPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .custom, values: ["live-tts-model"]),
+            "The replacing refresh published its models"
+        )
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: replacementKey, selectedProvider: "Custom")
         guard let replacementToken = manager.metadataTokenForTesting(for: .models) else {
             XCTFail("Expected the replacing refresh to own model metadata state.")
@@ -211,13 +220,75 @@ final class TTSNetworkManagerMetadataLifecycleTests: MockURLProtocolTestCase {
         )
 
         releaseAbandonedResponse.signal()
-        wait(for: [abandonedResponseReturned, replacementResponseReturned], timeout: 3.0)
+        wait(for: [abandonedResponseReturned, replacementResponseReturned, replacementPublished], timeout: 3.0)
+    }
 
-        let replacementPublished = expectation(description: "The replacing refresh published its models")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["live-tts-model"])
-            replacementPublished.fulfill()
+    func testTheCompletionObserverReportsAPublicationOnMainAfterItsListIsPublished() {
+        // WHY: A stale-result test trusts this report to mean the completion's handling is final.
+        // A report made before the publication it describes would let such a test read the list
+        // while the publication that should change it is still pending.
+        let (manager, completions) = makeMetadataManager()
+        let endpoint = "https://generativelanguage.googleapis.com/v1beta"
+        manager.updateSettings(
+            baseURL: endpoint,
+            apiKey: "gemini-key",
+            model: "gemini-3.1-flash-tts-preview",
+            voice: "Aoede",
+            selectedProvider: "Gemini"
+        )
+
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "gemini-key", selectedProvider: "Gemini")
+        waitForCompletions(in: completions, "The Gemini models publication was reported") {
+            $0.kind == .models && $0.outcome == .published
         }
-        wait(for: [replacementPublished], timeout: 1.0)
+
+        let report = completions.records.last
+        XCTAssertEqual(report?.onMainThread, true, "A publication must be reported where it was published.")
+        XCTAssertEqual(
+            report?.listAtReport,
+            ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            "A publication must be reported after its list is published."
+        )
+    }
+
+    func testAPublicationExpectationIgnoresTheReplayedAndAlreadyQueuedValues() {
+        // WHY: Combine replays the current list on subscription, and a publication an earlier
+        // action queued can still be waiting on the main queue. Either one satisfying the
+        // expectation would let a positive test pass without the action it describes having
+        // published anything. Every positive metadata test is the counterweight: each fails if
+        // a publication made after the expectation cannot satisfy it.
+        let manager = TestNetworkFactory.makeManager()
+        let list = ProviderSuggestions(provider: .openAI, values: ["tts-1"])
+        manager.modelSuggestions = list
+        DispatchQueue.main.async { manager.modelSuggestions = list }
+
+        let published = expectPublication(manager.$modelSuggestions, of: list, "No publication made after the expectation")
+        drainMainQueue()
+        // Every candidate publication has already run, so an immediate check is not a settle.
+        XCTAssertEqual(
+            XCTWaiter().wait(for: [published], timeout: 0),
+            .timedOut,
+            "Neither the replayed list nor a publication queued before the expectation may satisfy it."
+        )
+    }
+
+    func testAClosedRecorderCountsALateCompletionAndFulfilsNothing() {
+        // WHY: A completion can still be reported after its test has ended, when a scope that did
+        // not quiesce finishes later. Fulfilling that test's expectation then, or recording it as
+        // the test's own, would let late work act on a test that is no longer running.
+        let recorder = MetadataCompletionRecorder()
+        let late = TTSNetworkManager.MetadataCompletion(
+            kind: .models,
+            token: TTSNetworkManager.MetadataRequestToken(identifier: 1, generation: 0, provider: .openAI),
+            outcome: .superseded
+        )
+        let awaited = recorder.expectation("A completion its test stopped waiting for") { $0 == late }
+
+        recorder.close()
+        recorder.record(late)
+
+        XCTAssertEqual(recorder.lateCompletionCount, 1)
+        XCTAssertEqual(recorder.records, [])
+        XCTAssertEqual(XCTWaiter().wait(for: [awaited], timeout: 0), .timedOut, "A closed recorder must fulfil nothing.")
     }
 }

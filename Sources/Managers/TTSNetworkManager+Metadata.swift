@@ -36,6 +36,23 @@ extension TTSNetworkManager {
         let provider: APIKeyProvider
     }
 
+    /// How one metadata request's completion was handled, as reported to the manager's
+    /// `metadataCompletionObserver`.
+    struct MetadataCompletion: Equatable {
+        enum Outcome: Equatable {
+            /// The request was still current, and its list has been published.
+            case published
+            /// The request was still current, and it released its slot without publishing.
+            case abandoned
+            /// The request had already been replaced or invalidated, so its completion changed nothing.
+            case superseded
+        }
+
+        let kind: MetadataKind
+        let token: MetadataRequestToken
+        let outcome: Outcome
+    }
+
     struct MetadataRequest {
         let token: MetadataRequestToken
         /// The started discovery task, which only a models request has: no supported provider
@@ -90,8 +107,12 @@ extension TTSNetworkManager {
     /// Delegates to `completeMetadataRequest` rather than repeating its switch, so one token guard
     /// owns the transition and an abandonment cannot drift from the completion the publication path
     /// guards on. `stateQueue` is serial, so this must not wrap the call in a `sync` block of its own.
+    /// The completion observer is told the guard's answer on the caller's thread once it is final.
     private func finishMetadataRequest(for kind: MetadataKind, token: MetadataRequestToken) {
-        _ = completeMetadataRequest(for: kind, token: token)
+        let isCurrent = completeMetadataRequest(for: kind, token: token)
+        metadataCompletionObserver(
+            MetadataCompletion(kind: kind, token: token, outcome: isCurrent ? .abandoned : .superseded)
+        )
     }
 
     private func publishMetadata(_ values: [String],
@@ -100,16 +121,22 @@ extension TTSNetworkManager {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
 
-            guard self.completeMetadataRequest(for: kind, token: token) else { return }
-            self.isPublishingMetadata = true
-            defer { self.isPublishingMetadata = false }
-            let suggestions = ProviderSuggestions(provider: token.provider, values: values)
-            switch kind {
-            case .models:
-                self.modelSuggestions = suggestions
-            case .voices:
-                self.voiceSuggestions = suggestions
+            guard self.completeMetadataRequest(for: kind, token: token) else {
+                self.metadataCompletionObserver(MetadataCompletion(kind: kind, token: token, outcome: .superseded))
+                return
             }
+            do {
+                self.isPublishingMetadata = true
+                defer { self.isPublishingMetadata = false }
+                let suggestions = ProviderSuggestions(provider: token.provider, values: values)
+                switch kind {
+                case .models:
+                    self.modelSuggestions = suggestions
+                case .voices:
+                    self.voiceSuggestions = suggestions
+                }
+            }
+            self.metadataCompletionObserver(MetadataCompletion(kind: kind, token: token, outcome: .published))
         }
     }
 

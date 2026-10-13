@@ -2,13 +2,13 @@ import Combine
 import XCTest
 @testable import ClipboardTTSApp
 
-final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
+final class TTSNetworkManagerMetadataSourceTests: MetadataTestCase {
     func testMismatchedMetadataSourceCannotStartRequest() {
         // WHY: An old endpoint or provider identity must not mint a current token after a switch,
         // otherwise it can publish metadata that belongs to no selected source. Each half is
         // mismatched on its own here, because Settings changes both in the same edit and a guard
         // that checked only one would still admit the other's stale call.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta"
         let openAIEndpoint = "https://api.openai.com/v1/audio/speech"
         manager.updateSettings(
@@ -21,21 +21,20 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         manager.modelSuggestions = ProviderSuggestions(provider: .gemini, values: ["current-model"])
         manager.voiceSuggestions = ProviderSuggestions(provider: .gemini, values: ["current-voice"])
 
-        let staleRequestStarted = expectation(description: "Mismatched metadata request must not start")
-        staleRequestStarted.isInverted = true
-        MockURLProtocol.installRequestHandler { request in
-            staleRequestStarted.fulfill()
-            return sourceTestResponse(for: request, json: "{ \"data\": [] }")
-        }
-
+        // No handler is installed: this scope's unhandled-request accounting fails if any of these
+        // calls sends a request.
         // The selected endpoint, but the identity the user just switched away from.
         manager.fetchAvailableModels(baseURL: geminiEndpoint, apiKey: "old-key", selectedProvider: "OpenAI")
         manager.fetchAvailableVoices(baseURL: geminiEndpoint, selectedProvider: "OpenAI")
         // The selected identity, but the endpoint the user just switched away from.
         manager.fetchAvailableModels(baseURL: openAIEndpoint, apiKey: "old-key", selectedProvider: "Gemini")
         manager.fetchAvailableVoices(baseURL: openAIEndpoint, selectedProvider: "Gemini")
-        wait(for: [staleRequestStarted], timeout: 0.2)
 
+        // The source guard refuses each call before it mints a token, so there is no request,
+        // queued publication, or completion to wait for: the refusal is already final here.
+        XCTAssertNil(manager.metadataTokenForTesting(for: .models), "A mismatched source must not own model metadata state.")
+        XCTAssertNil(manager.metadataTokenForTesting(for: .voices), "A mismatched source must not own voice metadata state.")
+        XCTAssertEqual(completions.records, [])
         XCTAssertEqual(manager.modelSuggestions.values, ["current-model"])
         XCTAssertEqual(manager.voiceSuggestions.values, ["current-voice"])
     }
@@ -48,7 +47,7 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         // late. The same-scope edit made first is the counterweight: changing the key, model, and
         // voice leaves the provider and endpoint alone, so it must invalidate nothing, and it is what
         // attributes the invalidation below to the provider rather than to any edit at all.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let sharedEndpoint = "https://api.openai.com/v1/audio/speech"
         manager.updateSettings(
             baseURL: sharedEndpoint,
@@ -115,13 +114,17 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         releaseModelRequest.signal()
         wait(for: [modelRequestReleased], timeout: 2.0)
 
-        let lateAnswersRefused = expectation(description: "Late OpenAI metadata refused")
-        DispatchQueue.main.async {
-            XCTAssertEqual(manager.modelSuggestions, .unpublished)
-            XCTAssertEqual(manager.voiceSuggestions, .unpublished)
-            lateAnswersRefused.fulfill()
+        // Each stale token completes twice: models through the synthetic publication and the
+        // cancelled task's own completion, voices through the synthetic publication and the
+        // catalog's own queued one. All four must have been refused before the lists are read.
+        waitForCompletions(in: completions, count: 2, "Both late OpenAI model completions were refused") {
+            $0.kind == .models && $0.token == staleModelToken && $0.outcome == .superseded
         }
-        wait(for: [lateAnswersRefused], timeout: 2.0)
+        waitForCompletions(in: completions, count: 2, "Both late OpenAI voice completions were refused") {
+            $0.kind == .voices && $0.token == staleVoiceToken && $0.outcome == .superseded
+        }
+        XCTAssertEqual(manager.modelSuggestions, .unpublished)
+        XCTAssertEqual(manager.voiceSuggestions, .unpublished)
     }
 
     func testCleartextMetadataSourceCannotStartARequestOrPublishLists() {
@@ -132,7 +135,7 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
         // Settings cannot produce this configuration today, because the only discovery request it
         // makes uses OpenAI's fixed HTTPS endpoint. The guard is kept, and exercised here, as
         // defense in depth for a later caller that derives the discovery URL from a saved value.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let endpoint = "http://custom-metadata.example.com/v1/audio/speech"
         manager.updateSettings(
             baseURL: endpoint,
@@ -144,9 +147,9 @@ final class TTSNetworkManagerMetadataSourceTests: MockURLProtocolTestCase {
 
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: "cleartext-metadata-key", selectedProvider: "Custom")
 
-        let publicationWindowClosed = expectation(description: "Any metadata publication has run")
-        DispatchQueue.main.async { publicationWindowClosed.fulfill() }
-        wait(for: [publicationWindowClosed], timeout: 1.0)
+        // The transport refusal is decided before any task exists, so the request is abandoned
+        // before the call returns and nothing is left queued that could still publish a list.
+        XCTAssertEqual(completions.records.map(\.completion.outcome), [.abandoned])
         XCTAssertEqual(manager.modelSuggestions.values, [])
     }
 

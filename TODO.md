@@ -121,10 +121,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Non-blocking
 
-#### NB17 — Test teardown does not own every queued audio action
-
-**Validated — ownership trace.** Fixed waits remain in Services/audio/metadata tests. Draining a network delivery queue does not drain the player buffer queue, publications, or pending automatic start. This is a missing guarantee, not a claim the baseline observed an escaping callback. **Paths:** [Services tests](Tests/ServicesCoordinatorTests.swift), [audio tests](Tests/AudioPlayerManagerTests.swift), [test factory](Tests/TestNetworkSupport.swift), [audio owner](Sources/Managers/AudioPlayerManager.swift), metadata tests. **Direction/acceptance:** test-owned audio lifecycle, explicit processing/publication completion, cancelled scheduled work, unconditional teardown, and locally counted late work. Forced delayed callbacks cannot escape even after assertion timeouts. Preserve network scope accounting.
-
 #### NB24 — Clipboard-presence console messages have no release purpose
 
 **Validated — print calls; legacy Task 46.** They disclose clipboard presence, not copied text. **Paths:** [TextExtractionManager](Sources/Managers/TextExtractionManager.swift), [text tests](Tests/TextExtractionManagerTests.swift), README if a diagnostic description changes. **Direction/acceptance:** implement D8 by removing the prints. Preserve populated/empty injected clipboard returns; introduce no new error or alternative logging; never use the shared pasteboard.
@@ -153,6 +149,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB17](completed_work/NB17.md) — Fixed: every test audio player has an owner that ends its lifecycle however the test ends, and the metadata suites wait for reported completions instead of elapsed time.
 - [N7](completed_work/N7.md) — Fixed: the audio-queue closure names its capture of the manager, and a held prebuffer action cannot keep a released manager alive.
 - [NB48](completed_work/NB48.md) — Fixed: checked-in tests fail when the request helper's gate, barrier, or both are removed.
 - [NB49](completed_work/NB49.md) — Fixed: the request helper refuses, and sends nothing through, a configuration that is not routed.

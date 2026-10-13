@@ -1,11 +1,11 @@
 import XCTest
 @testable import ClipboardTTSApp
 
-final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
+final class TTSNetworkManagerMetadataTests: MetadataTestCase {
     func testDelayedOpenAIModelsCannotReplaceGeminiModels() {
         // WHY: Cancellation races with URLSession completion, so a delayed OpenAI response must not
         // overwrite the Gemini models that the user selected after starting the original request.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         manager.updateSettings(
             baseURL: "https://api.openai.com/v1/audio/speech",
             apiKey: "openai-test-key",
@@ -47,17 +47,16 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             selectedProvider: "Gemini"
         )
         XCTAssertEqual(manager.modelSuggestions.values, [])
+        let geminiModelsPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            "Gemini models published"
+        )
         manager.fetchAvailableModels(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "gemini-test-key",
             selectedProvider: "Gemini"
         )
-
-        let geminiModelsPublished = expectation(description: "Gemini models published")
-        DispatchQueue.main.async {
-            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
-            geminiModelsPublished.fulfill()
-        }
         wait(for: [geminiModelsPublished], timeout: 1.0)
 
         // URLSession can cancel before delivering a mock response, but a production completion
@@ -66,18 +65,18 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         releaseOldResponse.signal()
         wait(for: [oldResponseReturned], timeout: 1.0)
 
-        let staleResponseIgnored = expectation(description: "Stale OpenAI response ignored")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
-            staleResponseIgnored.fulfill()
+        // The stale token completes twice: the synthetic publication above, and the cancelled
+        // task's own completion. Both must have been refused before the list is read.
+        waitForCompletions(in: completions, count: 2, "Both stale OpenAI completions were refused") {
+            $0.kind == .models && $0.token == staleToken && $0.outcome == .superseded
         }
-        wait(for: [staleResponseIgnored], timeout: 1.0)
+        XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
     }
 
     func testDelayedCustomModelsCannotReplaceModelsFromNewEndpoint() {
         // WHY: Two Custom endpoints share the same request contract, so provider identity alone
         // cannot prevent endpoint A's late models from replacing endpoint B's current models.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let firstEndpoint = "https://custom-a.example/v1/audio/speech"
         let secondEndpoint = "https://custom-b.example/v1/audio/speech"
         manager.updateSettings(
@@ -106,6 +105,11 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         manager.fetchAvailableModels(baseURL: firstEndpoint, apiKey: "custom-a-key", selectedProvider: "Custom")
         wait(for: [oldRequestStarted], timeout: 1.0)
+        guard let staleToken = manager.metadataTokenForTesting(for: .models) else {
+            XCTFail("Expected the first Custom request to own model metadata state.")
+            releaseOldResponse.signal()
+            return
+        }
 
         manager.updateSettings(
             baseURL: secondEndpoint,
@@ -115,26 +119,22 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             selectedProvider: "Custom"
         )
         XCTAssertEqual(manager.modelSuggestions.values, [])
+        let currentModelsPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .custom, values: ["current-tts-model"]),
+            "Second Custom models published"
+        )
         manager.fetchAvailableModels(baseURL: secondEndpoint, apiKey: "custom-b-key", selectedProvider: "Custom")
 
         // The mock protocol may serialize its loads, so release endpoint A only after endpoint B
         // has been requested rather than requiring B's request to begin concurrently.
         releaseOldResponse.signal()
-        wait(for: [oldResponseReturned, secondRequestCompleted], timeout: 1.0)
+        wait(for: [oldResponseReturned, secondRequestCompleted, currentModelsPublished], timeout: 1.0)
 
-        let currentModelsPublished = expectation(description: "Second Custom models published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
-            currentModelsPublished.fulfill()
+        waitForCompletions(in: completions, "The stale Custom models completion was refused") {
+            $0.kind == .models && $0.token == staleToken && $0.outcome == .superseded
         }
-        wait(for: [currentModelsPublished], timeout: 1.0)
-
-        let staleResponseIgnored = expectation(description: "Stale Custom models response ignored")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
-            staleResponseIgnored.fulfill()
-        }
-        wait(for: [staleResponseIgnored], timeout: 1.0)
+        XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
     }
 
     func testAVoiceCatalogPublishedForTheOldProviderCannotReplaceTheNewOne() throws {
@@ -142,7 +142,7 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         // asynchronous, so a switch made in that window must invalidate the catalog already in
         // flight. Voice metadata therefore needs freshness state of its own, independent of the
         // models request that Settings starts beside it.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta"
         manager.updateSettings(
             baseURL: geminiEndpoint,
@@ -171,18 +171,16 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
         // second one through the same production guard so both races are covered.
         manager.publishMetadataForTesting(documentedGeminiTTSVoices, for: .voices, token: staleToken)
 
-        let staleCatalogIgnored = expectation(description: "Stale Gemini catalog ignored")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.voiceSuggestions, .unpublished)
-            staleCatalogIgnored.fulfill()
+        waitForCompletions(in: completions, count: 2, "Both stale Gemini catalogs were refused") {
+            $0.kind == .voices && $0.token == staleToken && $0.outcome == .superseded
         }
-        wait(for: [staleCatalogIgnored], timeout: 1.0)
+        XCTAssertEqual(manager.voiceSuggestions, .unpublished)
     }
 
     func testMalformedMetadataDoesNotReplaceCurrentLists() {
         // WHY: A malformed response must not turn a known-good current-provider list into an
         // arbitrary value; only a successful, decodable response is allowed to publish.
-        let manager = TestNetworkFactory.makeManager()
+        let (manager, completions) = makeMetadataManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
         manager.modelSuggestions = ProviderSuggestions(provider: .custom, values: ["known-tts-model"])
@@ -195,21 +193,19 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
 
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
         wait(for: [requestCompleted], timeout: 1.0)
-
-        let malformedResponseIgnored = expectation(description: "Malformed metadata was not published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, ["known-tts-model"])
-            // WHY: Declining to publish is only half the transition. The refusal must also release
-            // the slot, and the finished task it retains, that its own token held. Nothing else
-            // observes that release, so without this assertion the shared clearing the publishing
-            // and abandoning paths now share could be dropped entirely with every gate still green.
-            XCTAssertNil(
-                manager.metadataTokenForTesting(for: .models),
-                "An abandoned refresh must release the request slot its own token held."
-            )
-            malformedResponseIgnored.fulfill()
+        waitForCompletions(in: completions, "The malformed response was abandoned") {
+            $0.kind == .models && $0.outcome == .abandoned
         }
-        wait(for: [malformedResponseIgnored], timeout: 1.0)
+
+        XCTAssertEqual(manager.modelSuggestions.values, ["known-tts-model"])
+        // WHY: Declining to publish is only half the transition. The refusal must also release
+        // the slot, and the finished task it retains, that its own token held. Nothing else
+        // observes that release, so without this assertion the shared clearing the publishing
+        // and abandoning paths now share could be dropped entirely with every gate still green.
+        XCTAssertNil(
+            manager.metadataTokenForTesting(for: .models),
+            "An abandoned refresh must release the request slot its own token held."
+        )
     }
 
     func testEmptySuccessfulMetadataResponsesClearCurrentLists() {
@@ -225,15 +221,13 @@ final class TTSNetworkManagerMetadataTests: MockURLProtocolTestCase {
             requestCompleted.fulfill()
             return metadataResponse(for: request, json: "{ \"data\": [] }")
         }
+        let emptyListPublished = expectPublication(
+            manager.$modelSuggestions,
+            of: ProviderSuggestions(provider: .custom, values: []),
+            "Empty metadata list published"
+        )
 
         manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
-        wait(for: [requestCompleted], timeout: 1.0)
-
-        let emptyListPublished = expectation(description: "Empty metadata list published")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(manager.modelSuggestions.values, [])
-            emptyListPublished.fulfill()
-        }
-        wait(for: [emptyListPublished], timeout: 1.0)
+        wait(for: [requestCompleted, emptyListPublished], timeout: 1.0)
     }
 }
