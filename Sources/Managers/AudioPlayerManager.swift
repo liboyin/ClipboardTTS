@@ -248,7 +248,9 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
 
     func scheduleAudio(data: Data, streamGeneration: Int) {
         // Runs on the network delegate's background queue; serialize buffer access via bufferQueue.
-        bufferQueue.async {
+        // The packet's processing holds the manager only until it runs; the deferred automatic start
+        // captures it weakly, so a held prebuffer action cannot keep a released manager alive.
+        bufferQueue.async { [self] in
             defer { self.audioObservers.processed() }
             guard self.scheduleGeneration == streamGeneration else { return }
             guard let format = self.audioFormat else { return }

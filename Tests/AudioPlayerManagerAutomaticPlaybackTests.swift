@@ -42,6 +42,38 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         assertPlayingState(of: player, is: true)
     }
 
+    func testHeldAutomaticPlaybackActionDoesNotKeepReleasedManagerAlive() {
+        // WHY: The scheduler holds the deferred start for the whole prebuffer delay, so the action
+        // must not own the manager; one that did would keep a released player and its engine alive.
+        let scheduler = ManualAutomaticPlaybackScheduler()
+        let stateUpdates = AudioStateUpdateRecorder()
+        let bufferedAudioState = stateUpdates.expectNextUpdate()
+        weak var releasedPlayer: AudioPlayerManager?
+        do {
+            let player = AudioPlayerManager(
+                automaticPlaybackScheduler: scheduler.schedule,
+                audioStateObserver: stateUpdates.record
+            )
+            releasedPlayer = player
+            let generation = player.startNewStream()
+            player.scheduleAudio(data: Data(repeating: 0, count: 2), streamGeneration: generation)
+            wait(for: [bufferedAudioState], timeout: 1.0)
+            XCTAssertEqual(scheduler.scheduledActionCount, 1)
+            // A synchronous turn on the audio queue, so the packet's processing block has returned and
+            // been released before the last reference the test holds goes away.
+            XCTAssertFalse(player.changesAudioFormat(to: AudioPlayerManager.defaultSampleRate))
+        }
+        // The publication that fulfilled the wait has returned as well, so nothing but the held
+        // action can still reach the manager.
+        drainMainQueue()
+        XCTAssertNil(releasedPlayer, "The held automatic-playback action must not retain the manager.")
+
+        scheduler.runNextAction()
+        drainMainQueue()
+
+        XCTAssertNil(releasedPlayer)
+    }
+
     func testAutomaticPlaybackDoesNotStartAfterStopBeforePrebufferDeadline() {
         // WHY: Clear Buffer maps to stop(), so an already-queued automatic start must never
         // resurrect playback after the user has discarded the stream.
@@ -344,6 +376,14 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Delayed playback action is handled on the main queue")
         DispatchQueue.main.async {
             XCTAssertEqual(player.isPlaying, expectedState)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 1.0)
+    }
+
+    private func drainMainQueue() {
+        let expectation = XCTestExpectation(description: "Work queued to the main queue has run")
+        DispatchQueue.main.async {
             expectation.fulfill()
         }
         wait(for: [expectation], timeout: 1.0)

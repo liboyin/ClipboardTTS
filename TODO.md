@@ -28,7 +28,7 @@ The review did not exercise live providers, physical device switching, macOS 13,
 
 A follow-up sequential review on 2026-09-18 covered the Codex commits `afccaff`–`379cd97` and produced NB26–NB29 and N6. It was read-only against `ec01095`: it inspected the ten diffs, the affected source and tests, `project.yml`, the generated scheme list, and `swiftlint --strict` (0 violations in 95 files). It did not rerun the test suite, the coverage gate, or the mutation evidence those commits' dispositions claim.
 
-N7 comes from NB12's gate run on 2026-09-18 at `6578dac`, which used Xcode 27.0 (27A266a) and Swift 6.4 rather than the Xcode 26.6 recorded above. Toolchain claims recorded against 26.6 have not been revalidated on 27.0.
+[N7](completed_work/N7.md) came from NB12's gate run on 2026-09-18 at `6578dac`, which used Xcode 27.0 (27A266a) and Swift 6.4 rather than the Xcode 26.6 recorded above. Toolchain claims recorded against 26.6 have not been revalidated on 27.0.
 
 **Validated** means source inspection and/or the stated review probe supported the finding. **Not independently validated** identifies inherited evidence still needing verification. Architectural benefits are design judgments, even when the underlying structure is validated.
 
@@ -143,9 +143,7 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Nits
 
-#### N7 — The automatic-playback prebuffer closure draws an implicit-strong-capture warning
-
-**Validated — clean build output.** The clean `check-coverage.sh` build for NB12 (`6578dac`) reported `'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]` at [AudioPlayerManager.swift:275](Sources/Managers/AudioPlayerManager.swift). The inner `[weak self]` scheduler closure sits inside `scheduleAudio`'s `bufferQueue.async` closure, which captures `self` strongly without saying so. The line dates from `503ab88b`, and NB12 did not touch the file. It was not previously recorded, and whether Xcode 26.6 emitted it is unverified. **Paths:** [AudioPlayerManager](Sources/Managers/AudioPlayerManager.swift), [audio tests](Tests/AudioPlayerManagerTests.swift). **Direction:** make the capture intent explicit so the warning resolves without suppression. Keep the prebuffer closure from retaining the manager across its delay. **Acceptance:** a clean build reports no source warning at that site; automatic playback, its generation guard, and B3's pause revocation behave as before; no diagnostic is disabled.
+No Nit is outstanding; [N7](completed_work/N7.md) was the last one.
 
 ## Ready for implementation
 
@@ -155,6 +153,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [N7](completed_work/N7.md) — Fixed: the audio-queue closure names its capture of the manager, and a held prebuffer action cannot keep a released manager alive.
 - [NB48](completed_work/NB48.md) — Fixed: checked-in tests fail when the request helper's gate, barrier, or both are removed.
 - [NB49](completed_work/NB49.md) — Fixed: the request helper refuses, and sends nothing through, a configuration that is not routed.
 - [N8](completed_work/N8.md) — Fixed: the request helper is named `sendOneRoutedRequestLeavingNoCompletion`.
