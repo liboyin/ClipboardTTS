@@ -97,7 +97,7 @@ extension XCTestCase {
         let stateUpdates = AudioStateUpdateRecorder()
         let processedPacket = ArmedPacketSignal()
         let heldRecoveries = holdingRecoveries ? HeldRecoveryScheduler() : nil
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: scheduledBuffers.record,
             engineStarter: { engine in
                 engineCapture.engine = engine

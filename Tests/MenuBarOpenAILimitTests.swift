@@ -77,7 +77,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // the same generic HTTP failure every other error produces — no indication that the text
         // was simply too long. The click must say what is wrong before spending the request, and
         // must leave the pipeline idle so the next Speak click needs no Clear Buffer first.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_097))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = makeOpenAIManager()
@@ -115,7 +115,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // WHY: The limit is a maximum, not a threshold to stay under. Refusing text OpenAI accepts
         // would block work the user is entitled to, and this boundary is what an off-by-one in
         // either direction moves.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_096))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = makeOpenAIManager()
@@ -152,7 +152,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         let combiningAccentText = String(repeating: "e\u{0301}", count: 2_049)
         XCTAssertEqual(combiningAccentText.count, 2_049, "The value must stay under the limit by cluster count.")
         XCTAssertEqual(combiningAccentText.unicodeScalars.count, 4_098, "It must exceed the limit by scalar count.")
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: combiningAccentText)
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = makeOpenAIManager()
@@ -188,7 +188,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         XCTAssertEqual(emojiText.unicodeScalars.count, 4_096, "The value must sit exactly at the limit in scalars.")
         XCTAssertEqual(emojiText.utf16.count, 8_192, "It must exceed the limit in UTF-16 units.")
         XCTAssertEqual(emojiText.utf8.count, 16_384, "It must exceed the limit in UTF-8 bytes.")
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: emojiText))
         let networkManager = makeOpenAIManager()
         let requestStarted = expectation(description: "Text within the scalar limit reaches the provider")
@@ -219,7 +219,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // WHY: The limit is OpenAI's, not the app's. Gemini documents no such maximum, and the
         // user chose a provider-scoped check precisely so Gemini keeps its one-request, fastest
         // path. A guard that read the endpoint instead of the selected provider could refuse here.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(
             pasteboard: FakePasteboardReader(text: String(repeating: "a", count: 5_000))
         )
@@ -259,7 +259,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // WHY: A Custom endpoint's limits belong to whoever runs it, and the default Custom base
         // URL is the same string as OpenAI's fixed endpoint. A check that inferred the provider
         // from the endpoint would silently refuse text a self-hosted service accepts.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(
             pasteboard: FakePasteboardReader(text: String(repeating: "a", count: 5_000))
         )
@@ -299,7 +299,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // WHY: A dropped attempt speaks for a click the pipeline no longer belongs to, so it must
         // stay silent in every direction: it may neither start speech nor interrupt whatever now
         // owns the pipeline with a modal panel about a clipboard read it never performed.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_097))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = makeOpenAIManager()

@@ -7,7 +7,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // WHY: Services can arrive before Settings has ever appeared. A corrupt persisted Custom
         // rate must therefore block this normal speech path instead of decoding streamed PCM using
         // a silent 24-kHz fallback.
-        let audioPlayer = AudioPlayerManager(sampleRate: 48_001)
+        let audioPlayer = makeOwnedAudioPlayer(sampleRate: 48_001)
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { _ in
@@ -34,7 +34,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // every entry point. Services carries a selection the user made in another app, where no
         // dialog of ours is expected, so putting the rule in `streamTTS` would silently change this
         // path too. Long selected text must still reach the provider and fail there, as it does now.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(
             baseURL: "https://api.openai.com/v1/audio/speech",
@@ -70,7 +70,8 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // coordinator now owns the subscription that used to live on the lazily-built view, so
         // posting the notification alone — with no view in existence — must drive selected text ->
         // network -> scheduled audio. hasAudio flipping true proves that whole chain ran.
-        let audioPlayer = AudioPlayerManager()
+        let audioPublications = AudioStateUpdateRecorder()
+        let audioPlayer = makeOwnedAudioPlayer(audioStateObserver: audioPublications.record)
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { request in
@@ -83,24 +84,21 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
             speechSession: SpeechSessionCoordinator(audioPlayer: audioPlayer, networkManager: networkManager),
             notificationCenter: center
         )
+        let firstPublication = audioPublications.expectNextUpdate()
 
         withExtendedLifetime(coordinator) {
             center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: "Speak me")
-
-            let expectation = XCTestExpectation(description: "Service text streamed to audio")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                XCTAssertTrue(audioPlayer.hasAudio)
-                expectation.fulfill()
-            }
-            wait(for: [expectation], timeout: 3.0)
+            wait(for: [firstPublication], timeout: 3.0)
         }
+
+        XCTAssertTrue(audioPlayer.hasAudio, "The selected text's PCM must reach the player.")
     }
 
     func testBackgroundServiceNotificationUsesTheMainActionHandoff() {
         // WHY: AppKit Services normally arrives on main, but NotificationCenter permits another
         // posting thread. Playback state and AVAudioEngine control are main-confined, so a
         // background post must use the coordinator's full main-action handoff before speaking.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         let requestReceived = expectation(description: "Main action starts its speech request")
@@ -133,7 +131,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // start a stream with garbage. If the guard regressed and fed a non-String payload into
         // the pipeline, streamTTS would fire a real network request — MockURLProtocol's XCTFail
         // handler makes that regression fail the test rather than silently hit the live API.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
         MockURLProtocol.installRequestHandler { request in
@@ -142,20 +140,24 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         }
 
         let center = NotificationCenter()
+        let speechActions = LockedValue(0)
         let coordinator = ServicesCoordinator(
             speechSession: SpeechSessionCoordinator(audioPlayer: audioPlayer, networkManager: networkManager),
-            notificationCenter: center
+            notificationCenter: center,
+            speechActionObserver: { speechActions.withValue { $0 += 1 } }
         )
 
         withExtendedLifetime(coordinator) {
             center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: 42)
-
-            // Drain the main/network queues so a regressed request would have reached the protocol.
-            let settled = XCTestExpectation(description: "No stream started")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { settled.fulfill() }
-            wait(for: [settled], timeout: 1.0)
+            // A post on main is handled synchronously, and any speech it handed to the main actor
+            // would run within one main-queue turn; speaking is what starts a request, so a
+            // regression is visible here without waiting for the request itself.
+            let drained = expectation(description: "The main queue completed a turn")
+            DispatchQueue.main.async { drained.fulfill() }
+            wait(for: [drained], timeout: 1.0)
         }
 
+        XCTAssertEqual(speechActions.value, 0, "A malformed notification must not reach the session owner.")
         XCTAssertFalse(networkManager.isStreaming)
         XCTAssertFalse(audioPlayer.hasAudio)
     }

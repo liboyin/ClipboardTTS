@@ -56,7 +56,7 @@ final class AudioPlayerStreamTerminationTests: XCTestCase {
         let stateUpdates = AudioStateUpdateRecorder()
         let audioPublished = stateUpdates.expectNextUpdate()
         let endingPublished = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             audioStateObserver: { publications.record(); stateUpdates.record() }
         )
@@ -87,7 +87,7 @@ final class AudioPlayerStreamTerminationTests: XCTestCase {
         // narrower window where it is superseded after that and before the ending publishes.
         let processing = AudioDataProcessingRecorder()
         let endingHandled = processing.expectNextProcessing()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             audioDataProcessingObserver: processing.record
         )
@@ -113,7 +113,7 @@ final class AudioPlayerStreamTerminationTests: XCTestCase {
         // there has already run by the time the replacement retires the generation, while this test
         // still owns the main queue and the publication it queued cannot have run.
         let stateUpdates = AudioStateUpdateRecorder()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -136,7 +136,7 @@ final class AudioPlayerStreamTerminationTests: XCTestCase {
         // would make the record useless to anything that has to tell them apart.
         let stateUpdates = AudioStateUpdateRecorder()
         let endingPublished = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -154,7 +154,7 @@ final class AudioPlayerStreamTerminationTests: XCTestCase {
         // would report a stream as finished before its request has sent a single byte.
         let stateUpdates = AudioStateUpdateRecorder()
         let endingPublished = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             audioStateObserver: stateUpdates.record
         )

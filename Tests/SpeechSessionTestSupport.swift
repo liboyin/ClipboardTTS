@@ -134,7 +134,7 @@ extension MockURLProtocolTestCase {
         engineStarter: @escaping (AVAudioEngine) throws -> Void = { try $0.start() }
     ) -> OwnedSpeechSession {
         let heldAutomaticPlayback = ManualAutomaticPlaybackScheduler()
-        let audioPlayer = AudioPlayerManager(
+        let audioPlayer = makeOwnedAudioPlayer(
             sampleRate: sampleRate,
             engineStarter: engineStarter,
             automaticPlaybackScheduler: heldAutomaticPlayback.schedule

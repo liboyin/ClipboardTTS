@@ -110,3 +110,22 @@ custom_rules:
       - string
     message: "A test must not hold a manager whose session has no routing; build managers with TestNetworkFactory.makeManager, and pass AppStartupDependencies.make a non-nil productionSessionRouting: (a marked refusing routing)."
     severity: error
+
+  # Every test player must have a test-owned lifecycle, so in `Tests/` an `AudioPlayerManager` is
+  # built only by `makeOwnedAudioPlayer`/`makeAudioPlayerOwner` (their file is excluded), which
+  # register the owner's teardown as the player is built. The rule refuses `AudioPlayerManager(`,
+  # `AudioPlayerManager.init`, a contextual `.init` assigned to an `AudioPlayerManager`, and a
+  # contextual `.init(` whose first label is one of the initializer's own. Like the rules above it
+  # guards a habit, not a proof: a type alias, a spliced comment, or a contextual `.init` whose type
+  # only the compiler can see still gets through.
+  test_owned_audio_player:
+    name: "Test Owned Audio Player"
+    included: ".*/Tests/.*\\.swift"
+    excluded: ".*/Tests/AudioPlayerOwner\\.swift"
+    regex: "\\bAudioPlayerManager\\s*(\\(|\\.\\s*init\\b)|:\\s*AudioPlayerManager\\s*[?!]?\\s*=\\s*\\.\\s*init\\b|\\.\\s*init\\s*\\(\\s*(sampleRate|scheduledBufferObserver|engineStarter|automaticPlaybackScheduler|renderedSampleTimeReader|progressTimerScheduler|audioDataProcessingObserver|audioStateObserver|notificationCenter|configurationChangeRecoveryScheduler)\\s*:"
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    message: "A test player must have a test-owned lifecycle; build it with makeOwnedAudioPlayer (or makeAudioPlayerOwner), which registers its teardown, or disable this rule on the one line with the reason the owner cannot serve."
+    severity: error

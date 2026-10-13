@@ -323,7 +323,7 @@ final class AudioPlayerUnderrunRecoveryTests: XCTestCase {
         let scheduledBuffers = ScheduledPCMBufferRecorder()
         let stateUpdates = AudioStateUpdateRecorder()
         let processedPackets = AudioDataProcessingRecorder()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: scheduledBuffers.record,
             automaticPlaybackScheduler: heldAutomaticStart.schedule,
             renderedSampleTimeReader: renderedPosition.read,

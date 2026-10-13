@@ -11,7 +11,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduledBuffers = ScheduledPCMBufferRecorder()
         let stateUpdates = AudioStateUpdateRecorder()
         let firstStateUpdate = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: scheduledBuffers.record,
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
@@ -50,7 +50,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let bufferedAudioState = stateUpdates.expectNextUpdate()
         weak var releasedPlayer: AudioPlayerManager?
         do {
-            let player = AudioPlayerManager(
+            let player = makeOwnedAudioPlayer(
                 automaticPlaybackScheduler: scheduler.schedule,
                 audioStateObserver: stateUpdates.record
             )
@@ -80,7 +80,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -104,7 +104,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -126,7 +126,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -152,7 +152,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -178,7 +178,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let pausedStreamState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -211,7 +211,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let audioDataProcessing = AudioDataProcessingRecorder()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioDataProcessingObserver: audioDataProcessing.record,
             audioStateObserver: stateUpdates.record
@@ -246,7 +246,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let firstStateUpdate = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -275,7 +275,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduler = ManualAutomaticPlaybackScheduler()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
         )
@@ -300,7 +300,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let engineStarter = FailingAudioEngineStarter()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedAudioState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             engineStarter: engineStarter.start,
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record
@@ -326,7 +326,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let firstPacketProcessed = audioDataProcessing.expectNextProcessing()
         let stateUpdates = AudioStateUpdateRecorder()
         let firstStateUpdate = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: scheduler.schedule,
             audioDataProcessingObserver: audioDataProcessing.record,
             audioStateObserver: stateUpdates.record
@@ -354,7 +354,7 @@ final class AudioPlayerManagerAutomaticPlaybackTests: XCTestCase {
         let scheduledBuffers = ScheduledPCMBufferRecorder()
         let stateUpdates = AudioStateUpdateRecorder()
         let bufferedState = stateUpdates.expectNextUpdate()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: scheduledBuffers.record,
             automaticPlaybackScheduler: scheduler.schedule,
             audioStateObserver: stateUpdates.record

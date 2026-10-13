@@ -16,7 +16,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             SettingsKeys.ttsProvider: "Gemini"
         ])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         let settings = HostedSettings(
             networkManager: networkManager,
@@ -50,7 +50,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
         networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
@@ -133,7 +133,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         ])
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-gemini-api-key", for: .gemini)
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
 
         let requestEmitted = expectation(description: "Test Voice sends the typed Gemini model and voice")
@@ -190,7 +190,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!

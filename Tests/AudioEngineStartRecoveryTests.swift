@@ -17,7 +17,7 @@ final class AudioEngineStartRecoveryTests: XCTestCase {
         // format unplayable in the first place.
         let starter = SwitchableAudioEngineStarter(shouldFail: true)
         let timer = ProgressTimerSpy()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             engineStarter: starter.start,
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             progressTimerScheduler: timer.schedule
@@ -45,7 +45,7 @@ final class AudioEngineStartRecoveryTests: XCTestCase {
         // keep refusing sessions that would decode PCM at a rate the graph does not hold.
         let starter = SwitchableAudioEngineStarter(shouldFail: true)
         let timer = ProgressTimerSpy()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             engineStarter: starter.start,
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
             progressTimerScheduler: timer.schedule
@@ -73,7 +73,7 @@ final class AudioEngineStartRecoveryTests: XCTestCase {
         // may begin, so it must attempt the start itself, publish a repeated failure, and clear the
         // failure once the start succeeds.
         let starter = SwitchableAudioEngineStarter(shouldFail: true)
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             engineStarter: starter.start,
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule
         )
@@ -101,7 +101,7 @@ final class AudioEngineStartRecoveryTests: XCTestCase {
         let starter = SwitchableAudioEngineStarter(shouldFail: true)
         let timer = ProgressTimerSpy()
         let stateUpdates = AudioStateUpdateRecorder()
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             engineStarter: starter.start,
             automaticPlaybackScheduler: scheduler.schedule,
             progressTimerScheduler: timer.schedule,

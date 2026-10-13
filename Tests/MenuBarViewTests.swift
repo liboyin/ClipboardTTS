@@ -65,7 +65,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             SettingsKeys.ttsProvider: "Gemini",
             SettingsKeys.geminiVoice: "Distinctive-Review-Voice"
         ])
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager(defaults: defaults)
         networkManager.updateSettings(
@@ -109,7 +109,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // WHY: This is the core "Speak Copied Text" story - with text on the clipboard and nothing
         // playing, the button must pull the clipboard text and start a network request. Audio
         // scheduling is covered by AudioPlayerManagerTests, so this view test avoids live audio.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
@@ -130,7 +130,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // WHY: Once audio is buffered the button becomes "Clear Buffer"; speakCopiedText must then
         // tear playback down (stop streaming + discard buffered audio) rather than start a new read.
         // If it didn't, the button would advertise a clear that never happens.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager()
         let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
@@ -164,7 +164,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // WHY: The request error is supplementary feedback, not a replacement for playback
         // controls. Mounting the view verifies SwiftUI actually renders the conditional message
         // while keeping the primary playback control available.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
         let networkManager = TestNetworkFactory.makeManager()
         let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)

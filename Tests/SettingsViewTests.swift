@@ -18,7 +18,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         // Selecting OpenAI also fetches its model and voice suggestions.
         MockURLProtocol.installRequestHandler { request in
@@ -50,7 +50,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid PCM rate must not start Test Voice")
@@ -81,7 +81,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         let settings = HostedSettings(
             networkManager: networkManager,
@@ -107,7 +107,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
             SettingsKeys.ttsProvider: "Custom"
         ])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid Custom PCM draft must not start Test Voice")
@@ -141,7 +141,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         // Test Voice must retry that graph and keep its failure visible instead of sending a TTS
         // request that cannot play.
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager(engineStarter: { _ in throw EngineStartFailure.failed })
+        let audioPlayer = makeOwnedAudioPlayer(engineStarter: { _ in throw EngineStartFailure.failed })
         let defaults = makeOwnedDefaults()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         // Opening Settings on OpenAI fetches its model and voice suggestions, so only a request to
@@ -183,7 +183,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         // Constructing the manager first migrates the legacy plaintext key into the store, which is
         // where the form then reads it.
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
@@ -228,7 +228,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("Invalid Custom Test Voice configuration must not contact the endpoint")
@@ -264,7 +264,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         ])
 
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("A cleartext Custom endpoint must not be contacted")
@@ -295,7 +295,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         // sent to the wrong host or a request that cannot authenticate.
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-gemini-api-key", for: .gemini)
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let defaults = makeOwnedDefaults()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
 
@@ -343,7 +343,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
 
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-stored-key", for: .custom)
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
 
         let requestEmitted = expectation(description: "Test Voice uses the key retained by the form")

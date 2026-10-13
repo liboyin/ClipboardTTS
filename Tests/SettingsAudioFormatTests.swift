@@ -20,7 +20,7 @@ final class SettingsAudioFormatTests: MockURLProtocolTestCase {
             SettingsKeys.customSampleRate: sampleRate
         ])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("Opening a Custom Settings form must not request metadata.")
@@ -175,7 +175,7 @@ final class SettingsAudioFormatTests: MockURLProtocolTestCase {
             SettingsKeys.customSampleRate: customSampleRate
         ])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         // Mounting synchronizes the saved settings; a Custom form asks for no model or voice
         // discovery, so nothing is requested until Test Voice is pressed.

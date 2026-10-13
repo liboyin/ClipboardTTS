@@ -91,6 +91,13 @@ final class ManualAutomaticPlaybackScheduler {
         lock.unlock()
         action()
     }
+
+    /// Releases every held action without running it; the delays it was asked for stay recorded.
+    func discardHeldActions() {
+        lock.lock()
+        actions.removeAll()
+        lock.unlock()
+    }
 }
 
 final class ScheduledPCMBufferRecorder {

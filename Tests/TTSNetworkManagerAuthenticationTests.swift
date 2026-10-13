@@ -42,7 +42,7 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             SettingsKeys.apiBaseURL: "https://custom.example/v1/audio/speech"
         ])
 
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults)
         let requestEmitted = expectation(description: "Settings uses a normalized OpenAI request")
         MockURLProtocol.installRequestHandler { request in

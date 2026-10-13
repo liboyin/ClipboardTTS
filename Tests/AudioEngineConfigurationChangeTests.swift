@@ -237,7 +237,7 @@ final class AudioEngineConfigurationChangeTests: XCTestCase {
         let center = NotificationCenter()
         weak var releasedPlayer: AudioPlayerManager?
         autoreleasepool {
-            let player = AudioPlayerManager(
+            let player = makeOwnedAudioPlayer(
                 automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
                 notificationCenter: center
             )
@@ -253,7 +253,7 @@ final class AudioEngineConfigurationChangeTests: XCTestCase {
         // registration behind for the life of the process-wide center.
         let center = RegistrationTrackingNotificationCenter()
         autoreleasepool {
-            _ = AudioPlayerManager(
+            _ = makeOwnedAudioPlayer(
                 automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule,
                 notificationCenter: center
             )

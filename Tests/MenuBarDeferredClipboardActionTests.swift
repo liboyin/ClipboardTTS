@@ -36,7 +36,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // authorizes the Services stream's audio.
         let servicesAudioPublished = expectation(description: "Services audio stays authorized")
         servicesAudioPublished.assertForOverFulfill = false
-        let audioPlayer = AudioPlayerManager(audioStateObserver: { servicesAudioPublished.fulfill() })
+        let audioPlayer = makeOwnedAudioPlayer(audioStateObserver: { servicesAudioPublished.fulfill() })
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -86,7 +86,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // Only the newest attempt may act. A configuration failure leaves the pipeline idle again,
         // so an older attempt that survived would read the clipboard again and start a second
         // attempt from a click the user made before any result was visible.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -124,7 +124,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // is one intent. When the read finds nothing to speak no request starts, so the pipeline
         // never changes hands and nothing downstream can tell the older attempt it is stale. Only
         // the owner's newest-attempt token can, which is why it is not redundant.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader()
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -149,7 +149,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // WHY: Dropping stale attempts must not wedge the menu. After the Clear Buffer click the
         // two-click contract requires, the next explicit Speak click must still read the clipboard
         // and start a request.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -187,7 +187,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // while it is not this attempt's to take: speaking there would revoke the intervening
         // stream's audio and replace it. The request generation records that somebody else owned
         // the pipeline, whichever way those two publications happen to be ordered.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -236,7 +236,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // into Clear Buffer. That click asks for silence, and the idle pipeline it leaves behind is
         // exactly the state the waiting attempt would otherwise be allowed to speak in. Releasing
         // the pipeline advances the request generation, which is what makes the attempt stale.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()
@@ -269,7 +269,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // change would do nothing at all, and the "Try again" in the visible failure would be a
         // retry the user could not perform.
         let starter = SwitchableAudioEngineStarter(shouldFail: true)
-        let audioPlayer = AudioPlayerManager(
+        let audioPlayer = makeOwnedAudioPlayer(
             engineStarter: starter.start,
             automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule
         )
@@ -308,7 +308,7 @@ final class MenuBarDeferredClipboardActionTests: MockURLProtocolTestCase {
         // WHY: Settings can invalidate the PCM graph inside the delay window. Reading the clipboard
         // then would request audio the engine cannot play at the configured rate, so the stale
         // action must drop and leave the sample-rate failure as the state the user sees.
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: "Clipboard text")
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = TestNetworkFactory.makeManager()

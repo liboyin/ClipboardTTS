@@ -23,7 +23,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
 
         let secretStore = ScriptedSecretStore()
         secretStore.failingProviders = [.custom]
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         XCTAssertEqual(networkManager.lastError, APIKeyMigrationService.failureMessage(for: .custom))
         secretStore.failingProviders = []
@@ -70,7 +70,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         let injectedDefaults = InMemoryDefaults()
         let otherDefaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: otherDefaults)
         // Each domain holds a different provider's key, so a form that read the wrong one would
         // both rescue the wrong secret and leave the one it was given behind. Both are seeded after
@@ -129,7 +129,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-newer-keychain-key", for: .openAI)
         secretStore.failingProviders = [.openAI]
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         secretStore.failingProviders = []
 
@@ -186,7 +186,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
 
         let secretStore = ScriptedSecretStore()
         secretStore.failingProviders = [.openAI, .gemini]
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         XCTAssertEqual(networkManager.lastError, APIKeyMigrationService.failureMessage(for: .openAI))
         secretStore.failingProviders = []
@@ -223,7 +223,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         ])
         let secretStore = ScriptedSecretStore()
         secretStore.failingProviders = [.openAI]
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         XCTAssertEqual(networkManager.lastError, APIKeyMigrationService.failureMessage(for: .openAI))
         secretStore.failingProviders = []
@@ -255,7 +255,7 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         // replace a credential it was only ever supposed to read.
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-openai-key", for: .openAI)
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let defaults = makeOwnedDefaults()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { request in

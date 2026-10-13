@@ -11,70 +11,57 @@ final class AudioPlayerManagerTests: XCTestCase {
         // WHY: The UI elements (Play/Pause, Clear Buffer) rely on accurate state representation in the AudioPlayerManager.
         // We must verify that calling play(), pause(), and stop() correctly sets the `isPlaying` flag.
 
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+        let player = makeOwnedAudioPlayer(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
 
         XCTAssertFalse(player.isPlaying)
         XCTAssertFalse(player.hasAudio)
 
+        // Each transition is published synchronously on the main thread that requested it.
         player.play()
-
-        let expectation1 = XCTestExpectation(description: "State changes to playing")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertTrue(player.isPlaying)
-            expectation1.fulfill()
-        }
-        wait(for: [expectation1], timeout: 1.0)
+        XCTAssertTrue(player.isPlaying)
 
         player.pause()
-
-        let expectation2 = XCTestExpectation(description: "State changes to paused")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertFalse(player.isPlaying)
-            expectation2.fulfill()
-        }
-        wait(for: [expectation2], timeout: 1.0)
+        XCTAssertFalse(player.isPlaying)
 
         player.stop()
-
-        let expectation3 = XCTestExpectation(description: "State changes to stopped")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertFalse(player.isPlaying)
-            XCTAssertFalse(player.hasAudio)
-            expectation3.fulfill()
-        }
-        wait(for: [expectation3], timeout: 1.0)
+        XCTAssertFalse(player.isPlaying)
+        XCTAssertFalse(player.hasAudio)
     }
 
     func testPlaybackRateChange() {
         // WHY: The user slider must accurately control the underlying AVAudioUnitTimePitch rate without fail.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+        let player = makeOwnedAudioPlayer(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
         player.playbackRate = 1.5
         XCTAssertEqual(player.playbackRate, 1.5)
     }
 
     func testScheduleAudioDroppedAfterStop() {
         // WHY: Ensure that scheduleAudio calls from stale network requests are ignored after stop() is called.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+        let processedPackets = AudioDataProcessingRecorder()
+        let player = makeOwnedAudioPlayer(
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioDataProcessingObserver: processedPackets.record
+        )
         let gen = player.startNewStream()
 
         player.stop()
 
+        let packetProcessed = processedPackets.expectNextProcessing()
         player.scheduleAudio(data: Data(repeating: 0, count: 1024), streamGeneration: gen)
+        // The audio queue has handled the stale packet, so anything it queued for the main queue is
+        // queued; one main-queue turn then applies it before the assertions read the state.
+        wait(for: [packetProcessed], timeout: 1.0)
+        drainMainQueue()
 
-        let expectation = XCTestExpectation(description: "Audio should not be scheduled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertFalse(player.hasAudio)
-            XCTAssertEqual(player.bufferDuration, 0.0)
-            XCTAssertFalse(player.isPlaying)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
+        XCTAssertFalse(player.hasAudio)
+        XCTAssertEqual(player.bufferDuration, 0.0)
+        XCTAssertFalse(player.isPlaying)
     }
 
     func testDefaultSampleRateIs24KHz() {
         // WHY: OpenAI and Gemini PCM are fixed at 24 kHz, so the player must preserve the
         // long-standing default until Settings selects a validated Custom override.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+        let player = makeOwnedAudioPlayer(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
 
         XCTAssertEqual(player.sampleRate, 24_000)
         XCTAssertTrue(player.isReadyForNewStream)
@@ -85,16 +72,15 @@ final class AudioPlayerManagerTests: XCTestCase {
         // Duration and seek must use the rebuilt format everywhere, or the menu would report and
         // schedule positions at half their real time.
         let scheduledBuffers = ScheduledBufferSpy()
-        let player = AudioPlayerManager(
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: { scheduledBuffers.record($0) },
-            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
         )
 
         XCTAssertEqual(player.setSampleRate(48_000), .updated)
-        let generation = player.startNewStream()
-        player.scheduleAudio(data: Data(repeating: 0, count: 96_000), streamGeneration: generation)
-
-        waitForPlayback(toStartIn: player)
+        bufferAndStartPlayback(Data(repeating: 0, count: 96_000), in: player, publications: publications)
         XCTAssertEqual(player.bufferDuration, 1.0, accuracy: 0.000_001)
         XCTAssertEqual(player.progress(forRenderedSampleTime: 48_000) ?? -1.0, 1.0, accuracy: 0.000_001)
         XCTAssertEqual(scheduledBuffers.lastSampleRate, 48_000)
@@ -110,11 +96,12 @@ final class AudioPlayerManagerTests: XCTestCase {
     func testUnchangedSampleRatePreservesBufferedAudio() {
         // WHY: Selecting the already-active Custom rate must not interrupt a read or discard its
         // buffer, because no mixed-format data can exist when the graph did not change.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
-        let generation = player.startNewStream()
-        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
-
-        waitForPlayback(toStartIn: player)
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
+        )
+        bufferAndStartPlayback(Data(repeating: 0, count: 48_000), in: player, publications: publications)
         XCTAssertEqual(player.setSampleRate(24_000), .unchanged)
         XCTAssertTrue(player.hasAudio)
         XCTAssertEqual(player.bufferDuration, 1.0, accuracy: 0.000_001)
@@ -123,11 +110,12 @@ final class AudioPlayerManagerTests: XCTestCase {
     func testInvalidSampleRateLeavesCurrentFormatAndBufferUntouched() {
         // WHY: Rejecting an invalid Custom setting must be atomic. A partial graph rebuild would
         // either lose the current read or leave audio interpreted by a format the UI did not accept.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
-        let generation = player.startNewStream()
-        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
-
-        waitForPlayback(toStartIn: player)
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
+        )
+        bufferAndStartPlayback(Data(repeating: 0, count: 48_000), in: player, publications: publications)
         XCTAssertEqual(player.setSampleRate(7_999), .invalid)
         XCTAssertEqual(player.setSampleRate(.infinity), .invalid)
         XCTAssertEqual(player.sampleRate, 24_000)
@@ -142,14 +130,13 @@ final class AudioPlayerManagerTests: XCTestCase {
         // restart. The UI must then show a safe cleared state instead of claiming old-format audio
         // remains playable.
         let startController = SwitchableAudioEngineStarter()
-        let player = AudioPlayerManager(
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
             engineStarter: startController.start,
-            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
         )
-        let generation = player.startNewStream()
-        player.scheduleAudio(data: Data(repeating: 0, count: 48_000), streamGeneration: generation)
-
-        waitForPlayback(toStartIn: player)
+        bufferAndStartPlayback(Data(repeating: 0, count: 48_000), in: player, publications: publications)
         startController.shouldFail = true
 
         XCTAssertEqual(player.setSampleRate(48_000), .engineStartFailed)
@@ -171,16 +158,14 @@ final class AudioPlayerManagerTests: XCTestCase {
         // WHY: The progress slider must never advertise playback after it reaches the final buffered
         // frame; the retained buffer must still support replay without a new TTS request.
         let scheduledBuffers = ScheduledBufferSpy()
-        let player = AudioPlayerManager(
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
             scheduledBufferObserver: { scheduledBuffers.record($0) },
-            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
         )
         let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
-        let gen = player.startNewStream()
-        player.scheduleAudio(data: sampleData, streamGeneration: gen)
-
-        waitForPlayback(toStartIn: player)
-        XCTAssertTrue(player.isPlaying)
+        bufferAndStartPlayback(sampleData, in: player, publications: publications)
 
         player.seek(to: 0.0)
         XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
@@ -199,15 +184,16 @@ final class AudioPlayerManagerTests: XCTestCase {
         XCTAssertFalse(player.isPlaying)
         XCTAssertTrue(player.hasAudio)
 
+        // Play and seek publish their playing state synchronously on the main thread.
         player.play()
         player.seek(to: player.bufferDuration)
-        waitForPlayingState(of: player, toBecome: false)
+        XCTAssertFalse(player.isPlaying)
 
         let scheduledBufferCountBeforeReplay = scheduledBuffers.count
         player.play()
         XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
         XCTAssertEqual(scheduledBuffers.count, scheduledBufferCountBeforeReplay + 1)
-        waitForPlayingState(of: player, toBecome: true)
+        XCTAssertTrue(player.isPlaying)
 
         player.seek(to: player.bufferDuration + 1.0)
         XCTAssertEqual(player.playbackProgress, player.bufferDuration, accuracy: 0.000_001)
@@ -220,12 +206,12 @@ final class AudioPlayerManagerTests: XCTestCase {
         // boundaries, rather than floating-point conversion or the raw byte count.
         let expectedDuration = Double(24_007) / 24_000.0
         for byteCount in [48_014, 48_015] {
-            let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
-            let gen = player.startNewStream()
-            player.scheduleAudio(data: Data(repeating: 0, count: byteCount), streamGeneration: gen)
-
-            waitForPlayback(toStartIn: player)
-            XCTAssertTrue(player.isPlaying)
+            let publications = AudioStateUpdateRecorder()
+            let player = makeOwnedAudioPlayer(
+                automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+                audioStateObserver: publications.record
+            )
+            bufferAndStartPlayback(Data(repeating: 0, count: byteCount), in: player, publications: publications)
 
             player.seek(to: player.bufferDuration)
 
@@ -242,19 +228,25 @@ final class AudioPlayerManagerTests: XCTestCase {
         let expectedDuration = Double(framesPerChunk * 7) / 24_000.0
 
         for shouldPause in [false, true] {
-            let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+            let publications = AudioStateUpdateRecorder()
+            let player = makeOwnedAudioPlayer(
+                automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+                audioStateObserver: publications.record
+            )
             let gen = player.startNewStream()
+            let chunksPublished = (0..<7).map { _ in publications.expectNextUpdate() }
             for _ in 0..<7 {
                 player.scheduleAudio(data: Data(repeating: 0, count: framesPerChunk * 2), streamGeneration: gen)
             }
 
-            waitForBufferDuration(of: player, toBecome: expectedDuration)
-            waitForPlayingState(of: player, toBecome: true)
+            // The first chunk queued its automatic start ahead of its own publication, so once
+            // every chunk has published, the stream has started too.
+            wait(for: chunksPublished, timeout: 1.0)
+            XCTAssertEqual(player.bufferDuration, expectedDuration, accuracy: 0.000_001)
+            XCTAssertTrue(player.isPlaying)
             if shouldPause {
                 player.pause()
-                waitForPlayingState(of: player, toBecome: false)
-            } else {
-                XCTAssertTrue(player.isPlaying)
+                XCTAssertFalse(player.isPlaying)
             }
 
             player.seek(to: player.bufferDuration)
@@ -272,7 +264,7 @@ final class AudioPlayerManagerTests: XCTestCase {
         let chunkCount = 32
         let allPublished = expectation(description: "Every scheduled packet publishes its buffered state")
         allPublished.expectedFulfillmentCount = chunkCount
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
             audioStateObserver: { allPublished.fulfill() }
         )
@@ -291,14 +283,15 @@ final class AudioPlayerManagerTests: XCTestCase {
     func testSeekWhilePausedClampsToBufferedRangeWithoutResuming() {
         // WHY: Dragging the progress slider while paused must retain the paused state at every
         // boundary, including a request beyond the buffered audio.
-        let player = AudioPlayerManager(automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback)
+        let publications = AudioStateUpdateRecorder()
+        let player = makeOwnedAudioPlayer(
+            automaticPlaybackScheduler: immediatelyScheduleAutomaticPlayback,
+            audioStateObserver: publications.record
+        )
         let sampleData = Data(repeating: 0, count: 48000) // 1 second of 24kHz 16-bit PCM audio
-        let gen = player.startNewStream()
-        player.scheduleAudio(data: sampleData, streamGeneration: gen)
-
-        waitForPlayback(toStartIn: player)
+        bufferAndStartPlayback(sampleData, in: player, publications: publications)
         player.pause()
-        waitForPlayingState(of: player, toBecome: false)
+        XCTAssertFalse(player.isPlaying)
 
         player.seek(to: -1.0)
         XCTAssertEqual(player.playbackProgress, 0.0, accuracy: 0.000_001)
@@ -327,34 +320,29 @@ final class AudioPlayerManagerTests: XCTestCase {
         XCTAssertTrue(player.hasAudio)
     }
 
-    private func waitForPlayback(toStartIn player: AudioPlayerManager) {
-        let expectation = XCTestExpectation(description: "Audio is scheduled and playing")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertTrue(player.hasAudio)
-            XCTAssertTrue(player.isPlaying)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
+    /// Buffers `data` as a new stream and waits for the stream's publication.
+    ///
+    /// The immediate scheduler queues the automatic start on the main queue before the packet's own
+    /// publication, so once that publication has run the start has run too.
+    private func bufferAndStartPlayback(_ data: Data,
+                                        in player: AudioPlayerManager,
+                                        publications: AudioStateUpdateRecorder,
+                                        file: StaticString = #filePath,
+                                        line: UInt = #line) {
+        let published = publications.expectNextUpdate()
+        let generation = player.startNewStream()
+        player.scheduleAudio(data: data, streamGeneration: generation)
+        wait(for: [published], timeout: 1.0)
+        XCTAssertTrue(player.hasAudio, "Precondition: the stream is buffered.", file: file, line: line)
+        XCTAssertTrue(player.isPlaying, "Precondition: the stream started automatically.", file: file, line: line)
     }
 
-    private func waitForPlayingState(of player: AudioPlayerManager, toBecome expectedState: Bool) {
-        let expectation = XCTestExpectation(description: "Playback state is updated")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(player.isPlaying, expectedState)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
+    /// Runs one main-queue turn, so a publication already queued lands before the assertions.
+    private func drainMainQueue() {
+        let drained = expectation(description: "Main queue drained")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 2.0)
     }
-
-    private func waitForBufferDuration(of player: AudioPlayerManager, toBecome expectedDuration: Double) {
-        let expectation = XCTestExpectation(description: "Buffer duration is updated")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertEqual(player.bufferDuration, expectedDuration, accuracy: 0.000_001)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
-    }
-
 }
 
 /// Covers the progress tick that publishes playback position: the timer calls it, and these tests
@@ -369,7 +357,7 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         let renderedPosition = RenderedPositionSource(sampleTime: 4_800) // 0.2 second at 24 kHz
         let heldAutomaticStart = ManualAutomaticPlaybackScheduler()
         let bufferPublished = expectation(description: "Buffered audio state is published")
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: heldAutomaticStart.schedule,
             renderedSampleTimeReader: renderedPosition.read,
             audioStateObserver: { bufferPublished.fulfill() }
@@ -399,7 +387,7 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         let heldAutomaticStart = ManualAutomaticPlaybackScheduler()
         let progressTimer = ProgressTimerSpy()
         let bufferPublished = expectation(description: "Buffered audio state is published")
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: heldAutomaticStart.schedule,
             renderedSampleTimeReader: renderedPosition.read,
             progressTimerScheduler: progressTimer.schedule,
@@ -434,7 +422,7 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         let renderedPosition = RenderedPositionSource(sampleTime: nil)
         let heldAutomaticStart = ManualAutomaticPlaybackScheduler()
         let bufferPublished = expectation(description: "Buffered audio state is published")
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: heldAutomaticStart.schedule,
             renderedSampleTimeReader: renderedPosition.read,
             audioStateObserver: { bufferPublished.fulfill() }
@@ -463,7 +451,7 @@ final class AudioPlayerProgressTickTests: XCTestCase {
         let heldAutomaticStart = ManualAutomaticPlaybackScheduler()
         let progressTimer = ProgressTimerSpy()
         let bufferPublished = expectation(description: "Buffered audio state is published")
-        let player = AudioPlayerManager(
+        let player = makeOwnedAudioPlayer(
             automaticPlaybackScheduler: heldAutomaticStart.schedule,
             renderedSampleTimeReader: renderedPosition.read,
             progressTimerScheduler: progressTimer.schedule,

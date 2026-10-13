@@ -92,7 +92,7 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-openai-key", for: .openAI)
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { request in
             metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}, {\"id\": \"gpt-4o-mini-tts\"}] }")

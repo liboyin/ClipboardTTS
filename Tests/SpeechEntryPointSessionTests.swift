@@ -23,7 +23,7 @@ final class SpeechEntryPointSessionTests: MockURLProtocolTestCase {
         // only thing that distinguishes that from the direct manager sequence it replaced. A click
         // path reverted to requesting audio alone would still start a request and still buffer the
         // PCM this suite's other tests observe, so nothing but the ending would notice.
-        let audioPlayer = AudioPlayerManager(automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule)
+        let audioPlayer = makeOwnedAudioPlayer(automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule)
         defer { audioPlayer.stop() }
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
         let networkManager = TestNetworkFactory.makeManager()
@@ -63,7 +63,7 @@ final class SpeechEntryPointSessionTests: MockURLProtocolTestCase {
             SettingsKeys.customVoice: "custom-voice"
         ])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager(automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule)
+        let audioPlayer = makeOwnedAudioPlayer(automaticPlaybackScheduler: ManualAutomaticPlaybackScheduler().schedule)
         defer { audioPlayer.stop() }
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         MockURLProtocol.installRequestHandler { request in

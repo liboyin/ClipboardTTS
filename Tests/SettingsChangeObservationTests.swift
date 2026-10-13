@@ -23,7 +23,7 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -49,7 +49,7 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
 
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -70,7 +70,7 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         // within the same mount.
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "Custom"])
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let published = LockedValue<[Bool]>([])
         let observation = audioPlayer.$hasValidSampleRateConfiguration.dropFirst().sink { isValid in
             published.withValue { $0.append(isValid) }
@@ -106,7 +106,7 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         ])
         let secretStore = InMemorySecretStore()
         // Startup builds the player at the saved Custom rate, so speech is already in that format.
-        let audioPlayer = AudioPlayerManager(sampleRate: savedRate)
+        let audioPlayer = makeOwnedAudioPlayer(sampleRate: savedRate)
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         let releaseResponse = DispatchSemaphore(value: 0)
         defer { releaseResponse.signal() }

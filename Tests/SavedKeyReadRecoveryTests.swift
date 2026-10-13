@@ -210,7 +210,7 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         }
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -241,7 +241,7 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -262,7 +262,7 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         secretStore.seed("test-saved-custom-key", for: .custom)
         let settings = HostedSettings(
             networkManager: TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults),
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -291,7 +291,7 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         }
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self
@@ -321,7 +321,7 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         }
         let settings = HostedSettings(
             networkManager: networkManager,
-            audioPlayer: AudioPlayerManager(),
+            audioPlayer: makeOwnedAudioPlayer(),
             secretStore: secretStore,
             defaults: defaults,
             testCase: self

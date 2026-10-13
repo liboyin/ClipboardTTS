@@ -69,7 +69,7 @@ final class SettingsAboutButtonWiringTests: MockURLProtocolTestCase {
         // WHY: An injected action alone does not prove users can reach About; the rendered form
         // must keep the conventional control and route its click without opening AppKit UI in tests.
         let secretStore = InMemorySecretStore()
-        let audioPlayer = AudioPlayerManager()
+        let audioPlayer = makeOwnedAudioPlayer()
         let defaults = makeOwnedDefaults()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
         // Opening Settings on OpenAI fetches its model and voice suggestions.
