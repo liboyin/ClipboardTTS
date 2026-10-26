@@ -129,10 +129,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 **Validated — source inspection.** `audioPayload(in:)` now reads every part before returning, so any part whose `inlineData` is unreadable or declares a non-audio media type makes the whole candidate `.invalid` and takes the fatal revocation path, dropping audio parts that passed validation earlier in the same event. Before `912bf09` the first audio part returned immediately and a later part was never read. The trade-off is deliberate and documented; the exposure is that a provider adding one non-audio inline part to an `AUDIO`-modality response would silence an utterance that previously played. **Paths:** [audioPayload](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [Gemini streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift), README. **Direction:** decide from provider evidence whether an unplayable part accompanying valid audio is a corrupt stream or an ignorable extra; keep the current rule until that evidence exists. **Acceptance:** the chosen rule and its evidence are stated in README, and both a malformed-only event and a mixed valid/malformed event keep a test.
 
-#### NB28 — Three landed invariants carry no recorded mutation evidence
-
-**Validated — TODO inspection.** The [NB2](completed_work/NB2.md), [NB3](completed_work/NB3.md), and [NB7](completed_work/NB7.md) dispositions describe the new behavior but record no mutants, while NB1, NB4, NB5, NB9, NB10, and B2–B4 each name the mutants that fail a named test. AGENTS requires a revert, a plausible regression, and an over-restriction where applicable for each added or changed invariant. Inspection indicates the obvious reverts do die — the parity predicate against `testOpenAICompatibleResponsesKeepACompleteFrameBeforeTrailingPartialBytes`, first-part-only Gemini delivery against `testGeminiDeliversEveryAudioPartInOrderAndJoinsPartialFrames`, and endpoint inference against `testCustomGoogleLookingHostUsesOpenAICompatibleModelDiscovery` — but that is reasoning, not a run. **Paths:** the NB2/NB3/NB7 records, [PCM completion](Sources/Managers/TTSNetworkManager+Failures.swift), [Gemini streaming](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [provider dispatch](Sources/Managers/TTSNetworkManager.swift). **Direction/acceptance:** run the missing mutants in isolated scratch copies and record each against the named test that fails it, or record why a category does not apply. Run them through README's `run-mutants.py` procedure.
-
 ### Nits
 
 No Nit is outstanding; [N7](completed_work/N7.md) was the last one.
@@ -145,6 +141,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB28](completed_work/NB28.md) — Fixed: NB2, NB3 and NB7 each have recorded mutants for revert, regression and over-restriction, and the Gemini event-failure helper no longer lets completion stand in for a fatal event.
 - [NB43](completed_work/NB43.md) — Fixed: the runner reads test logs as UTF-8 whatever the locale and prints names the locale cannot encode escaped, and its verifier passes under UTF-8, ISO 8859-1, `C` and US-ASCII locales.
 - [NB17](completed_work/NB17.md) — Fixed: every test audio player has an owner that ends its lifecycle however the test ends, and the metadata suites wait for reported completions instead of elapsed time.
 - [N7](completed_work/N7.md) — Fixed: the audio-queue closure names its capture of the manager, and a held prebuffer action cannot keep a released manager alive.

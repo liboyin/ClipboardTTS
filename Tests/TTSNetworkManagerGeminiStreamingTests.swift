@@ -299,14 +299,14 @@ final class TTSNetworkManagerGeminiStreamingTests: MockURLProtocolTestCase {
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
-            _ = releaseResponse.wait(timeout: .now() + 1.0)
+            // Outlast the assertions; completion alone would publish the failure they expect.
+            _ = releaseResponse.wait(timeout: .now() + 30.0)
             return (successResponse(for: request), nil)
         }
         let task = startGeminiRequest(manager, requestStarted: requestStarted) { _ in
             XCTFail("Invalid Gemini events must not deliver audio.")
         }
         defer { releaseResponse.signal() }
-
         receive(manager, response: successResponse(for: task), for: task)
         assertTerminalState(of: manager, expectedError: "The TTS service returned no playable audio. Please try again.") {
             manager.urlSession(manager.session, dataTask: task, didReceive: event)
