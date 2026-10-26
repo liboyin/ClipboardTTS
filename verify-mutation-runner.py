@@ -29,6 +29,7 @@ import importlib.util
 import io
 import itertools
 import json
+import locale
 import os
 import pathlib
 import re
@@ -210,20 +211,22 @@ def write_stand_in(path, text):
     """Writes text as an executable stand-in whose first act, after its interpreter line, notes its pid.
 
     Every stand-in, the fixture's tools and any a case writes for itself, is written here, so none can be
-    left out of its case's ledger. A shell stand-in is one whose interpreter line ends in "sh".
+    left out of its case's ledger. A shell stand-in is one whose interpreter line ends in "sh". It is written as
+    UTF-8, which Python reads a script's source as whatever the locale: written in ISO 8859-1, a stand-in holding
+    text that is not ASCII would not even start.
     """
     shebang, body = text.split("\n", 1)
     note = OWN_SH if shebang.endswith("sh") else "import os\n" + OWN_PY
-    path.write_text(f"{shebang}\n{note}{body}")
+    path.write_text(f"{shebang}\n{note}{body}", encoding="utf-8")
     path.chmod(0o755)
 
 FAKE_XCODEBUILD = r'''#!/usr/bin/env python3
 import os, pathlib, signal, sys, time
-target = pathlib.Path("Sources/Target.swift").read_text()
+target = pathlib.Path("Sources/Target.swift").read_text(encoding="utf-8")  # a case's target need not be ASCII
 tests = [a for a in sys.argv if a.startswith("-only-testing:")]
 record = pathlib.Path(os.environ["RUNNER_VERIFY_RECORD"])
-with open(record, "a") as f:
-    f.write(repr((target.strip(), tests, sys.argv[1:])) + "\n")
+with open(record, "a") as f:  # as ASCII, which reads back the same whatever locale this and the verifier run in
+    f.write(ascii((target.strip(), tests, sys.argv[1:])) + "\n")
 assert pathlib.Path("Sources/Dirty.swift").read_text() == "uncommitted\n", "the tracked diff was not applied"
 for selector in (t.split(":", 1)[1] for t in tests):
     if "Nope" not in selector:  # a misspelled selector matches nothing, as in a real run
@@ -243,6 +246,10 @@ if "UNDECODABLE" in target:  # test output need not be UTF-8, and a test's name 
     if "KILL" in target:
         sys.stdout.buffer.write("/x/Tests/A.swift:9: error: -[ClipboardTTSAppTests.ÉtéSuite ".encode()
                                 + b"test\xffOne] : failed\n")
+    sys.stdout.flush()
+if "NON_LATIN" in target and "KILL" in target:  # a failing test named outside Latin-1, spelled in UTF-8 as xcodebuild does
+    sys.stdout.flush()
+    sys.stdout.buffer.write("/x/Tests/A.swift:9: error: -[ClipboardTTSAppTests.ÉtéΩSuite testOne] : failed\n".encode())
     sys.stdout.flush()
 print("PROJECT:", pathlib.Path("project.yml").read_text().strip())
 if "HOLD" in target:  # holds the run open until the case releases it, so another run can meet it
@@ -435,7 +442,7 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
     repo = root / "repo"
     (repo / "Sources").mkdir(parents=True)
     (repo / "Tests").mkdir()
-    (repo / "run-mutants.py").write_text(RUNNER.read_text())
+    (repo / "run-mutants.py").write_bytes(RUNNER.read_bytes())  # as bytes: its text is not ASCII, as a locale may need
     (repo / "Sources" / "Target.swift").write_text(target_text)
     (repo / "Sources" / "Dirty.swift").write_text("committed\n")
     (repo / ".gitignore").write_text("ignored.log\n")
@@ -482,7 +489,7 @@ def make_repo(root, target_text="let value = ORIGINAL\n"):
 
 def run_runner(root, repo, tools, mutants, extra=(), out=None, untracked=("Tests/New.swift",),
                tests=("ClipboardTTSAppTests/ASuite",), ignore_sigint=False, own_session=False, env=None,
-               file_size_limit=None):
+               file_size_limit=None, encoding=None):
     spec = root / "spec.json"
     spec.write_text(json.dumps({"tests": list(tests), "untracked": list(untracked),
                                 "mutants": mutants}))
@@ -504,10 +511,19 @@ def run_runner(root, repo, tools, mutants, extra=(), out=None, untracked=("Tests
     # then signal as the terminal would without reaching this verifier.
     result = subprocess.run([sys.executable, str(repo / "run-mutants.py"), str(spec), "--out", str(out),
                              "--xcodebuild", str(tools / "xcodebuild"), "--xcodegen", str(tools / "xcodegen"), *extra],
-                            capture_output=True, text=True, env=env, timeout=60, start_new_session=own_session,
+                            capture_output=True, text=True, encoding=encoding, env=env, timeout=60,
+                            start_new_session=own_session,
                             preexec_fn=prepare if ignore_sigint or own_session or file_size_limit else None)
     runs = [ast.literal_eval(line) for line in record.read_text().splitlines()]
     return result, out, runs
+
+
+def as_printed(text):
+    """text as the runner prints it in this verifier's locale and this verifier then reads it: what the locale's encoding
+    cannot carry, such as U+FFFD under ISO 8859-1, is escaped, on stdout by the runner and on stderr by Python, and under
+    UTF-8 nothing is."""
+    encoding = locale.getpreferredencoding(False)
+    return text.encode(encoding, "backslashreplace").decode(encoding)
 
 
 def ignores_case(directory):
@@ -1171,8 +1187,8 @@ def edits_and_restore_preserve_exact_line_endings(root):
     original = "let value = ORIGINAL\r\n// LF π\n// CR\r".encode("utf-8")
     (repo / "Sources" / "Target.swift").write_bytes(original)
     tool = tools / "xcodebuild"
-    tool.write_text(tool.read_text().replace(
-        "target = pathlib.Path", "print('OBSERVED_BYTES:', repr(pathlib.Path('Sources/Target.swift').read_bytes()))\ntarget = pathlib.Path", 1))
+    tool.write_bytes(tool.read_bytes().replace(  # as bytes: the stand-in's text is not ASCII
+        b"target = pathlib.Path", b"print('OBSERVED_BYTES:', repr(pathlib.Path('Sources/Target.swift').read_bytes()))\ntarget = pathlib.Path", 1))
     edits = [mutant("kill", "KILL"), {"name": "exact-newline", "edits": [
         {"path": "Sources/Target.swift", "old": "ORIGINAL\r\n", "new": "KILL\r\n"}]}]
     result, out, runs = run_runner(root, repo, tools, edits)
@@ -1464,7 +1480,7 @@ def a_generator_message_that_is_not_utf8_is_reported_decoded(root):
     bad = {"name": "bad", "edits": [{"path": "project.yml", "old": "SPEC_ORIGINAL", "new": "SPEC_UNDECODABLE"}]}
     result, out, runs = run_runner(root, repo, tools, [bad, mutant("later", "KILL")])
     message = "SPEC_UNDECODABLE: café � is not a valid spec"
-    assert result.returncode == 2 and "error: " in result.stderr and message in result.stderr, (
+    assert result.returncode == 2 and "error: " in result.stderr and as_printed(message) in result.stderr, (
         result.returncode, result.stderr)
     assert "Traceback" not in result.stderr and result.stdout == "control: SURVIVED\n" and len(runs) == 1, (
         result.stdout, result.stderr, runs)
@@ -1482,15 +1498,39 @@ def test_output_that_is_not_utf8_is_still_judged(root):
     result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL"), mutant("survive", "SURVIVOR")],
                                 tests=("ClipboardTTSAppTests/ÉtéSuite",))
     assert result.returncode == 0 and "Traceback" not in result.stderr, (result.returncode, result.stderr)
-    assert result.stdout == ("control: SURVIVED\n"
-                             "kill: KILLED ClipboardTTSAppTests.ASuite testGuard; ClipboardTTSAppTests.ÉtéSuite test�One\n"
-                             "survive: SURVIVED\n"), result.stdout
+    assert result.stdout == as_printed(
+        "control: SURVIVED\nkill: KILLED ClipboardTTSAppTests.ASuite testGuard; ClipboardTTSAppTests.ÉtéSuite test�One\n"
+        "survive: SURVIVED\n"), result.stdout
     for name in ("control", "kill", "survive"):
         assert b"\xff" in (out / "logs" / f"{name}.log").read_bytes(), f"{name}'s test output was UTF-8"
     report = json.loads((out / "results.json").read_text())
     assert report["complete"] and report["exit"] == 0 and report["error"] is None, report
     assert [(r["name"], r["verdict"]) for r in report["mutants"]] == [("kill", "KILLED"), ("survive", "SURVIVED")], report
     assert (out / "copy" / "Sources" / "Target.swift").read_text() == "let value = ORIGINAL // UNDECODABLE\n"
+
+
+@case
+def a_test_name_outside_the_locale_s_encoding_is_matched_and_reported_exactly(root):
+    # The runner runs under ISO 8859-1, whatever locale and stream encoding this verifier runs with: PYTHONIOENCODING
+    # would otherwise override the locale's encoding for its stdout. Its logs spell the selected suite, and a failing
+    # test in it, in UTF-8 with a character outside Latin-1: read in the locale's encoding, the name would be garbled in
+    # the kill and match no selector, and printing it unescaped would raise.
+    repo, tools = make_repo(root, "let value = ORIGINAL // NON_LATIN\n")
+    latin1 = {"LANG": "en_US.ISO8859-1", "LC_ALL": "en_US.ISO8859-1", "PYTHONUTF8": "0",
+              "PYTHONIOENCODING": "iso8859-1:strict"}
+    result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL"), mutant("survive", "SURVIVOR")],
+                                tests=("ClipboardTTSAppTests/ÉtéΩSuite",), env=latin1, encoding="iso8859-1")
+    assert result.returncode == 0 and "Traceback" not in result.stderr, (result.returncode, result.stdout, result.stderr)
+    assert result.stdout == ("control: SURVIVED\n"
+                             "kill: KILLED ClipboardTTSAppTests.ASuite testGuard; ClipboardTTSAppTests.Été\\u03a9Suite testOne\n"
+                             "survive: SURVIVED\n"), result.stdout
+    assert "ÉtéΩSuite".encode() in (out / "logs" / "control.log").read_bytes(), "the log did not spell the name in UTF-8"
+    report = json.loads((out / "results.json").read_text())
+    assert report["complete"] and report["exit"] == 0 and report["control"]["verdict"] == "SURVIVED", report
+    assert report["mutants"] == [
+        {"name": "kill", "verdict": "KILLED",
+         "details": ["ClipboardTTSAppTests.ASuite testGuard", "ClipboardTTSAppTests.ÉtéΩSuite testOne"]},
+        {"name": "survive", "verdict": "SURVIVED", "details": []}], report
 
 
 @case
@@ -1602,7 +1642,7 @@ def a_signal_during_the_control_stops_it(root):
 def a_runner_outside_a_repository_refuses(root):
     (root / "loose").mkdir()
     runner = root / "loose" / "run-mutants.py"
-    runner.write_text(RUNNER.read_text())
+    runner.write_bytes(RUNNER.read_bytes())
     spec = root / "spec.json"
     spec.write_text(json.dumps({"mutants": [mutant("kill", "KILL")]}))
     result = subprocess.run([sys.executable, str(runner), str(spec), "--out", str(root / "out")],
@@ -2767,7 +2807,7 @@ def a_ledger_line_names_a_process_only_as_a_positive_decimal_pid(_root):
 def every_stand_in_the_verifier_writes_notes_itself(_root):
     # A stand-in is a file this verifier makes executable and then runs. Only write_stand_in may make one, so none can
     # skip its note; a fixture repository's own file may still change mode, as a tracked change the copy must carry.
-    tree = ast.parse(pathlib.Path(__file__).read_text())
+    tree = ast.parse(pathlib.Path(__file__).read_bytes())  # decoded as Python decodes source, not in the locale's encoding
     writer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "write_stand_in")
     inside = {id(node) for node in ast.walk(writer)}
     strays = []
@@ -2867,4 +2907,7 @@ def the_fixture_s_tools_are_stopped_with_the_case_that_started_them(root):
 
 
 if __name__ == "__main__":
+    # A failure's message can quote text this stdout's encoding cannot carry, such as a report holding Ω under ISO 8859-1
+    # or É under US-ASCII. It is escaped, as Python already does on stderr, so the failing case is still named.
+    sys.stdout.reconfigure(errors="backslashreplace")
     sys.exit(main())

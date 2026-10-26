@@ -168,6 +168,15 @@ def selectors_without_tests(log, tests):
     return [selector for selector in tests if not any(matches(selector, case) for case in started)]
 
 
+def read_log(path):
+    """Reads a test log as UTF-8, as xcodebuild writes it, whatever the locale; a byte that is not UTF-8 reads as U+FFFD.
+
+    The locale's encoding would misread a test's name that is not ASCII: under ISO 8859-1 every byte
+    decodes, so a garbled name would be reported and would match no selector.
+    """
+    return pathlib.Path(path).read_text(encoding="utf-8", errors="replace")
+
+
 def positive_seconds(text):
     """Parses a deadline in seconds, refusing one that could never be met or never expire."""
     value = float(text)
@@ -488,7 +497,7 @@ def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interru
             return "NO-VERDICT", [f"the test run did not finish within {test_deadline:g} seconds and was stopped"]
         finally:
             interrupts.process = None
-    return classify(pathlib.Path(log_path).read_text(errors="replace"))
+    return classify(read_log(log_path))
 
 
 def apply_plan(plan, originals):
@@ -634,7 +643,7 @@ def main(argv=None):
                 raise RunnerError(f"interrupted by signal {interrupts.received[0]}")
             if verdict != "SURVIVED":
                 raise RunnerError("the unmutated control did not pass, so no mutant verdict can be trusted")
-            unmatched = selectors_without_tests((logs / "control.log").read_text(errors="replace"), tests)
+            unmatched = selectors_without_tests(read_log(logs / "control.log"), tests)
             if unmatched:
                 raise RunnerError(f"the control ran no test for {', '.join(unmatched)}")
             for mutant in mutants:
@@ -655,8 +664,7 @@ def main(argv=None):
                     raise RunnerError(f"interrupted by signal {interrupts.received[0]}; the copy was restored")
                 if verdict == "SURVIVED":
                     # As for the control: a selector none of whose tests ran says nothing about this mutant.
-                    log = (logs / f"{mutant['name']}.log").read_text(errors="replace")
-                    unmatched = selectors_without_tests(log, tests)
+                    unmatched = selectors_without_tests(read_log(logs / f"{mutant['name']}.log"), tests)
                     if unmatched:
                         verdict, details = "NO-TESTS", [f"no test ran for {selector}" for selector in unmatched]
                 report["mutants"].append({"name": mutant["name"], "verdict": verdict, "details": details})
@@ -672,4 +680,9 @@ def main(argv=None):
         return report["exit"]
 
 if __name__ == "__main__":
+    # A verdict line prints a test's name as its log spells it, which the locale's encoding may not carry: under
+    # ISO 8859-1, a name outside Latin-1 or the U+FFFD read_log substitutes. Such a character is escaped, as Python
+    # already does on stderr, rather than raising; under UTF-8 every name prints unchanged, and results.json, written
+    # as ASCII JSON, keeps the exact name.
+    sys.stdout.reconfigure(errors="backslashreplace")
     sys.exit(main())
