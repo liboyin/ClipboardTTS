@@ -129,3 +129,21 @@ custom_rules:
       - string
     message: "A test player must have a test-owned lifecycle; build it with makeOwnedAudioPlayer (or makeAudioPlayerOwner), which registers its teardown, or disable this rule on the one line with the reason the owner cannot serve."
     severity: error
+
+  # The app writes nothing to the console (D8, D25): the clipboard messages it once printed disclosed
+  # clipboard presence and had no release purpose, and no test can observe their return, because
+  # stdout is the test runner's as well. So in `Sources/` a free call of `print`, `debugPrint` or
+  # `NSLog`, bare or `Swift.`-qualified, is refused, while a member call such as `x.print(` or
+  # `x . print(`, a `func print(` declaration and a longer identifier are not. `Tests/` may still
+  # print. Like the rules above it guards a habit, not a proof: a function reference, an alias, or
+  # another logging API still gets through.
+  production_console_output:
+    name: "Production Console Output"
+    included: ".*/Sources/.*\\.swift"
+    regex: "(?<![\\w.])(?<!\\.\\s{1,20})(?<!\\bfunc\\s{1,20})((Swift\\s*\\.\\s*)?(print|debugPrint)|NSLog)\\s*\\("
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    message: "The app writes nothing to the console; remove the call rather than replacing it with another logging API, or disable this rule on the one line with the reason the output is needed."
+    severity: error

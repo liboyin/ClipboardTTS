@@ -98,6 +98,12 @@ A follow-up sequential review on 2026-09-18 covered the Codex commits `afccaff`�
 |---|---|---|
 | D24 | Mutants that weaken network routing in tests may run through `run-mutants.py` when every request the selected tests issue targets a loopback literal and the main agent has inspected the spec and its selectors before the run. This is a standing approval of that isolation, replacing per-task approvals: the 2026-10-12 approval was given for NB31 alone, and NB46 had reused it without asking. Removing the test factory's mock routing stays excluded, because it would unroute every network suite, and those suites send to non-loopback mock hosts. | NB31, NB46, NB49, later routing work |
 
+### Accepted user decisions — 2026-10-27
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D25 | Keep D8's removal by a strict SwiftLint rule that refuses a free `print`, `debugPrint` or `NSLog` call in `Sources/`, leaving `Tests/` free to print. No test can observe a reinstated print, because stdout is shared with the test runner, so the guard is lint rather than XCTest. | NB24 |
+
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
 ### Constraints that remain in force
@@ -121,10 +127,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Non-blocking
 
-#### NB24 — Clipboard-presence console messages have no release purpose
-
-**Validated — print calls; legacy Task 46.** They disclose clipboard presence, not copied text. **Paths:** [TextExtractionManager](Sources/Managers/TextExtractionManager.swift), [text tests](Tests/TextExtractionManagerTests.swift), README if a diagnostic description changes. **Direction/acceptance:** implement D8 by removing the prints. Preserve populated/empty injected clipboard returns; introduce no new error or alternative logging; never use the shared pasteboard.
-
 #### NB27 — A later malformed Gemini inline part discards audio already validated ahead of it
 
 **Validated — source inspection.** `audioPayload(in:)` now reads every part before returning, so any part whose `inlineData` is unreadable or declares a non-audio media type makes the whole candidate `.invalid` and takes the fatal revocation path, dropping audio parts that passed validation earlier in the same event. Before `912bf09` the first audio part returned immediately and a later part was never read. The trade-off is deliberate and documented; the exposure is that a provider adding one non-audio inline part to an `AUDIO`-modality response would silence an utterance that previously played. **Paths:** [audioPayload](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [Gemini streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift), README. **Direction:** decide from provider evidence whether an unplayable part accompanying valid audio is a corrupt stream or an ignorable extra; keep the current rule until that evidence exists. **Acceptance:** the chosen rule and its evidence are stated in README, and both a malformed-only event and a mixed valid/malformed event keep a test.
@@ -141,6 +143,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB24](completed_work/NB24.md) — Fixed (D8, D25): the clipboard-presence prints are gone, and a strict lint rule refuses console output calls in `Sources/`.
 - [NB28](completed_work/NB28.md) — Fixed: NB2, NB3 and NB7 each have recorded mutants for revert, regression and over-restriction, and the Gemini event-failure helper no longer lets completion stand in for a fatal event.
 - [NB43](completed_work/NB43.md) — Fixed: the runner reads test logs as UTF-8 whatever the locale and prints names the locale cannot encode escaped, and its verifier passes under UTF-8, ISO 8859-1, `C` and US-ASCII locales.
 - [NB17](completed_work/NB17.md) — Fixed: every test audio player has an owner that ends its lifecycle however the test ends, and the metadata suites wait for reported completions instead of elapsed time.
@@ -217,7 +220,7 @@ Each finding closed or accepted without change has its own record in [completed_
 | 42 | NB25 | Fixed; see [NB25](completed_work/NB25.md) |
 | 44 | NB1 / D4 | Fixed; see [NB1](completed_work/NB1.md) |
 | 45 | NB5 / D6 | Fixed; see [NB5](completed_work/NB5.md) |
-| 46 | NB24 / D8 | Retained; remove prints |
+| 46 | NB24 / D8 | Fixed; see [NB24](completed_work/NB24.md) |
 | 48 | NB22 | Missing-rationale premise corrected: both audio files explain their exceptions; cohesion policy belongs in AGENTS, not a forced split task |
 | 52 | B2 / D1 | Fixed; see [B2](completed_work/B2.md) |
 | 55 | NB7 | Fixed; canonical typed identity |

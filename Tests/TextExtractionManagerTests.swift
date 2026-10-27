@@ -17,4 +17,12 @@ final class TextExtractionManagerTests: XCTestCase {
         let text = manager.getCopiedText()
         XCTAssertNil(text)
     }
+
+    func testTextExtractionTreatsOnlyAnEmptyStringAsNoText() {
+        // WHY: A pasteboard can hold an empty string rather than nothing, and the speak flow must see
+        // that as no text. The one-character case pins the boundary, so a check stricter than
+        // emptiness cannot drop real copied text.
+        XCTAssertNil(TextExtractionManager(pasteboard: FakePasteboardReader(text: "")).getCopiedText())
+        XCTAssertEqual(TextExtractionManager(pasteboard: FakePasteboardReader(text: "a")).getCopiedText(), "a")
+    }
 }
