@@ -36,6 +36,7 @@ Sources/
 Tests/                        # XCTest, including focused metadata state/race suites, shared
                               # MockURLProtocol, and OwnedDefaults (test-owned settings storage)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
+kokoro/compose.yaml           # optional local Kokoro-82M server for the Custom provider
 ```
 
 ## Architecture
@@ -64,6 +65,27 @@ project.yml                   # XcodeGen source of truth (*.xcodeproj is gitigno
 - **Provider normalization**: An unknown persisted provider value is normalized to OpenAI and its fixed endpoint before any request is built. This fails safely instead of pairing a key with an arbitrary Custom endpoint.
 - **Voice metadata**: Voice selection belongs to Settings alone. The menu-bar drop-down is playback control — speak/clear, play/pause, progress, speed — and neither offers nor displays the configured voice, so the voice lives beside the model and API key that decide what it means. Settings fetches its own model and voice suggestions when it opens, which is why removing the menu's picker cost no lookup: `SettingsView.onAppear` already calls `syncSettings()`. Each edit refreshes only the lists it can change. For OpenAI and Gemini, opening the window and a provider or API-key edit rediscover models and republish the voice catalog. Discovered models depend only on the provider, endpoint, and key, so a model edit republishes only the voice catalog, which for OpenAI follows the model, and a voice edit refreshes neither. Only Custom has an editable endpoint, and it has no discovery: an endpoint edit applies the configuration, and the manager clears lists fetched for the previous endpoint. Each model and voice row observes its binding once, so typing and choosing from its picker each apply an edit once. OpenAI does not expose a built-in voice-discovery endpoint for speech, so its suggestions use the provider-authoritative list in the official [Text-to-Speech guide](https://developers.openai.com/api/docs/guides/text-to-speech#voice-options): `tts-1` and `tts-1-hd` offer alloy, ash, coral, echo, fable, onyx, nova, sage, and shimmer; other configured OpenAI TTS models offer those nine plus ballad, verse, marin, and cedar. Gemini documents no discovery endpoint either, so `ProviderMetadataCatalog` holds the complete voice list from the official [speech-generation guide](https://ai.google.dev/gemini-api/docs/speech-generation) — 30 voices as verified on 2026-08-20 — as a single production constant published through the freshness-guarded metadata path. Google changing the documented set is therefore a source change: re-verify the constant against that guide's "Voice options" table, in its order, rather than adding voices from another provider or a discovery request Gemini does not offer. A Custom endpoint has no discovery contract; its voice is whatever Settings has configured, and Settings does not ask for one. No supported provider offers voice discovery, so the app makes no voice request at all and holds no decoder for a voice response; reinstating one is a provider-contract change, not a refactor. A model or voice the current catalog does not list — typed by the user, or saved before the documented set changed — is kept exactly as configured and offered by that provider's Settings picker alongside the catalog it can be corrected from, because SwiftUI documents a picker whose selection has no matching tag as undefined and normalizing the value would speak in one the user never chose.
 - **External toolchain**: `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them. Every app build runs `swiftlint --strict` over `Sources` and `Tests` and fails if SwiftLint is not on `PATH` or in Homebrew's `/opt/homebrew/bin` or `/usr/local/bin`.
+
+## Local Kokoro Server
+
+`kokoro/compose.yaml` runs [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) v0.9.0, an OpenAI-compatible server for the Kokoro-82M v1.0 model, as a Custom provider on this Mac. The image is pinned by digest and already contains the model weights and voices, so after the first pull (about 3 GB) it needs no network. Docker on macOS cannot use the Apple GPU, so the model runs on the CPU. The port is published on `127.0.0.1` only, because the server has no authentication. Its log level is `INFO`, so `docker logs` shows each text chunk's token count and first 50 characters, which is copied text, kept until the 1 MB log cap rotates it out; `API_LOG_LEVEL: WARNING` keeps copied text out of the logs.
+
+```
+docker compose -f kokoro/compose.yaml up -d   # start; it restarts with Docker until brought down
+docker compose -f kokoro/compose.yaml down    # stop and remove the container
+```
+
+Then select Custom in Settings:
+
+| Field | Value |
+|---|---|
+| Base URL | `http://127.0.0.1:8880/v1/audio/speech` (the full speech URL, which the app posts to as written) |
+| Model | `kokoro` |
+| Voice | a voice ID such as `af_heart`; the first letter selects the language (`a` American English, `b` British English). `curl http://127.0.0.1:8880/v1/audio/voices` lists all of them. |
+| API Key | anything, including empty; the server ignores it |
+| PCM Sample Rate (Hz) | 24000 |
+
+The server streams by default and labels its PCM `audio/pcm`, which the declared-format rule accepts. It streams one text chunk at a time, and the compose file lowers `TARGET_MAX_TOKENS` from 250 to 100 (with `TARGET_MIN_TOKENS` at 75), so a chunk is about one or two sentences and the first audio of a long passage arrives in about 3 s rather than 6 s on CPU. An unknown voice is answered with HTTP 400, which the app reports as an HTTP failure.
 
 ## Build & Test
 

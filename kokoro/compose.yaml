@@ -1,0 +1,41 @@
+# Local Kokoro-82M v1.0 speech server for ClipboardTTS's Custom provider.
+#
+# Docker on macOS runs this on the CPU only; see README "Local Kokoro Server".
+# Start: docker compose -f kokoro/compose.yaml up -d
+# Stop:  docker compose -f kokoro/compose.yaml down
+name: clipboardtts-kokoro
+
+services:
+  kokoro:
+    # Kokoro-FastAPI v0.9.0 (built 2026-09-10), pinned by multi-arch index digest so every user
+    # runs the same server. The model weights and voices ship inside the image.
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0@sha256:ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c
+    ports:
+      # Loopback only: ClipboardTTS accepts plain HTTP only to a loopback literal, and the server
+      # has no authentication of its own.
+      - "127.0.0.1:8880:8880"
+    environment:
+      # The weights are already in the image; skip the startup download step and its Hub check.
+      DOWNLOAD_MODEL: "false"
+      HF_HUB_OFFLINE: "1"
+      # Smaller text chunks so the first audio arrives sooner. The packer fills each chunk up to
+      # TARGET_MAX_TOKENS (default 250) and never splits an ordinary sentence, so the maximum, not
+      # the minimum, sets the first chunk's size; on an 815-character paragraph on CPU this cut
+      # time to first audio from about 6 s to about 3 s without slowing the whole passage.
+      TARGET_MIN_TOKENS: "75"
+      TARGET_MAX_TOKENS: "100"
+      # INFO logs each text chunk's token count and first 50 characters, which is the user's
+      # copied text; WARNING keeps that text out of the logs.
+      API_LOG_LEVEL: INFO
+    logging:
+      driver: json-file
+      options:
+        max-size: 1m
+        max-file: "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8880/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
