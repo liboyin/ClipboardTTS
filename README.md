@@ -37,6 +37,7 @@ Tests/                        # XCTest, including focused metadata state/race su
                               # MockURLProtocol, and OwnedDefaults (test-owned settings storage)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
 kokoro/compose.yaml           # optional local Kokoro-82M server for the Custom provider
+kokoro/start-native.sh        # the same server run natively, on the Apple GPU
 ```
 
 ## Architecture
@@ -86,6 +87,34 @@ Then select Custom in Settings:
 | PCM Sample Rate (Hz) | 24000 |
 
 The server streams by default and labels its PCM `audio/pcm`, which the declared-format rule accepts. It streams one text chunk at a time, and the compose file lowers `TARGET_MAX_TOKENS` from 250 to 100 (with `TARGET_MIN_TOKENS` at 75), so a chunk is about one or two sentences and the first audio of a long passage arrives in about 3 s rather than 6 s on CPU. An unknown voice is answered with HTTP 400, which the app reports as an HTTP failure.
+
+### Native on macOS
+
+`kokoro/start-native.sh` runs the same Kokoro-FastAPI v0.9.0 directly on macOS, where PyTorch can use the Apple GPU (MPS). It needs a one-time checkout beside this repository, built with [uv](https://docs.astral.sh/uv/) from upstream's own lock file, which installs into the checkout's `.venv` with a uv-managed Python 3.12 — the version the Docker image uses — and leaves any other Python environment alone. The download script verifies the weights against upstream's pinned SHA-256 values.
+
+```
+git clone --branch v0.9.0 --depth 1 https://github.com/remsky/Kokoro-FastAPI.git ~/Code/Kokoro-FastAPI
+cd ~/Code/Kokoro-FastAPI
+uv sync --frozen --extra cpu --python 3.12   # macOS PyTorch builds include MPS despite the extra's name
+.venv/bin/python docker/scripts/download_model.py --output api/src/models/v1_0
+```
+
+```
+kokoro/start-native.sh         # Apple GPU; Ctrl-C stops it
+kokoro/start-native.sh --cpu   # CPU only
+```
+
+It listens on `127.0.0.1:8881`, so it can run beside the Docker service; use `http://127.0.0.1:8881/v1/audio/speech` as the Base URL, with the Settings values above otherwise unchanged. `KOKORO_FASTAPI_DIR` and `KOKORO_PORT` override the checkout location and port; the loopback host is fixed. It applies the compose file's chunk sizing and `INFO` log level, so the terminal shows copied text the same way `docker logs` does, and skips the Hugging Face update check. The first start after setup took about 54 s; later starts take about 8 s on the GPU and 7 s on the CPU. The startup banner says "warmed up on cuda" whatever the device; the `Loading Kokoro model on mps` log line is the reliable one.
+
+Measured on 2026-10-29 on an Apple M2 with 16 GB, macOS 26.7.1, upstream commit `404d122`, with ClipboardTTS-shaped requests to each server in turn after one warm-up request, using text that server process had not spoken before (repeating a text makes the GPU look faster than it is, 0.31 s rather than about 1 s for a short sentence):
+
+| Server | First audio, one sentence (6 runs) | First audio, 860–950 characters (3 runs) | Whole passage, about 50 s of audio |
+|---|---|---|---|
+| Docker, CPU | 1.07–1.10 s (3 runs of one repeated sentence) | 2.1–3.9 s | 17.6–18.3 s |
+| Native, CPU | 0.54–0.87 s | 0.96–1.9 s | 8.5–10.2 s |
+| Native, Apple GPU | 0.86–1.3 s | 0.72–1.2 s | 4.6–5.3 s |
+
+Running natively removes most of Docker's latency. The GPU halves generation time and gave the steadiest first audio on long passages, but a sentence the GPU process has not seen before costs it a little more than the CPU; both stay well ahead of playback. These are a few runs on one machine, not a benchmark.
 
 ## Build & Test
 
