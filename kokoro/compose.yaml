@@ -1,5 +1,8 @@
-# Local Kokoro-82M v1.0 speech server for ClipboardTTS's Custom provider.
+# Local Kokoro-82M v1.1-zh speech server for ClipboardTTS's Custom provider.
 #
+# Kokoro-FastAPI-zh is a community fork of Kokoro-FastAPI v0.2.4 that serves the v1.1-zh model and
+# phonemizes English runs inside Chinese text with an English pipeline (misaki's en_callable), so
+# mixed Chinese-English text is spoken rather than garbled. Use a zf_/zm_ voice for that.
 # Docker on macOS runs this on the CPU only; see README "Local Kokoro Server".
 # Start: docker compose -f kokoro/compose.yaml up -d
 # Stop:  docker compose -f kokoro/compose.yaml down
@@ -7,9 +10,10 @@ name: clipboardtts-kokoro
 
 services:
   kokoro:
-    # Kokoro-FastAPI v0.9.0 (built 2026-09-10), pinned by multi-arch index digest so every user
-    # runs the same server. The model weights and voices ship inside the image.
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.0@sha256:ee3111d6a2c903ed62f3b4fa19543c6901205ed39fce3c177e895b34a8386b9c
+    # hsiang-han/Kokoro-FastAPI-zh v0.2.4-zh (built 2026-03-02), pinned by multi-arch index digest so
+    # every user runs the same server. The v1.1-zh weights (SHA-256 matching Hugging Face's) and all
+    # 103 of its voices ship inside the image.
+    image: ghcr.io/hsiang-han/kokoro-fastapi-zh-cpu:v0.2.4-zh@sha256:a675c4d280ff08002778468a2687d35c27d0a9709c6a8259afbfa573a72e7e2b
     ports:
       # Loopback only: ClipboardTTS accepts plain HTTP only to a loopback literal, and the server
       # has no authentication of its own.
@@ -18,10 +22,9 @@ services:
       # The weights are already in the image; skip the startup download step and its Hub check.
       DOWNLOAD_MODEL: "false"
       HF_HUB_OFFLINE: "1"
-      # Smaller text chunks so the first audio arrives sooner. The packer fills each chunk up to
-      # TARGET_MAX_TOKENS (default 250) and never splits an ordinary sentence, so the maximum, not
-      # the minimum, sets the first chunk's size; on an 815-character paragraph on CPU this cut
-      # time to first audio from about 6 s to about 3 s without slowing the whole passage.
+      # Smaller text chunks so the first audio arrives sooner (defaults 175/250), tuned on upstream
+      # v0.9.0's packer. This fork's older one splits Chinese text at every clause anyway and does
+      # not hold a clause to the maximum; see README "Local Kokoro Server".
       TARGET_MIN_TOKENS: "75"
       TARGET_MAX_TOKENS: "100"
       # INFO logs each text chunk's token count and first 50 characters, which is the user's

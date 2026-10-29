@@ -36,8 +36,8 @@ Sources/
 Tests/                        # XCTest, including focused metadata state/race suites, shared
                               # MockURLProtocol, and OwnedDefaults (test-owned settings storage)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
-kokoro/compose.yaml           # optional local Kokoro-82M server for the Custom provider
-kokoro/start-native.sh        # the same server run natively, on the Apple GPU
+kokoro/compose.yaml           # optional local Kokoro-82M v1.1-zh server for the Custom provider
+kokoro/start-native.sh        # Kokoro-82M v1.0 run natively, on the Apple GPU
 ```
 
 ## Architecture
@@ -69,7 +69,7 @@ kokoro/start-native.sh        # the same server run natively, on the Apple GPU
 
 ## Local Kokoro Server
 
-`kokoro/compose.yaml` runs [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) v0.9.0, an OpenAI-compatible server for the Kokoro-82M v1.0 model, as a Custom provider on this Mac. The image is pinned by digest and already contains the model weights and voices, so after the first pull (about 3 GB) it needs no network. Docker on macOS cannot use the Apple GPU, so the model runs on the CPU. The port is published on `127.0.0.1` only, because the server has no authentication. Its log level is `INFO`, so `docker logs` shows each text chunk's token count and first 50 characters, which is copied text, kept until the 1 MB log cap rotates it out; `API_LOG_LEVEL: WARNING` keeps copied text out of the logs.
+`kokoro/compose.yaml` runs [Kokoro-FastAPI-zh](https://github.com/hsiang-han/Kokoro-FastAPI-zh) v0.2.4-zh, a community fork of [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) v0.2.4, as an OpenAI-compatible server for the [Kokoro-82M v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh) model, a Custom provider on this Mac. It is used because it speaks mixed Chinese-English text: given a Chinese voice, it phonemizes each run of English words with an English pipeline (misaki's `en_callable`), whereas upstream Kokoro-FastAPI and the v1.0 model pass English inside Chinese text through as raw letters and garble it. The image is pinned by digest and already contains the model weights (SHA-256 identical to Hugging Face's) and all 103 voices, so after the first pull (about 4 GB) it needs no network. Docker on macOS cannot use the Apple GPU, so the model runs on the CPU. The port is published on `127.0.0.1` only, because the server has no authentication. Its log level is `INFO`, so `docker logs` shows each text chunk's token count and first 50 characters, which is copied text, kept until the 1 MB log cap rotates it out; `API_LOG_LEVEL: WARNING` keeps copied text out of the logs.
 
 ```
 docker compose -f kokoro/compose.yaml up -d   # start; it restarts with Docker until brought down
@@ -82,15 +82,23 @@ Then select Custom in Settings:
 |---|---|
 | Base URL | `http://127.0.0.1:8880/v1/audio/speech` (the full speech URL, which the app posts to as written) |
 | Model | `kokoro` |
-| Voice | a voice ID such as `af_heart`; the first letter selects the language (`a` American English, `b` British English). `curl http://127.0.0.1:8880/v1/audio/voices` lists all of them. |
+| Voice | a Chinese voice such as `zf_001` (female) or `zm_010` (male) for Chinese and mixed text; `af_maple`, `af_sol` (American English) and `bf_vale` (British English) are the only English voices. There are 55 `zf_` and 45 `zm_` voices, numbered between 001 and 100 with gaps; `curl http://127.0.0.1:8880/v1/audio/voices` lists all of them. |
 | API Key | anything, including empty; the server ignores it |
 | PCM Sample Rate (Hz) | 24000 |
 
-The server streams by default and labels its PCM `audio/pcm`, which the declared-format rule accepts. It streams one text chunk at a time, and the compose file lowers `TARGET_MAX_TOKENS` from 250 to 100 (with `TARGET_MIN_TOKENS` at 75), so a chunk is about one or two sentences and the first audio of a long passage arrives in about 3 s rather than 6 s on CPU. An unknown voice is answered with HTTP 400, which the app reports as an HTTP failure.
+The server streams by default and labels its PCM `audio/pcm`, which the declared-format rule accepts. It streams one text chunk at a time, splitting Chinese text at `，`, `。`, `！`, `？` and `；`, so the first audio waits only for the first clause. The compose file keeps the 75/100 `TARGET_MIN_TOKENS`/`TARGET_MAX_TOKENS` setting tuned on upstream v0.9.0, but this fork's older chunker does not hold Chinese clauses to that maximum: chunks of up to 435 tokens were observed. It splits a clause further, and only at an ASCII comma, once the clause exceeds 450 tokens, while the Kokoro library truncates any chunk past 510 phonemes and logs "Truncating to 510 characters" when it does, so a very long Chinese clause with no punctuation is the case that can lose speech. A v1.0 voice such as `af_heart` no longer exists and, like any unknown voice, is answered with HTTP 400, which the app reports as an HTTP failure.
+
+This paragraph (506 characters) is spoken in full by `zf_001`: the server splits it into 11 chunks, the largest 435 tokens, and logs no truncation, and on 2026-10-30 on an Apple M2 the first audio arrived in 1.8 s and the whole 61.8 s of speech was generated in 23.2 s. Its English runs reach the model as English phonemes, and its numbers, versions and percentages are read in Chinese (`v5.0` as "v 五点零", `88.2%` as "百分之八十八点二").
+
+```
+Google DeepMind 发布新一代前沿模型 Gemini 4 Carbon，距 Gemini 4 Argon 仅两周，主打网络安全与长程智能体能力。谷歌称其在 Artificial Analysis Intelligence Index v5.0 以 59 分排名第一（Argon 为 50 分），并在 SEC-bench Pro（88.2%）、ExploitGym（54.8%）、CWE-bench（71.0%）领先；Artificial Analysis 确认其登顶 Intelligence Index v5，但在 Coding Agent Index 上以 59 分仅次于 Claude Opus 5.5 的 62 分。Arena 公布 Gemini 4 Carbon (High) 首次上榜即拿下 Text Arena 第一（1528 分）、Agent Arena 第二、Code Arena: WebDev 第四（1768 分），并登上这三个榜单的帕累托前沿；在 Agent Arena 中每任务中位成本 1.80 美元，比排名第一的 Claude Opus 5.5 (Max) 低 72%。
+```
+
+A hyphen directly before a number is read as a minus sign, so `GPT-4` is spoken as "GPT 负四" ("GPT negative four").
 
 ### Native on macOS
 
-`kokoro/start-native.sh` runs the same Kokoro-FastAPI v0.9.0 directly on macOS, where PyTorch can use the Apple GPU (MPS). It needs a one-time checkout beside this repository, built with [uv](https://docs.astral.sh/uv/) from upstream's own lock file, which installs into the checkout's `.venv` with a uv-managed Python 3.12 — the version the Docker image uses — and leaves any other Python environment alone. The download script verifies the weights against upstream's pinned SHA-256 values.
+`kokoro/start-native.sh` runs upstream Kokoro-FastAPI v0.9.0 with the Kokoro-82M v1.0 model directly on macOS, where PyTorch can use the Apple GPU (MPS). It is the server the compose file ran before it moved to v1.1-zh, so it does not speak mixed Chinese-English text. It needs a one-time checkout beside this repository, built with [uv](https://docs.astral.sh/uv/) from upstream's own lock file, which installs into the checkout's `.venv` with a uv-managed Python 3.12 — the version the Docker image uses — and leaves any other Python environment alone. The download script verifies the weights against upstream's pinned SHA-256 values.
 
 ```
 git clone --branch v0.9.0 --depth 1 https://github.com/remsky/Kokoro-FastAPI.git ~/Code/Kokoro-FastAPI
@@ -104,13 +112,13 @@ kokoro/start-native.sh         # Apple GPU; Ctrl-C stops it
 kokoro/start-native.sh --cpu   # CPU only
 ```
 
-It listens on `127.0.0.1:8881`, so it can run beside the Docker service; use `http://127.0.0.1:8881/v1/audio/speech` as the Base URL, with the Settings values above otherwise unchanged. `KOKORO_FASTAPI_DIR` and `KOKORO_PORT` override the checkout location and port; the loopback host is fixed. It applies the compose file's chunk sizing and `INFO` log level, so the terminal shows copied text the same way `docker logs` does, and skips the Hugging Face update check. The first start after setup took about 54 s; later starts take about 8 s on the GPU and 7 s on the CPU. The startup banner says "warmed up on cuda" whatever the device; the `Loading Kokoro model on mps` log line is the reliable one.
+It listens on `127.0.0.1:8881`, so it can run beside the Docker service; use `http://127.0.0.1:8881/v1/audio/speech` as the Base URL and a v1.0 voice such as `af_heart`, whose first letter selects the language (`a` American English, `b` British English), with the other Settings values above unchanged. `KOKORO_FASTAPI_DIR` and `KOKORO_PORT` override the checkout location and port; the loopback host is fixed. It applies the compose file's chunk sizing and `INFO` log level, so the terminal shows copied text the same way `docker logs` does, and skips the Hugging Face update check. The first start after setup took about 54 s; later starts take about 8 s on the GPU and 7 s on the CPU. The startup banner says "warmed up on cuda" whatever the device; the `Loading Kokoro model on mps` log line is the reliable one.
 
 Measured on 2026-10-29 on an Apple M2 with 16 GB, macOS 26.7.1, upstream commit `404d122`, with ClipboardTTS-shaped requests to each server in turn after one warm-up request, using text that server process had not spoken before (repeating a text makes the GPU look faster than it is, 0.31 s rather than about 1 s for a short sentence):
 
 | Server | First audio, one sentence (6 runs) | First audio, 860–950 characters (3 runs) | Whole passage, about 50 s of audio |
 |---|---|---|---|
-| Docker, CPU | 1.07–1.10 s (3 runs of one repeated sentence) | 2.1–3.9 s | 17.6–18.3 s |
+| Docker, CPU (the v0.9.0 image) | 1.07–1.10 s (3 runs of one repeated sentence) | 2.1–3.9 s | 17.6–18.3 s |
 | Native, CPU | 0.54–0.87 s | 0.96–1.9 s | 8.5–10.2 s |
 | Native, Apple GPU | 0.86–1.3 s | 0.72–1.2 s | 4.6–5.3 s |
 
