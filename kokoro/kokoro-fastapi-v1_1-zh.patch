@@ -1,0 +1,45 @@
+Kokoro-FastAPI v0.9.0 (commit 404d122) serving Kokoro-82M v1.1-zh, for kokoro/start-native.sh.
+Applied once at setup with git apply; see README "Native on macOS". Two changes:
+- load the v1.1-zh weights rather than v1.0's (the filename is not a setting);
+- give the Chinese pipeline misaki's en_callable, so English runs in mixed text are spoken, as
+  Kokoro-FastAPI-zh and hexgrad's own v1.1-zh sample do.
+
+diff --git a/api/src/core/model_config.py b/api/src/core/model_config.py
+index 47544c1..d99fc36 100644
+--- a/api/src/core/model_config.py
++++ b/api/src/core/model_config.py
+@@ -34,9 +34,9 @@ class ModelConfig(BaseModel):
+     cache_voices: bool = Field(True, description="Whether to cache voice tensors")
+     voice_cache_size: int = Field(2, description="Maximum number of cached voices")
+ 
+-    # Model filename
++    # Model filename: Kokoro-82M v1.1-zh rather than v1.0
+     pytorch_kokoro_v1_file: str = Field(
+-        "v1_0/kokoro-v1_0.pth", description="PyTorch Kokoro V1 model filename"
++        "v1_1_zh/kokoro-v1_1-zh.pth", description="PyTorch Kokoro V1 model filename"
+     )
+ 
+     # Backend config
+diff --git a/api/src/inference/kokoro_v1.py b/api/src/inference/kokoro_v1.py
+index c559fc9..324cae3 100644
+--- a/api/src/inference/kokoro_v1.py
++++ b/api/src/inference/kokoro_v1.py
+@@ -199,11 +199,18 @@ class KokoroV1(BaseModelBackend):
+ 
+         if lang_code not in self._pipelines:
+             logger.info(f"Creating new pipeline for language code: {lang_code}")
++            extra = {}
++            if lang_code == "z":
++                # v1.1-zh phonemizes English inside Chinese text only through an English
++                # pipeline; without one, misaki drops those words.
++                english = KPipeline(lang_code="a", repo_id=settings.model_repo_id, model=False)
++                extra["en_callable"] = lambda text: next(english(text)).phonemes
+             self._pipelines[lang_code] = KPipeline(
+                 lang_code=lang_code,
+                 repo_id=settings.model_repo_id,
+                 model=self._model,
+                 device=self._device,
++                **extra,
+             )
+         return self._pipelines[lang_code]
+ 

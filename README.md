@@ -37,7 +37,9 @@ Tests/                        # XCTest, including focused metadata state/race su
                               # MockURLProtocol, and OwnedDefaults (test-owned settings storage)
 project.yml                   # XcodeGen source of truth (*.xcodeproj is gitignored)
 kokoro/compose.yaml           # optional local Kokoro-82M v1.1-zh server for the Custom provider
-kokoro/start-native.sh        # Kokoro-82M v1.0 run natively, on the Apple GPU
+kokoro/start-native.sh        # the same model run natively, on the Apple GPU
+kokoro/kokoro-fastapi-v1_1-zh.patch # setup patch to upstream Kokoro-FastAPI for start-native.sh
+kokoro/kokoro-v1_1-zh.sha256  # SHA-256 list for the native setup's Hugging Face download
 ```
 
 ## Architecture
@@ -98,31 +100,37 @@ A hyphen directly before a number is read as a minus sign, so `GPT-4` is spoken 
 
 ### Native on macOS
 
-`kokoro/start-native.sh` runs upstream Kokoro-FastAPI v0.9.0 with the Kokoro-82M v1.0 model directly on macOS, where PyTorch can use the Apple GPU (MPS). It is the server the compose file ran before it moved to v1.1-zh, so it does not speak mixed Chinese-English text. It needs a one-time checkout beside this repository, built with [uv](https://docs.astral.sh/uv/) from upstream's own lock file, which installs into the checkout's `.venv` with a uv-managed Python 3.12 — the version the Docker image uses — and leaves any other Python environment alone. The download script verifies the weights against upstream's pinned SHA-256 values.
+`kokoro/start-native.sh` serves the same Kokoro-82M v1.1-zh model and voices directly on macOS, where PyTorch can use the Apple GPU (MPS). It runs upstream Kokoro-FastAPI v0.9.0 rather than the fork, with `kokoro/kokoro-fastapi-v1_1-zh.patch` applied: upstream can serve only v1.0's weights, and does not give the Chinese pipeline the English phonemizer (`en_callable`) that the fork and hexgrad's own v1.1-zh sample use, without which English words inside Chinese text are dropped. The launcher refuses a checkout that does not carry the patch. Setup is a one-time checkout beside this repository, built with [uv](https://docs.astral.sh/uv/) from upstream's own lock file, which installs into the checkout's `.venv` with a uv-managed Python 3.12 — the version the Docker image uses — and leaves any other Python environment alone. The weights and voices (about 380 MB) are downloaded from Hugging Face at a pinned revision and checked against `kokoro/kokoro-v1_1-zh.sha256`, whose values are Hugging Face's own SHA-256 for that revision; the Docker image's 103 voices match them. Run these from this repository's root:
 
 ```
-git clone --branch v0.9.0 --depth 1 https://github.com/remsky/Kokoro-FastAPI.git ~/Code/Kokoro-FastAPI
-cd ~/Code/Kokoro-FastAPI
-uv sync --frozen --extra cpu --python 3.12   # macOS PyTorch builds include MPS despite the extra's name
-.venv/bin/python docker/scripts/download_model.py --output api/src/models/v1_0
+K=~/Code/Kokoro-FastAPI
+git clone --branch v0.9.0 --depth 1 https://github.com/remsky/Kokoro-FastAPI.git "$K"
+git -C "$K" apply "$PWD/kokoro/kokoro-fastapi-v1_1-zh.patch"
+(cd "$K" && uv sync --frozen --extra cpu --python 3.12)   # macOS PyTorch builds include MPS despite the extra's name
+"$K/.venv/bin/python" -c "from huggingface_hub import snapshot_download; snapshot_download('hexgrad/Kokoro-82M-v1.1-zh', revision='01e7505bd6a7a2ac4975463114c3a7650a9f7218', allow_patterns=['config.json', 'kokoro-v1_1-zh.pth', 'voices/*.pt'], local_dir='$K/api/src/models/v1_1_zh')"
+(cd "$K/api/src/models/v1_1_zh" && shasum -a 256 -c --quiet) < kokoro/kokoro-v1_1-zh.sha256 && echo verified
 ```
+
+A checkout set up for the earlier v1.0 launcher needs only the `git apply`, download and check steps. Keep the checkout's path short: eSpeak NG, which phonemizes English words missing from misaki's dictionary, failed to load its data from a 177-character path inside the `.venv` and stopped the server, while the default checkout's 100-character path works.
 
 ```
 kokoro/start-native.sh         # Apple GPU; Ctrl-C stops it
 kokoro/start-native.sh --cpu   # CPU only
 ```
 
-It listens on `127.0.0.1:8881`, so it can run beside the Docker service; use `http://127.0.0.1:8881/v1/audio/speech` as the Base URL and a v1.0 voice such as `af_heart`, whose first letter selects the language (`a` American English, `b` British English), with the other Settings values above unchanged. `KOKORO_FASTAPI_DIR` and `KOKORO_PORT` override the checkout location and port; the loopback host is fixed. It applies the compose file's chunk sizing and `INFO` log level, so the terminal shows copied text the same way `docker logs` does, and skips the Hugging Face update check. The first start after setup took about 54 s; later starts take about 8 s on the GPU and 7 s on the CPU. The startup banner says "warmed up on cuda" whatever the device; the `Loading Kokoro model on mps` log line is the reliable one.
+It listens on `127.0.0.1:8881`, so it can run beside the Docker service; use `http://127.0.0.1:8881/v1/audio/speech` as the Base URL, with the other Settings values above unchanged, including the voices. `KOKORO_FASTAPI_DIR` and `KOKORO_PORT` override the checkout location and port; the loopback host is fixed. It applies the compose file's chunk sizing and `INFO` log level, so the terminal shows copied text the same way `docker logs` does, and skips the Hugging Face update check. The first start of a new checkout took about 68 s; later starts take about 13 s on the GPU and 9 s on the CPU. On the GPU, the first request after a start took 1.8 s to its first audio. The startup banner says "warmed up on cuda" whatever the device; the `Loading Kokoro model on mps` log line is the reliable one.
 
-Measured on 2026-10-29 on an Apple M2 with 16 GB, macOS 26.7.1, upstream commit `404d122`, with ClipboardTTS-shaped requests to each server in turn after one warm-up request, using text that server process had not spoken before (repeating a text makes the GPU look faster than it is, 0.31 s rather than about 1 s for a short sentence):
+Upstream v0.9.0 chunks text differently from the fork: it also splits at `、` and `:`, so the paragraph above becomes 15 chunks rather than 11, the largest 289 tokens, with one break falling inside "Code Arena: WebDev". It is spoken in full, with no truncation logged. A text with nothing to speak, such as `——`, is answered with HTTP 200 and no audio.
 
-| Server | First audio, one sentence (6 runs) | First audio, 860–950 characters (3 runs) | Whole passage, about 50 s of audio |
+Measured on 2026-10-30 on an Apple M2 with 16 GB, macOS 26.7.1, upstream commit `404d122`, voice `zf_001`, with ClipboardTTS-shaped requests to one server process of each kind after one warm-up request: six short mixed sentences such as "这个 bug 只在 Safari 浏览器里出现。", then the paragraph above, none of them spoken before by that process:
+
+| Server | First audio, short sentences | First audio, paragraph | Paragraph, about 62–64 s of audio |
 |---|---|---|---|
-| Docker, CPU (the v0.9.0 image) | 1.07–1.10 s (3 runs of one repeated sentence) | 2.1–3.9 s | 17.6–18.3 s |
-| Native, CPU | 0.54–0.87 s | 0.96–1.9 s | 8.5–10.2 s |
-| Native, Apple GPU | 0.86–1.3 s | 0.72–1.2 s | 4.6–5.3 s |
+| Docker fork, CPU | 1.20–1.46 s | 1.68 s | 22.9 s |
+| Native, CPU | 0.58–0.70 s | 0.88 s | 12.0 s |
+| Native, Apple GPU | 0.47–0.54 s | 0.64 s | 9.3 s |
 
-Running natively removes most of Docker's latency. The GPU halves generation time and gave the steadiest first audio on long passages, but a sentence the GPU process has not seen before costs it a little more than the CPU; both stay well ahead of playback. These are a few runs on one machine, not a benchmark.
+The GPU is slower on input lengths it has not processed before: sent the same paragraph three more times, it generated it in 6.9–7.1 s, while the CPU stayed at 11.9–12.4 s. Three further servers per device, run with the same patch from a scratch checkout, generated the paragraph within 0.2 s of these totals, and the two of them timed on the short sentences gave first audio within 0.06 s of these. Running natively roughly halves Docker's first-audio latency and generation time, and the GPU is the faster device for both; all three stay well ahead of playback. These are a few runs on one machine, not a benchmark, and an earlier single run that put the GPU behind the CPU did not reproduce.
 
 ## Build & Test
 
