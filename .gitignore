@@ -17,3 +17,6 @@ xcuserdata/
 # AI Harness
 .claude/settings.*.json
 .remember/
+
+# Local secrets
+.env
