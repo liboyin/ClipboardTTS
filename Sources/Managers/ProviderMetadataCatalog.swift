@@ -21,21 +21,25 @@ enum ProviderMetadataCatalog {
     /// Gemini documents no voice-discovery endpoint, so this list is the app's only source of
     /// truth for the Settings suggestions, which are the only place a voice is chosen. Transcribed
     /// from the "Voice options" table of https://ai.google.dev/gemini-api/docs/speech-generation,
-    /// verified 2026-08-20; it must be re-verified against that guide whenever Google changes the
-    /// documented set.
+    /// verified 2026-11-01, when the guide gave one set for every model it lists; it must be
+    /// re-verified against that guide whenever Google changes the documented set.
     private static let geminiVoices = [
         "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
         "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib",
         "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
         "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
     ]
-    /// The one Gemini TTS model the app supports, which is also the model it offers as a suggestion.
-    private static let geminiModels = ["gemini-3.1-flash-tts-preview"]
+    /// The Gemini TTS models the app supports and offers as suggestions, the default first.
+    ///
+    /// Both stream from `:streamGenerateContent`, verified live 2026-11-01. Flash-Lite is Google's
+    /// replacement for `gemini-3.1-flash-tts-preview`; Flash covers languages Flash-Lite does not.
+    /// The default is repeated as each settings fallback, so change those with this order.
+    private static let geminiModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]
 
     /// The models `provider` documents itself, or `nil` when only its endpoint can answer.
     ///
-    /// Gemini publishes no model-discovery endpoint, so the supported TTS model is the app's own
-    /// answer and needs no request. An OpenAI-compatible or Custom deployment answers for itself,
+    /// Gemini publishes no model-discovery endpoint, so the supported TTS models are the app's own
+    /// answer and need no request. An OpenAI-compatible or Custom deployment answers for itself,
     /// which is what `nil` says here; `OpenAIModelDiscovery` owns asking it.
     static func models(for provider: APIKeyProvider) -> [String]? {
         switch provider {

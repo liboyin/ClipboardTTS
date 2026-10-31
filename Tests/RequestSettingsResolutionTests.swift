@@ -78,7 +78,7 @@ final class RequestSettingsResolutionTests: XCTestCase {
         XCTAssertEqual(openAI.voice, "alloy")
 
         let gemini = TTSNetworkManager.RequestSettings.resolved(provider: .gemini, apiKey: "", defaults: defaults)
-        XCTAssertEqual(gemini.model, "gemini-3.1-flash-tts-preview")
+        XCTAssertEqual(gemini.model, "gemini-3.8-flash-lite-tts")
         XCTAssertEqual(gemini.voice, "Aoede")
 
         let custom = TTSNetworkManager.RequestSettings.resolved(provider: .custom, apiKey: "", defaults: defaults)

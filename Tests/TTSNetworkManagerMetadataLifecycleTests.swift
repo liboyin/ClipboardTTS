@@ -246,7 +246,7 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
         XCTAssertEqual(report?.onMainThread, true, "A publication must be reported where it was published.")
         XCTAssertEqual(
             report?.listAtReport,
-            ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            ProviderSuggestions(provider: .gemini, values: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]),
             "A publication must be reported after its list is published."
         )
     }

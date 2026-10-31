@@ -53,7 +53,7 @@ final class ProviderMetadataCatalogTests: XCTestCase {
         // direction. The model is passed for every provider, so this also pins that Gemini's answer
         // does not depend on it: a per-model Gemini catalog would be an invention.
         XCTAssertEqual(
-            ProviderMetadataCatalog.voices(for: .gemini, model: "gemini-3.1-flash-tts-preview"),
+            ProviderMetadataCatalog.voices(for: .gemini, model: "gemini-3.8-flash-lite-tts"),
             documentedGeminiTTSVoices
         )
         XCTAssertEqual(ProviderMetadataCatalog.voices(for: .gemini, model: "tts-1"), documentedGeminiTTSVoices)
@@ -71,10 +71,14 @@ final class ProviderMetadataCatalogTests: XCTestCase {
 
     func testGeminiIsTheOnlyProviderWhoseModelListNeedsNoDiscoveryRequest() {
         // WHY: Which providers the app can answer for itself decides which ones send a credential
-        // to a discovery endpoint. Gemini documents no such endpoint, so its supported TTS model is
+        // to a discovery endpoint. Gemini documents no such endpoint, so its supported TTS models are
         // the app's own answer; OpenAI and Custom deployments answer for themselves, and claiming
         // otherwise here would replace a live model list with a guess.
-        XCTAssertEqual(ProviderMetadataCatalog.models(for: .gemini), ["gemini-3.1-flash-tts-preview"])
+        XCTAssertEqual(
+            ProviderMetadataCatalog.models(for: .gemini),
+            ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"],
+            "Flash-Lite must lead as the default, with Flash offered beside it."
+        )
         XCTAssertNil(ProviderMetadataCatalog.models(for: .openAI))
         XCTAssertNil(ProviderMetadataCatalog.models(for: .custom))
     }

@@ -42,14 +42,14 @@ final class TTSNetworkManagerMetadataTests: MetadataTestCase {
         manager.updateSettings(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiKey: "gemini-test-key",
-            model: "gemini-3.1-flash-tts-preview",
+            model: "gemini-3.8-flash-lite-tts",
             voice: "Aoede",
             selectedProvider: "Gemini"
         )
         XCTAssertEqual(manager.modelSuggestions.values, [])
         let geminiModelsPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]),
             "Gemini models published"
         )
         manager.fetchAvailableModels(
@@ -70,7 +70,7 @@ final class TTSNetworkManagerMetadataTests: MetadataTestCase {
         waitForCompletions(in: completions, count: 2, "Both stale OpenAI completions were refused") {
             $0.kind == .models && $0.token == staleToken && $0.outcome == .superseded
         }
-        XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.1-flash-tts-preview"])
+        XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"])
     }
 
     func testDelayedCustomModelsCannotReplaceModelsFromNewEndpoint() {
@@ -147,7 +147,7 @@ final class TTSNetworkManagerMetadataTests: MetadataTestCase {
         manager.updateSettings(
             baseURL: geminiEndpoint,
             apiKey: "gemini-key",
-            model: "gemini-3.1-flash-tts-preview",
+            model: "gemini-3.8-flash-lite-tts",
             voice: "Aoede",
             selectedProvider: "Gemini"
         )

@@ -38,7 +38,7 @@ extension TTSNetworkManager.RequestSettings {
             return Self(
                 baseURL: geminiAPIRoot,
                 apiKey: apiKey,
-                model: defaults.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.1-flash-tts-preview",
+                model: defaults.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.8-flash-lite-tts",
                 voice: defaults.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede",
                 provider: provider
             )

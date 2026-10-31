@@ -127,7 +127,8 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         // the form must keep each exactly as typed and speak with it, while offering the catalog it
         // can be corrected from. Dropping either from its picker would leave that selection without
         // a matching tag; replacing it with a catalog entry would send a request the user never
-        // configured. Both fields are driven because each renders its own picker.
+        // configured. Both fields are driven because each renders its own picker. The model is the
+        // retired 3.1 preview, which users who chose it keep after it left the catalog.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Gemini"
         ])
@@ -140,7 +141,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             let url = try XCTUnwrap(request.url?.absoluteString)
-            XCTAssertTrue(url.contains("/models/gemini-3.1-pro-tts-preview:"), url)
+            XCTAssertTrue(url.contains("/models/gemini-3.1-flash-tts-preview:"), url)
             let bodyData = try XCTUnwrap(requestBodyData(from: request))
             let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
             XCTAssertEqual(geminiVoiceName(in: body), "Unlisted-Preview-Voice")
@@ -155,15 +156,15 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             testCase: self
         )
 
-        settings.type("gemini-3.1-pro-tts-preview", into: .providerModel, expecting: "gemini-3.1-flash-tts-preview")
+        settings.type("gemini-3.1-flash-tts-preview", into: .providerModel, expecting: "gemini-3.8-flash-lite-tts")
         settings.type("Unlisted-Preview-Voice", into: .providerVoice, expecting: "Aoede")
 
         XCTAssertEqual(
             settings.suggestionControls(),
             [
                 HostedSettings.SuggestionControl(
-                    choices: ["gemini-3.1-pro-tts-preview", "gemini-3.1-flash-tts-preview"],
-                    selection: "gemini-3.1-pro-tts-preview"
+                    choices: ["gemini-3.1-flash-tts-preview", "gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"],
+                    selection: "gemini-3.1-flash-tts-preview"
                 ),
                 HostedSettings.SuggestionControl(
                     choices: ["Unlisted-Preview-Voice"] + documentedGeminiTTSVoices,
@@ -171,7 +172,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
                 )
             ]
         )
-        XCTAssertEqual(defaults.string(forKey: SettingsKeys.geminiModel), "gemini-3.1-pro-tts-preview")
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.geminiModel), "gemini-3.1-flash-tts-preview")
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.geminiVoice), "Unlisted-Preview-Voice")
 
         settings.click("Test Voice")
@@ -212,8 +213,8 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             settings.suggestionControls(),
             [
                 HostedSettings.SuggestionControl(
-                    choices: ["gemini-3.1-flash-tts-preview"],
-                    selection: "gemini-3.1-flash-tts-preview"
+                    choices: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"],
+                    selection: "gemini-3.8-flash-lite-tts"
                 ),
                 HostedSettings.SuggestionControl(choices: documentedGeminiTTSVoices, selection: "Sulafat")
             ]

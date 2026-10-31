@@ -29,7 +29,7 @@ final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
         )
         let geminiModelsPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.1-flash-tts-preview"]),
+            of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]),
             "Gemini models published"
         )
         manager.fetchAvailableModels(

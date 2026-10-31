@@ -16,9 +16,9 @@ struct GeminiSSEEventParser {
     ///
     /// The largest event Google documents is about 42 MB. Every Gemini TTS model is limited to
     /// 16,384 output tokens, billed at 25 audio tokens per second: 655 s of 24-kHz 16-bit mono PCM,
-    /// base64-encoded. Models other than `gemini-3.1-flash-tts-preview` do not stream, so they send
-    /// that whole utterance as one event. The headroom covers JSON framing and a modest limit
-    /// increase; re-verify both figures before lowering it.
+    /// base64-encoded. The 2.5 models do not stream, so they send that whole utterance as one
+    /// event. The headroom covers JSON framing and a modest limit increase; re-verify both figures
+    /// before lowering it.
     static let defaultMaximumUnfinishedEventByteCount = 64 * 1024 * 1024
 
     /// The stream sent more than the cap before ending one event.

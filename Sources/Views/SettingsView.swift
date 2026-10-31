@@ -10,7 +10,7 @@ struct SettingsView: View {
         static let apiBaseURL = "https://api.openai.com/v1/audio/speech"
         static let openAIModel = "tts-1"
         static let openAIVoice = "alloy"
-        static let geminiModel = "gemini-3.1-flash-tts-preview"
+        static let geminiModel = "gemini-3.8-flash-lite-tts"
         static let geminiVoice = "Aoede"
         static let customModel = ""
         static let customVoice = ""
