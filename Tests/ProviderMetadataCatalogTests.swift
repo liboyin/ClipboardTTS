@@ -37,11 +37,12 @@ final class ProviderMetadataCatalogTests: XCTestCase {
         XCTAssertNil(ProviderMetadataCatalog.voices(for: .custom))
     }
 
-    func testOnlyACustomEndpointsModelListNeedsADiscoveryRequest() {
-        // WHY: Which providers the app answers for itself decides which ones send a credential to a
-        // discovery endpoint. Gemini documents no such endpoint, and OpenAI's list also names
-        // Realtime models that cannot speak, so the supported speech models are the app's own answer
-        // for both, the default first; a Custom deployment answers for itself.
+    func testOpenAIAndGeminiOfferFixedModelCatalogsAndCustomOffersNone() {
+        // WHY: The app sends no model-discovery request, so these catalogs are the only model
+        // suggestions Settings offers. Gemini documents no discovery endpoint, and OpenAI's list also
+        // names Realtime models that cannot speak, so the supported speech models are the app's own
+        // answer for both, the default first. A Custom deployment documents nothing, so `nil` leaves
+        // its configured model alone.
         XCTAssertEqual(
             ProviderMetadataCatalog.models(for: .openAI),
             ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"],

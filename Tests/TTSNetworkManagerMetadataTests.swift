@@ -2,139 +2,61 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataTests: MetadataTestCase {
-    func testDelayedDiscoveredModelsCannotReplaceGeminiModels() {
-        // WHY: Cancellation races with URLSession completion, so a delayed discovery response must not
-        // overwrite the Gemini models that the user selected after starting the original request.
+    func testAModelCatalogPublishedForTheOldProviderCannotReplaceTheNewOne() throws {
+        // WHY: A catalog's publication waits for a main-queue turn, so a provider switch made in
+        // that window must refuse it. Otherwise OpenAI's models would replace the Gemini models the
+        // user switched to, offering choices Gemini's endpoint cannot serve.
         let (manager, completions) = makeMetadataManager()
-        manager.updateSettings(
-            baseURL: "https://custom.example/v1/audio/speech",
-            apiKey: "custom-test-key",
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "Custom"
+        manager.updateSettings(baseURL: OpenAIRealtimeSpeech.endpoint, apiKey: "openai-key",
+                               model: "gpt-realtime-2.1-mini", voice: "alloy", selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: OpenAIRealtimeSpeech.endpoint, selectedProvider: "OpenAI")
+        let staleToken = try XCTUnwrap(
+            manager.metadataTokenForTesting(for: .models),
+            "The started model request must own model metadata state until its publication runs."
         )
 
-        let oldRequestStarted = expectation(description: "Custom metadata request started")
-        let oldResponseReturned = expectation(description: "Custom metadata response returned")
-        let releaseOldResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.installRequestHandler { request in
-            oldRequestStarted.fulfill()
-            _ = releaseOldResponse.wait(timeout: .now() + 1.0)
-            oldResponseReturned.fulfill()
-            return metadataResponse(
-                for: request,
-                json: "{ \"data\": [{\"id\": \"stale-tts-model\"}] }"
-            )
-        }
-
-        manager.fetchAvailableModels(
-            baseURL: "https://custom.example/v1/audio/speech",
-            apiKey: "custom-test-key",
-            selectedProvider: "Custom"
-        )
-        wait(for: [oldRequestStarted], timeout: 1.0)
-        guard let staleToken = manager.metadataTokenForTesting(for: .models) else {
-            XCTFail("Expected the delayed Custom request to own model metadata state.")
-            releaseOldResponse.signal()
-            return
-        }
-
-        manager.updateSettings(
-            baseURL: "https://generativelanguage.googleapis.com/v1beta",
-            apiKey: "gemini-test-key",
-            model: "gemini-3.8-flash-lite-tts",
-            voice: "Aoede",
-            selectedProvider: "Gemini"
-        )
+        let geminiEndpoint = "https://generativelanguage.googleapis.com/v1beta"
+        manager.updateSettings(baseURL: geminiEndpoint, apiKey: "gemini-key", model: "gemini-3.8-flash-lite-tts",
+                               voice: "Aoede", selectedProvider: "Gemini")
         XCTAssertEqual(manager.modelSuggestions.values, [])
         let geminiModelsPublished = expectPublication(
             manager.$modelSuggestions,
             of: ProviderSuggestions(provider: .gemini, values: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]),
             "Gemini models published"
         )
-        manager.fetchAvailableModels(
-            baseURL: "https://generativelanguage.googleapis.com/v1beta",
-            apiKey: "gemini-test-key",
-            selectedProvider: "Gemini"
-        )
+        manager.fetchAvailableModels(baseURL: geminiEndpoint, selectedProvider: "Gemini")
         wait(for: [geminiModelsPublished], timeout: 1.0)
 
-        // URLSession can cancel before delivering a mock response, but a production completion
-        // might already be queued. Deliver that race through the same publication path.
-        manager.publishMetadataForTesting(["stale-tts-model"], for: .models, token: staleToken)
-        releaseOldResponse.signal()
-        wait(for: [oldResponseReturned], timeout: 1.0)
+        // The OpenAI publication was queued before the switch; deliver a second one through the
+        // same production guard so both races are covered.
+        manager.publishMetadataForTesting(["gpt-realtime-2.1-mini"], for: .models, token: staleToken)
 
-        // The stale token completes twice: the synthetic publication above, and the cancelled
-        // task's own completion. Both must have been refused before the list is read.
-        waitForCompletions(in: completions, count: 2, "Both stale OpenAI completions were refused") {
+        waitForCompletions(in: completions, count: 2, "Both stale OpenAI catalogs were refused") {
             $0.kind == .models && $0.token == staleToken && $0.outcome == .superseded
         }
         XCTAssertEqual(manager.modelSuggestions.values, ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"])
     }
 
-    func testDelayedCustomModelsCannotReplaceModelsFromNewEndpoint() {
-        // WHY: Two Custom endpoints share the same request contract, so provider identity alone
-        // cannot prevent endpoint A's late models from replacing endpoint B's current models.
+    func testAnEndpointChangeInvalidatesListsPublishedForTheOldEndpoint() throws {
+        // WHY: Metadata belongs to a provider and an endpoint together. A direct caller that keeps
+        // the provider and changes the endpoint must refuse the publication queued for the old one
+        // and clear both lists, exactly as a provider switch does.
         let (manager, completions) = makeMetadataManager()
-        let firstEndpoint = "https://custom-a.example/v1/audio/speech"
-        let secondEndpoint = "https://custom-b.example/v1/audio/speech"
-        manager.updateSettings(
-            baseURL: firstEndpoint,
-            apiKey: "custom-a-key",
-            model: "model-a",
-            voice: "voice-a",
-            selectedProvider: "Custom"
-        )
+        manager.updateSettings(baseURL: OpenAIRealtimeSpeech.endpoint, apiKey: "openai-key",
+                               model: "gpt-realtime-2.1-mini", voice: "alloy", selectedProvider: "OpenAI")
+        manager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["gpt-realtime-2.1-mini"])
+        manager.fetchAvailableModels(baseURL: OpenAIRealtimeSpeech.endpoint, selectedProvider: "OpenAI")
+        let staleToken = try XCTUnwrap(manager.metadataTokenForTesting(for: .models))
 
-        let oldRequestStarted = expectation(description: "First Custom models request started")
-        let oldResponseReturned = expectation(description: "First Custom models response returned")
-        let secondRequestCompleted = expectation(description: "Second Custom models request completed")
-        let releaseOldResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.installRequestHandler { request in
-            if request.url?.host == "custom-a.example" {
-                oldRequestStarted.fulfill()
-                _ = releaseOldResponse.wait(timeout: .now() + 1.0)
-                oldResponseReturned.fulfill()
-                return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"stale-tts-model\"}] }")
-            }
+        manager.updateSettings(baseURL: "wss://elsewhere.example/v1/realtime", apiKey: "openai-key",
+                               model: "gpt-realtime-2.1-mini", voice: "alloy", selectedProvider: "OpenAI")
 
-            secondRequestCompleted.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"current-tts-model\"}] }")
-        }
-
-        manager.fetchAvailableModels(baseURL: firstEndpoint, apiKey: "custom-a-key", selectedProvider: "Custom")
-        wait(for: [oldRequestStarted], timeout: 1.0)
-        guard let staleToken = manager.metadataTokenForTesting(for: .models) else {
-            XCTFail("Expected the first Custom request to own model metadata state.")
-            releaseOldResponse.signal()
-            return
-        }
-
-        manager.updateSettings(
-            baseURL: secondEndpoint,
-            apiKey: "custom-b-key",
-            model: "model-b",
-            voice: "voice-b",
-            selectedProvider: "Custom"
-        )
-        XCTAssertEqual(manager.modelSuggestions.values, [])
-        let currentModelsPublished = expectPublication(
-            manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .custom, values: ["current-tts-model"]),
-            "Second Custom models published"
-        )
-        manager.fetchAvailableModels(baseURL: secondEndpoint, apiKey: "custom-b-key", selectedProvider: "Custom")
-
-        // The mock protocol may serialize its loads, so release endpoint A only after endpoint B
-        // has been requested rather than requiring B's request to begin concurrently.
-        releaseOldResponse.signal()
-        wait(for: [oldResponseReturned, secondRequestCompleted, currentModelsPublished], timeout: 1.0)
-
-        waitForCompletions(in: completions, "The stale Custom models completion was refused") {
+        XCTAssertNil(manager.metadataTokenForTesting(for: .models))
+        XCTAssertEqual(manager.modelSuggestions, .unpublished)
+        waitForCompletions(in: completions, "The old endpoint's catalog was refused") {
             $0.kind == .models && $0.token == staleToken && $0.outcome == .superseded
         }
-        XCTAssertEqual(manager.modelSuggestions.values, ["current-tts-model"])
+        XCTAssertEqual(manager.modelSuggestions, .unpublished)
     }
 
     func testAVoiceCatalogPublishedForTheOldProviderCannotReplaceTheNewOne() throws {
@@ -177,57 +99,26 @@ final class TTSNetworkManagerMetadataTests: MetadataTestCase {
         XCTAssertEqual(manager.voiceSuggestions, .unpublished)
     }
 
-    func testMalformedMetadataDoesNotReplaceCurrentLists() {
-        // WHY: A malformed response must not turn a known-good current-provider list into an
-        // arbitrary value; only a successful, decodable response is allowed to publish.
+    func testAProviderWithoutACatalogLeavesTheListsAloneAndReleasesItsSlot() {
+        // WHY: A Custom endpoint documents no models, so its request is abandoned rather than
+        // published. Abandoning must not turn the lists into an arbitrary value, and it must release
+        // the slot its own token held: nothing else observes that release, so without this assertion
+        // the clearing the publishing and abandoning paths share could be dropped with every other
+        // gate still green.
         let (manager, completions) = makeMetadataManager()
         let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
         manager.modelSuggestions = ProviderSuggestions(provider: .custom, values: ["known-tts-model"])
 
-        let requestCompleted = expectation(description: "Malformed metadata request completed")
-        MockURLProtocol.installRequestHandler { request in
-            requestCompleted.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": {} }")
-        }
+        manager.fetchAvailableModels(baseURL: endpoint, selectedProvider: "Custom")
 
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
-        wait(for: [requestCompleted], timeout: 1.0)
-        waitForCompletions(in: completions, "The malformed response was abandoned") {
+        waitForCompletions(in: completions, "The request was abandoned") {
             $0.kind == .models && $0.outcome == .abandoned
         }
-
         XCTAssertEqual(manager.modelSuggestions.values, ["known-tts-model"])
-        // WHY: Declining to publish is only half the transition. The refusal must also release
-        // the slot, and the finished task it retains, that its own token held. Nothing else
-        // observes that release, so without this assertion the shared clearing the publishing
-        // and abandoning paths now share could be dropped entirely with every gate still green.
         XCTAssertNil(
             manager.metadataTokenForTesting(for: .models),
             "An abandoned refresh must release the request slot its own token held."
         )
-    }
-
-    func testEmptySuccessfulMetadataResponsesClearCurrentLists() {
-        // WHY: An empty successful response is authoritative for the current source and must clear
-        // old entries rather than leave users selecting metadata that no longer exists.
-        let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://custom.example/v1/audio/speech"
-        manager.updateSettings(baseURL: endpoint, apiKey: "custom-key", model: "model", voice: "voice", selectedProvider: "Custom")
-        manager.modelSuggestions = ProviderSuggestions(provider: .custom, values: ["old-tts-model"])
-
-        let requestCompleted = expectation(description: "Empty metadata request completed")
-        MockURLProtocol.installRequestHandler { request in
-            requestCompleted.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
-        let emptyListPublished = expectPublication(
-            manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .custom, values: []),
-            "Empty metadata list published"
-        )
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
-        wait(for: [requestCompleted, emptyListPublished], timeout: 1.0)
     }
 }

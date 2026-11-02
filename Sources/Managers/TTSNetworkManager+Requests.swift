@@ -42,8 +42,7 @@ extension TTSNetworkManager {
     /// back from the request that authorized it, so a credential introduced at a request-building
     /// call site has to be named here too or a redirect would silently drop it.
     enum CredentialHeaderField {
-        /// The bearer field OpenAI's Realtime handshake, OpenAI-compatible speech, and model
-        /// discovery authenticate with.
+        /// The bearer field OpenAI's Realtime handshake and OpenAI-compatible speech authenticate with.
         static let authorization = "Authorization"
         /// The field Gemini's own endpoint authenticates with.
         static let googleAPIKey = "x-goog-api-key"

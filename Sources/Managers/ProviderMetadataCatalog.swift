@@ -43,12 +43,12 @@ enum ProviderMetadataCatalog {
     /// The default is repeated as each settings fallback, so change those with this order.
     private static let geminiModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]
 
-    /// The models `provider` documents itself, or `nil` when only its endpoint can answer.
+    /// The models `provider` documents, or `nil` for a provider that documents none.
     ///
     /// OpenAI's and Gemini's supported speech models are the app's own answer and need no request:
     /// Gemini publishes no model-discovery endpoint, and OpenAI's model list also names Realtime
-    /// models that cannot speak, such as `gpt-realtime-whisper`. A Custom deployment answers for
-    /// itself, which is what `nil` says here; `OpenAIModelDiscovery` owns asking it.
+    /// models that cannot speak, such as `gpt-realtime-whisper`. A Custom deployment is not asked,
+    /// so `nil` leaves its model whatever Settings has configured, as for its voice.
     static func models(for provider: APIKeyProvider) -> [String]? {
         switch provider {
         case .openAI:

@@ -34,13 +34,12 @@ final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
         )
         manager.fetchAvailableModels(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
-            apiKey: "gemini-token",
             selectedProvider: "Gemini"
         )
         wait(for: [geminiModelsPublished], timeout: 1.0)
 
         // OpenAI's models are the app's own answer too: its model list names Realtime models that
-        // cannot speak, so no handler is installed and an unhandled discovery request would fail
+        // cannot speak, so no handler is installed and an unhandled request would fail
         // this scope's accounting.
         manager.updateSettings(
             baseURL: OpenAIRealtimeSpeech.endpoint,
@@ -56,44 +55,25 @@ final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
         )
         manager.fetchAvailableModels(
             baseURL: OpenAIRealtimeSpeech.endpoint,
-            apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
         wait(for: [openAIModelsPublished], timeout: 1.0)
     }
 
-    func testCustomGoogleLookingHostUsesOpenAICompatibleModelDiscovery() {
-        // WHY: Model discovery must take its protocol from the selected identity just as speech
-        // does. Otherwise a Custom host containing Google's hostname would get Gemini's static
-        // list and no request for the catalog it actually exposes.
+    func testACustomGoogleLookingHostGetsNoGeminiCatalog() {
+        // WHY: The catalog must follow the selected identity just as speech does. A Custom host
+        // containing Google's hostname is still Custom, which documents no models, so it must
+        // publish nothing rather than Gemini's list, whose choices its endpoint cannot serve. No
+        // handler is installed, so this scope's unhandled-request accounting fails if one is sent.
         let endpoint = "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech"
-        let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: "custom-token",
-            model: "custom-model",
-            voice: "custom-voice",
-            selectedProvider: "Custom"
-        )
-        let discoveryRequested = expectation(description: "Custom model discovery is requested")
-        MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://generativelanguage.googleapis.com.custom.example/v1/models")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer custom-token")
-            XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
-            discoveryRequested.fulfill()
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{ \"data\": [{\"id\": \"custom-tts-model\"}] }".utf8))
-        }
-        let modelsPublished = expectation(description: "Custom discovered models are published")
-        let observation = manager.$modelSuggestions.dropFirst().sink { suggestions in
-            guard suggestions.values == ["custom-tts-model"] else { return }
-            XCTAssertEqual(suggestions.provider, .custom)
-            modelsPublished.fulfill()
-        }
-        defer { observation.cancel() }
+        let (manager, completions) = makeMetadataManager()
+        manager.updateSettings(baseURL: endpoint, apiKey: "custom-token", model: "custom-model",
+                               voice: "custom-voice", selectedProvider: "Custom")
 
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-token", selectedProvider: "Custom")
-        wait(for: [discoveryRequested, modelsPublished], timeout: 2.0)
+        manager.fetchAvailableModels(baseURL: endpoint, selectedProvider: "Custom")
+
+        XCTAssertEqual(completions.records.map(\.completion.outcome), [.abandoned])
+        XCTAssertEqual(manager.modelSuggestions, .unpublished)
     }
 
     func testVoiceCatalogsReflectProviderCapabilities() {

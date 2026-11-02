@@ -172,27 +172,30 @@ final class TTSNetworkManagerRedirectCredentialTests: MockURLProtocolTestCase {
             "A followed redirect must not carry a credential the request never authorized."
         )
     }
-    func testAFollowedDiscoveryRedirectCarriesItsRequestsBearerKey() {
-        // WHY: Discovery loses the same stripped `Authorization` header a speech request does, and
-        // it authenticates with the same saved key, so the restoration cannot be written only for
-        // the task the manager happens to be tracking as its active speech request.
-        let releaseResponse = DispatchSemaphore(value: 0)
+    func testAFollowedRedirectOfATaskThatIsNotTheActiveRequestCarriesItsOwnBearerKey() {
+        // WHY: A task the manager is no longer tracking, such as a replaced speech request whose
+        // redirect arrives late, loses the same stripped `Authorization` header and was authorized
+        // with its own key. The restoration must come from that task's own request, not from
+        // whichever request the manager happens to be tracking as active. The task is never resumed,
+        // so the delegate call under test is the only thing that happens to it.
         let manager = makeCustomManager()
-        guard let task = startBlockedDiscoveryRequest(on: manager, releasedBy: releaseResponse) else { return }
-        defer { releaseResponse.signal() }
+        var untracked = URLRequest(url: URL(string: "https://custom.api/v1/audio/speech")!)
+        untracked.setValue("Bearer test-untracked-api-key", forHTTPHeaderField: "Authorization")
+        let task = manager.session.dataTask(with: untracked)
+        XCTAssertNil(manager.activeTaskForTesting, "The task under test must not be the active request.")
 
         var followedRequest: URLRequest?
         manager.urlSession(
             manager.session,
             task: task,
             willPerformHTTPRedirection: redirectResponse(for: task),
-            newRequest: redirectRequest(to: "https://custom.api/v2/models")
+            newRequest: redirectRequest(to: "https://custom.api/v2/audio/speech")
         ) { followedRequest = $0 }
 
         XCTAssertEqual(
             followedRequest?.value(forHTTPHeaderField: "Authorization"),
-            "Bearer test-custom-api-key",
-            "A followed discovery redirect must authenticate with the key its own request carried."
+            "Bearer test-untracked-api-key",
+            "A followed redirect must authenticate with the key its own request carried."
         )
     }
 }

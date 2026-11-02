@@ -35,16 +35,13 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testOpeningSettingsDiscoversMetadataOnce() {
-        // WHY: Model discovery is a provider request authorized with the user's key. Opening the
-        // window synchronizes once; replaying the provider observer as well would spend a second
-        // request on lists the first one is already fetching.
+    func testOpeningSettingsPublishesEachListOnce() {
+        // WHY: Opening the window synchronizes once; replaying the provider observer as well would
+        // publish each catalog twice, and a second publication racing the first is exactly what the
+        // metadata token guard exists to refuse.
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
         let secretStore = InMemorySecretStore()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        MockURLProtocol.installRequestHandler { request in
-            metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
         let begun = metadataRequestsBegun(by: networkManager)
 
         let settings = HostedSettings(
@@ -58,7 +55,7 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         XCTAssertEqual(
             metadataRequestsBegun(by: networkManager) - begun,
             2,
-            "Opening Settings must discover models and publish the voice catalog once each."
+            "Opening Settings must publish the model and voice catalogs once each."
         )
         settings.release()
     }

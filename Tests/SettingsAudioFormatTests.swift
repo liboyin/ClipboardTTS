@@ -144,9 +144,9 @@ final class SettingsAudioFormatTests: MockURLProtocolTestCase {
         let speechEndpoint = Self.speechEndpoint
         MockURLProtocol.installRequestHandler { request in
             guard request.url?.absoluteString == speechEndpoint else {
-                // Model discovery, which a switch away from Custom asks for. Answering it at once
-                // leaves the held speech request as the only one still in flight.
-                return (mockHTTPResponse(for: request, statusCode: 200), Data("{ \"data\": [] }".utf8))
+                // No suggestion list sends a request, so the held speech request is the only one.
+                XCTFail("Only Test Voice may reach the network, not \(request.url?.absoluteString ?? "an unknown URL").")
+                return (mockHTTPResponse(for: request, statusCode: 404), nil)
             }
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 2.0)
@@ -177,8 +177,8 @@ final class SettingsAudioFormatTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        // Mounting synchronizes the saved settings; a Custom form asks for no model or voice
-        // discovery, so nothing is requested until Test Voice is pressed.
+        // Mounting synchronizes the saved settings; a Custom form publishes no catalog, so nothing is
+        // requested until Test Voice is pressed.
         MockURLProtocol.installRequestHandler { request in
             XCTFail("Mounting a Custom form must request nothing.")
             return (mockHTTPResponse(for: request, statusCode: 200), nil)

@@ -78,92 +78,69 @@ final class TTSNetworkManagerRedirectTests: MockURLProtocolTestCase {
         }
     }
 
-    func testACleartextRedirectOfADiscoveryRequestIsAlsoRefused() {
-        // WHY: URLSession consults this delegate for the completion-handler tasks discovery uses,
-        // and those requests carry the same bearer key. The refusal must not depend on the task
-        // being the active speech request, which a guard written only for speech would.
-        let releaseResponse = DispatchSemaphore(value: 0)
+    func testACleartextRedirectOfARealtimeHandshakeIsAlsoRefused() {
+        // WHY: URLSession consults this delegate for every task the session owns, and a Realtime
+        // handshake carries the same bearer key. The refusal must not depend on the task being the
+        // active speech request, which a guard written only for data tasks would.
         let manager = makeCustomManager()
-        guard let task = startBlockedDiscoveryRequest(on: manager, releasedBy: releaseResponse) else { return }
-        defer { releaseResponse.signal() }
+        let task = makeUnstartedRealtimeHandshake(on: manager)
 
         var followedRequest: URLRequest?
         manager.urlSession(
             manager.session,
             task: task,
             willPerformHTTPRedirection: redirectResponse(for: task),
-            newRequest: redirectRequest(to: "http://models.example.com/v1/models")
+            newRequest: redirectRequest(to: "http://realtime.example.com/v1/realtime")
         ) { followedRequest = $0 }
 
-        XCTAssertNil(followedRequest, "A discovery redirect to cleartext must not be followed.")
-        XCTAssertEqual(manager.modelSuggestions.values, [], "A refused discovery redirect must publish nothing.")
+        XCTAssertNil(followedRequest, "A handshake redirect to cleartext must not be followed.")
+        XCTAssertNil(manager.lastError, "A refusal that belongs to no data task must publish nothing itself.")
     }
 
-    func testAForeignOriginRedirectOfADiscoveryRequestIsRefusedSilently() {
-        // WHY: Discovery carries the same bearer key to the same configured origin, so it answers
-        // to the same destination rule. It has no session to fail and no speech state to publish —
-        // a metadata failure is silent, as every other one is — so the refusal must be recorded
-        // against the speech request only when the task is that request.
-        let releaseResponse = DispatchSemaphore(value: 0)
+    func testAForeignOriginRedirectOfARealtimeHandshakeIsRefusedWithoutBeingRecordedAsSpeech() {
+        // WHY: The handshake carries the key to OpenAI's own origin, so it answers to the same
+        // destination rule. It is not the active data task, so the refusal must not be recorded
+        // against one: the Realtime request reports the failed handshake itself, as a lost
+        // connection.
         let manager = makeCustomManager()
-        guard let task = startBlockedDiscoveryRequest(on: manager, releasedBy: releaseResponse) else { return }
-        defer { releaseResponse.signal() }
+        let task = makeUnstartedRealtimeHandshake(on: manager)
 
         var followedRequest: URLRequest?
         manager.urlSession(
             manager.session,
             task: task,
             willPerformHTTPRedirection: redirectResponse(for: task),
-            newRequest: redirectRequest(to: "https://models.example.com/v1/models")
+            newRequest: redirectRequest(to: "https://realtime.example.com/v1/realtime")
         ) { followedRequest = $0 }
 
-        XCTAssertNil(followedRequest, "A discovery redirect to a foreign origin must not be followed.")
-        XCTAssertEqual(manager.modelSuggestions.values, [], "A refused discovery redirect must publish nothing.")
-        XCTAssertNil(manager.lastError, "A refused discovery redirect must stay silent.")
+        XCTAssertNil(followedRequest, "A handshake redirect to a foreign origin must not be followed.")
+        XCTAssertNil(manager.lastError, "A refusal that belongs to no data task must publish nothing itself.")
     }
 
-    func testARefusedDiscoveryRedirectLeavesTheSpeechRequestInFlightAlone() {
-        // WHY: Settings fetches models when it opens, so a discovery task and a speech request are
-        // alive together whenever the user opens it during playback. Recording a refusal against
-        // whichever request happens to be active would stop speech the provider never redirected,
-        // and a metadata failure has no voice of its own to say so. The speech request here is left
-        // to finish on its own response, because what distinguishes the two outcomes is which
-        // failure it publishes: its provider's status, or a refusal that was never its own.
+    func testARefusedHandshakeRedirectLeavesTheSpeechRequestInFlightAlone() {
+        // WHY: A task that is not the active data task can be refused while a speech request is in
+        // flight. Recording that refusal against whichever request happens to be active would stop
+        // speech the provider never redirected. The speech request here is left to finish on its own
+        // response, because what distinguishes the two outcomes is which failure it publishes: its
+        // provider's status, or a refusal that was never its own.
         let manager = makeCustomManager()
-        let releaseDiscovery = DispatchSemaphore(value: 0)
-        let discoveryStarted = expectation(description: "The discovery request starts")
-        MockURLProtocol.installRequestHandler { request in
-            if request.url?.absoluteString.contains("/models") == true {
-                discoveryStarted.fulfill()
-                _ = releaseDiscovery.wait(timeout: .now() + 2.0)
-            }
-            let response = HTTPURLResponse(url: request.url!, statusCode: 307, httpVersion: nil, headerFields: nil)!
-            return (response, nil)
-        }
-        manager.fetchAvailableModels(
-            baseURL: "https://custom.api/v1/audio/speech",
-            apiKey: "test-custom-api-key",
-            selectedProvider: "Custom"
-        )
-        wait(for: [discoveryStarted], timeout: 2.0)
-        manager.streamTTS(text: "Speak while Settings is open") { _ in }
-        guard let discoveryTask = manager.modelMetadataTaskForTesting() else {
-            XCTFail("The started discovery request must own a metadata task.")
-            releaseDiscovery.signal()
-            return
-        }
+        let releaseSpeech = DispatchSemaphore(value: 0)
+        guard let speechTask = startBlockedRequest(on: manager, releasedBy: releaseSpeech, dataHandler: { _ in }) else { return }
+        defer { releaseSpeech.signal() }
+        let handshake = makeUnstartedRealtimeHandshake(on: manager)
 
         manager.urlSession(
             manager.session,
-            task: discoveryTask,
-            willPerformHTTPRedirection: redirectResponse(for: discoveryTask),
-            newRequest: redirectRequest(to: "https://models.example.com/v1/models")
-        ) { XCTAssertNil($0, "A discovery redirect to a foreign origin must not be followed.") }
+            task: handshake,
+            willPerformHTTPRedirection: redirectResponse(for: handshake),
+            newRequest: redirectRequest(to: "https://realtime.example.com/v1/realtime")
+        ) { XCTAssertNil($0, "A handshake redirect to a foreign origin must not be followed.") }
+        XCTAssertEqual(manager.activeTaskForTesting?.taskIdentifier, speechTask.taskIdentifier)
 
-        // Releasing the held discovery response lets the speech request reach its own, which is a
-        // plain 307 it never asked to follow: the status is what it must report.
+        // Releasing the held response lets the speech request reach its own, which is a plain 307 it
+        // never asked to follow: the status is what it must report.
         assertTerminalState(of: manager, expectedError: "Speech request failed (HTTP 307).") {
-            releaseDiscovery.signal()
+            releaseSpeech.signal()
         }
     }
 }

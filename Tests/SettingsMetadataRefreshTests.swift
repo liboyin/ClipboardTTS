@@ -12,7 +12,7 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
     func testATypedEditRunsItsFieldCallbackOnceBesideARenderedPicker() {
         // WHY: The field and the suggestion picker beside it edit the same binding. Observing each
         // control rather than the binding ran every edit's callback twice, which applied the form
-        // and started model discovery twice per keystroke. Both pickers must render here, because
+        // and refreshed the suggestion lists twice per keystroke. Both pickers must render here, because
         // the duplicate only exists while there is a second control to observe.
         let networkManager = TestNetworkFactory.makeManager()
         networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
@@ -82,11 +82,9 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
     }
 
     func testEachSettingsEditRefreshesOnlyTheSuggestionListsThatDependOnIt() throws {
-        // WHY: Model discovery is a provider request authorized with the user's key, and it depends
-        // only on the provider, endpoint, and key. Refreshing it on every model or voice keystroke
-        // spent a request per character on a list the edit could not change, and no voice catalog
-        // depends on the model either, so neither edit may refresh anything. A key edit must still
-        // refresh both lists. Each edit is also checked against what the manager will send, because
+        // WHY: Both suggestion lists are the selected provider's catalogs, so no key, model, or voice
+        // edit can change them, and refreshing on every keystroke would only republish what the
+        // window shows. Each edit is still checked against what the manager will send, because
         // refreshing nothing is not the same as applying nothing. OpenAI's lists need no request, so
         // no handler is installed and one sent would fail this scope's accounting.
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
@@ -114,11 +112,7 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         begun = metadataRequestsBegun(by: networkManager)
 
         settings.typeAPIKey("replacement-openai-key")
-        XCTAssertEqual(
-            metadataRequestsBegun(by: networkManager) - begun,
-            2,
-            "A key edit must refresh the model list and republish the voice catalog."
-        )
+        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the key.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "replacement-openai-key")
         settings.release()
     }

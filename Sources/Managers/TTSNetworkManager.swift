@@ -6,7 +6,7 @@ import Foundation
 /// `Sendable` and URLSession invokes delegate methods on its own queue. Four confinement rules
 /// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
 /// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
-///   `requestSettings`, the metadata request records, and the request-state publication flag) is
+///   `requestSettings`, the metadata request tokens, and the request-state publication flag) is
 ///   read and written only under `stateQueue`.
 /// - The `@Published` properties, `isPublishingMetadata`, `migrationFailureMessage`, and the queued
 ///   request-state publications are written only on the main queue (every write path dispatches or
@@ -57,9 +57,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// returned. Each token a fetch mints is reported once while the manager lives, plus once for
     /// each synthetic completion a test delivers for it; a fetch the source guard refuses mints no
     /// token and reports nothing. A publication's handling is reported on the main queue, and an
-    /// abandonment's on the thread that abandoned it: the session's delegate queue for a finished
-    /// discovery task, or the caller's for a refusal decided before any task exists. It runs outside
-    /// `stateQueue`. Production does nothing here; it exists so a test can wait for a stale
+    /// abandonment's on the caller's thread, because a provider with no catalog is refused before
+    /// anything is queued. It runs outside `stateQueue`. Production does nothing here; it exists so a test can wait for a stale
     /// completion to have been refused instead of waiting out elapsed time.
     let metadataCompletionObserver: @Sendable (MetadataCompletion) -> Void
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
@@ -83,8 +82,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     private var migrationFailureMessage: String?
     var metadataGeneration: UInt64 = 0
     var nextMetadataRequestIdentifier: UInt64 = 0
-    var modelMetadataRequest: MetadataRequest?
-    var voiceMetadataRequest: MetadataRequest?
+    var modelMetadataToken: MetadataRequestToken?
+    var voiceMetadataToken: MetadataRequestToken?
     var isPublishingMetadata = false
 
     /// Returns the active task for debug-only delegate-ordering tests.
@@ -208,9 +207,8 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             guard metadataScopeChanged else { return nil }
 
             metadataGeneration &+= 1
-            modelMetadataRequest?.task?.cancel()
-            modelMetadataRequest = nil
-            voiceMetadataRequest = nil
+            modelMetadataToken = nil
+            voiceMetadataToken = nil
             return metadataGeneration
         }
         if let invalidatedGeneration {

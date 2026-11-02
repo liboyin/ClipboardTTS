@@ -2,221 +2,72 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
-    func testScopeChangesCancelThePendingModelRequest() {
-        // WHY: Freshness guards prevent stale publication, but cancellation also matters because
-        // abandoned metadata work must not continue consuming a provider connection after a switch.
-        // Only model discovery issues a request, so it is the only one there is a task to cancel.
-        let manager = TestNetworkFactory.makeManager()
-        let firstEndpoint = "https://custom-a.example/v1/audio/speech"
-        let secondEndpoint = "https://custom-b.example/v1/audio/speech"
-        manager.updateSettings(
-            baseURL: firstEndpoint,
-            apiKey: "custom-a-key",
-            model: "model-a",
-            voice: "voice-a",
-            selectedProvider: "Custom"
-        )
-
-        let modelRequestStarted = expectation(description: "First model request started")
-        let modelRequestReleased = expectation(description: "First model request released")
-        let releaseModelRequest = DispatchSemaphore(value: 0)
-        defer { releaseModelRequest.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            modelRequestStarted.fulfill()
-            _ = releaseModelRequest.wait(timeout: .now() + 1.0)
-            modelRequestReleased.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
-
-        manager.fetchAvailableModels(baseURL: firstEndpoint, apiKey: "custom-a-key", selectedProvider: "Custom")
-        wait(for: [modelRequestStarted], timeout: 1.0)
-        guard let modelTask = manager.modelMetadataTaskForTesting() else {
-            XCTFail("Expected a pending model metadata task.")
-            return
-        }
-
-        manager.updateSettings(
-            baseURL: secondEndpoint,
-            apiKey: "custom-b-key",
-            model: "model-b",
-            voice: "voice-b",
-            selectedProvider: "Custom"
-        )
-        XCTAssertNotEqual(modelTask.state, .running, "Changing endpoints must cancel the pending model request.")
-        releaseModelRequest.signal()
-        wait(for: [modelRequestReleased], timeout: 1.0)
-    }
-
-    func testRefreshingTheSameSourceCancelsTheModelRequestItReplaces() {
-        // WHY: Every keystroke in a Settings API-key field runs `syncSettings`, which refreshes
-        // metadata for the provider and endpoint already selected. The scope has not changed, so
-        // `updateSettings` invalidates nothing, and this replacement is the only thing that stops
-        // the discovery request the keystroke discarded: without it, typing a key would leave one
-        // provider connection in flight per character.
-        let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://api.openai.com/v1/audio/speech"
-        let partialKey = "custom-ke"
-        let completeKey = "custom-key"
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: partialKey,
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "Custom"
-        )
-
-        let replacedRequestStarted = expectation(description: "The replaced model request started")
-        let replacedRequestReleased = expectation(description: "The replaced model request finished")
-        let replacementCompleted = expectation(description: "The replacing model request finished")
-        let releaseReplacedRequest = DispatchSemaphore(value: 0)
-        defer { releaseReplacedRequest.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            // The two refreshes are told apart by the key each keystroke had produced so far.
-            guard request.value(forHTTPHeaderField: "Authorization") == "Bearer \(partialKey)" else {
-                replacementCompleted.fulfill()
-                return metadataResponse(for: request, json: "{ \"data\": [] }")
-            }
-            replacedRequestStarted.fulfill()
-            _ = releaseReplacedRequest.wait(timeout: .now() + 1.0)
-            replacedRequestReleased.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [] }")
-        }
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: partialKey, selectedProvider: "Custom")
-        wait(for: [replacedRequestStarted], timeout: 1.0)
-        guard let replacedTask = manager.modelMetadataTaskForTesting() else {
-            XCTFail("Expected the first refresh to own a pending model metadata task.")
-            return
-        }
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: completeKey, selectedProvider: "Custom")
-        XCTAssertNotEqual(
-            replacedTask.state,
-            .running,
-            "Refreshing the same source must cancel the discovery request it replaces."
-        )
-
-        releaseReplacedRequest.signal()
-        wait(for: [replacedRequestReleased, replacementCompleted], timeout: 3.0)
-    }
-
-    func testAVoiceRefreshCannotCancelTheModelDiscoveryStartedBesideIt() {
-        // WHY: This is the trade-off the replacement guard has to respect. `syncSettings` asks
-        // for models and then voices in a single refresh, and both go through the same guard, so
-        // one that did not distinguish the two kinds would let the voice request cancel the model
-        // request started beside it and leave the model picker permanently empty. Custom is the
-        // provider whose models need a discovery request, so it is the one that can lose it.
+    func testOneSettingsRefreshPublishesBothTheModelListAndTheVoiceCatalog() {
+        // WHY: `syncSettings` asks for models and then voices in a single refresh, before either
+        // publication has run. Both go through the same guard, so one that did not keep the two kinds
+        // apart would let the voice request replace the model request and leave the model picker empty.
         let (manager, completions) = makeMetadataManager()
-        let endpoint = "https://custom.example/v1/audio/speech"
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: "custom-key",
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "Custom"
-        )
-
-        // The models response is withheld until the voice half of the refresh has been asked for.
-        // Without that, the model request could finish first and leave nothing for an
-        // over-restricted guard to cancel, so the assertion below would hold either way.
-        let modelsRequestStarted = expectation(description: "The model discovery request started")
-        let modelsResponseReturned = expectation(description: "The model discovery response returned")
-        let releaseModelsResponse = DispatchSemaphore(value: 0)
-        defer { releaseModelsResponse.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            modelsRequestStarted.fulfill()
-            _ = releaseModelsResponse.wait(timeout: .now() + 2.0)
-            modelsResponseReturned.fulfill()
-            return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
-        }
-
+        manager.updateSettings(baseURL: OpenAIRealtimeSpeech.endpoint, apiKey: "openai-key",
+                               model: "gpt-realtime-2.1-mini", voice: "alloy", selectedProvider: "OpenAI")
         let modelsPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .custom, values: ["tts-1"]),
+            of: ProviderSuggestions(provider: .openAI, values: ProviderMetadataCatalog.models(for: .openAI) ?? []),
             "The model list published"
         )
+        let voicesPublished = expectPublication(
+            manager.$voiceSuggestions,
+            of: ProviderSuggestions(provider: .openAI, values: ProviderMetadataCatalog.voices(for: .openAI) ?? []),
+            "The voice catalog published"
+        )
 
-        // The order `SettingsView.syncSettings` uses.
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
-        wait(for: [modelsRequestStarted], timeout: 2.0)
-        manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "Custom")
-        waitForCompletions(in: completions, count: 1, "The voice request finished without a catalog") {
-            $0.kind == .voices && $0.outcome == .abandoned
-        }
+        // The order `SettingsView.syncSettings` uses, with no main-queue turn between the two.
+        manager.fetchAvailableModels(baseURL: OpenAIRealtimeSpeech.endpoint, selectedProvider: "OpenAI")
+        manager.fetchAvailableVoices(baseURL: OpenAIRealtimeSpeech.endpoint, selectedProvider: "OpenAI")
 
-        releaseModelsResponse.signal()
-        wait(for: [modelsResponseReturned, modelsPublished], timeout: 2.0)
+        wait(for: [modelsPublished, voicesPublished], timeout: 2.0)
+        waitForCompletions(in: completions, count: 2, "Both requests published") { $0.outcome == .published }
     }
 
     func testAnAbandonedModelRequestCannotClearTheRequestThatReplacedIt() {
         // WHY: An abandoning completion and a publishing one clear the same slot, so the abandoning
-        // half must check the token for the same reason the publishing half does. A refresh that
-        // fails to decode still has to report itself as finished, and by then a later refresh for
-        // the same source may already own the model slot. Clearing without matching the token would
-        // discard the live request, and the replacement's own completion would then find nothing to
-        // match and publish nothing — leaving the Settings model picker permanently empty after any
-        // malformed response, with no error anywhere to explain it.
+        // half must check the token for the same reason the publishing half does. By the time a
+        // request reports itself abandoned, a later refresh for the same source may already own the
+        // model slot. Clearing without matching the token would discard the live request, and the
+        // replacement's own publication would then find nothing to match and publish nothing,
+        // leaving the Settings model picker empty with no error anywhere to explain it.
         let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://custom.example/v1/audio/speech"
-        let abandonedKey = "custom-ke"
-        let replacementKey = "custom-key"
-        manager.updateSettings(
-            baseURL: endpoint,
-            apiKey: abandonedKey,
-            model: "model",
-            voice: "voice",
-            selectedProvider: "Custom"
-        )
+        let endpoint = "https://generativelanguage.googleapis.com/v1beta"
+        manager.updateSettings(baseURL: endpoint, apiKey: "gemini-key", model: "gemini-3.8-flash-lite-tts",
+                               voice: "Aoede", selectedProvider: "Gemini")
 
-        let abandonedRequestStarted = expectation(description: "The abandoned model request started")
-        let abandonedResponseReturned = expectation(description: "The abandoned model response returned")
-        let replacementResponseReturned = expectation(description: "The replacement model response returned")
-        let releaseAbandonedResponse = DispatchSemaphore(value: 0)
-        defer { releaseAbandonedResponse.signal() }
-        MockURLProtocol.installRequestHandler { request in
-            // The two refreshes are told apart by the key each keystroke had produced so far.
-            guard request.value(forHTTPHeaderField: "Authorization") == "Bearer \(abandonedKey)" else {
-                replacementResponseReturned.fulfill()
-                return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"live-tts-model\"}] }")
-            }
-            abandonedRequestStarted.fulfill()
-            _ = releaseAbandonedResponse.wait(timeout: .now() + 1.0)
-            abandonedResponseReturned.fulfill()
-            // Undecodable, so this refresh takes the abandonment path rather than publishing.
-            return metadataResponse(for: request, json: "{ \"data\": {} }")
-        }
-
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: abandonedKey, selectedProvider: "Custom")
-        wait(for: [abandonedRequestStarted], timeout: 1.0)
+        // Each catalog publication waits for a main-queue turn, so both requests are current in turn
+        // before either publishes.
+        manager.fetchAvailableModels(baseURL: endpoint, selectedProvider: "Gemini")
         guard let abandonedToken = manager.metadataTokenForTesting(for: .models) else {
             XCTFail("Expected the first refresh to own model metadata state.")
             return
         }
-
-        // Observed before the replacement starts, because its response is not withheld.
         let replacementPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .custom, values: ["live-tts-model"]),
+            of: ProviderSuggestions(provider: .gemini, values: ProviderMetadataCatalog.models(for: .gemini) ?? []),
             "The replacing refresh published its models"
         )
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: replacementKey, selectedProvider: "Custom")
+        manager.fetchAvailableModels(baseURL: endpoint, selectedProvider: "Gemini")
         guard let replacementToken = manager.metadataTokenForTesting(for: .models) else {
             XCTFail("Expected the replacing refresh to own model metadata state.")
             return
         }
         XCTAssertNotEqual(abandonedToken, replacementToken)
 
-        // URLSession completion timing cannot order the abandonment against the replacement, so
-        // deliver that race through the same guard the production abandonment paths call.
+        // Deliver the first request's abandonment through the same guard the production abandonment
+        // path calls, while the replacement still owns the slot.
         manager.finishMetadataRequestForTesting(for: .models, token: abandonedToken)
         XCTAssertEqual(
             manager.metadataTokenForTesting(for: .models),
             replacementToken,
             "An abandoned refresh must clear only its own request, never the one that replaced it."
         )
-
-        releaseAbandonedResponse.signal()
-        wait(for: [abandonedResponseReturned, replacementResponseReturned, replacementPublished], timeout: 3.0)
+        wait(for: [replacementPublished], timeout: 2.0)
     }
 
     func testTheCompletionObserverReportsAPublicationOnMainAfterItsListIsPublished() {
@@ -233,7 +84,7 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
             selectedProvider: "Gemini"
         )
 
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "gemini-key", selectedProvider: "Gemini")
+        manager.fetchAvailableModels(baseURL: endpoint, selectedProvider: "Gemini")
         waitForCompletions(in: completions, "The Gemini models publication was reported") {
             $0.kind == .models && $0.outcome == .published
         }

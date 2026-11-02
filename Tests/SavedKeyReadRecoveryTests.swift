@@ -272,12 +272,10 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testRecoveringTheSelectedKeyRefreshesModelsWithIt() {
-        // WHY: Opening Settings refreshed models without the key it could not read. Recovering the
-        // key changes it just as typing one does, and typing one refreshes the model list, so a
-        // provider whose list depends on the key gets one built with it. The voice catalog does not
-        // follow a key. OpenAI's list needs no request, so no handler is installed and one sent
-        // would fail this scope's accounting.
+    func testRecoveringTheSelectedKeyReachesRequestsWithoutRefreshingAnyList() {
+        // WHY: A recovered key must reach the next request, as a typed one does. No suggestion list
+        // depends on a key, so recovering one refreshes nothing; a refresh here would republish
+        // catalogs the window already shows.
         let defaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-saved-openai-key", for: .openAI)
@@ -295,23 +293,20 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         secretStore.failingProviders = []
         settings.click(retryTitle)
 
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 1, "Only the model list follows the key.")
+        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list follows a key.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "test-saved-openai-key")
         settings.release()
     }
 
-    func testRecoveringAnotherProvidersKeyLeavesTheSelectedDiscoveryAlone() {
-        // WHY: Discovery follows the selected provider's key. Recovering a different provider's
-        // key changes nothing it depends on, so rediscovering would only repeat a request.
+    func testRecoveringAnotherProvidersKeyLeavesTheSelectedConfigurationAlone() {
+        // WHY: Recovering a different provider's key must not replace the key the selected
+        // provider's requests carry, and refreshes no list.
         let defaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-saved-openai-key", for: .openAI)
         secretStore.seed("test-saved-gemini-key", for: .gemini)
         secretStore.failingProviders = [.gemini]
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        MockURLProtocol.installRequestHandler { request in
-            metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
-        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: makeOwnedAudioPlayer(),

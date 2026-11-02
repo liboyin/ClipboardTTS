@@ -269,16 +269,10 @@ struct SettingsView: View {
     /// Reads the saved keys the store refused again, at the user's request, and hands on any it recovers.
     ///
     /// A recovered key withdraws the menu bar's startup guidance about it and reaches future
-    /// requests. A recovered selected-provider key also rediscovers models, as a key edit does,
-    /// because discovery at mount ran without it; the voice catalog and audio format do not follow a key.
+    /// requests. No suggestion list or audio format follows a key, so nothing is refreshed.
     func retryReadingSavedKeys() {
-        let previousAPIKey = currentAPIKey
         secretState.retryUnreadableSecrets().forEach(networkManager.withdrawKeyReadFailure(for:))
         applyCredentialsToFutureRequests()
-        guard currentAPIKey != previousAPIKey, selectedProvider != .custom else { return }
-        networkManager.fetchAvailableModels(
-            baseURL: currentBaseURL, apiKey: currentAPIKey, selectedProvider: selectedProvider.settingsValue
-        )
     }
 
     /// Points the menu bar's migration warning at whatever is still unsecured, or withdraws it.
@@ -302,22 +296,24 @@ struct SettingsView: View {
         speechSession.start(text: "Hello! This is a test of your text to speech configuration.")
     }
 
-    /// Applies the form to future requests, then refreshes the lists the edit can alter: discovered
-    /// models follow only the provider, endpoint, and key, and the voice catalog only the provider.
-    /// A Custom endpoint has no discovery contract.
-    func syncSettings(discoveringModels: Bool = true, refreshingVoices: Bool = true) {
+    /// Applies the form to future requests, then republishes the suggestion lists when asked.
+    ///
+    /// Both lists are the selected provider's catalogs, so only opening the window and choosing a
+    /// provider refresh them; a key, model, or voice edit applies the form alone. A Custom endpoint
+    /// documents no catalog.
+    func syncSettings(refreshingLists: Bool = true) {
         normalizeSelectedProvider()
         applyCredentialsToFutureRequests()
         _ = syncAudioFormat()
-        guard selectedProvider != .custom else { return }
+        guard refreshingLists, selectedProvider != .custom else { return }
         let baseURL = currentBaseURL
         let provider = selectedProvider.settingsValue
-        if discoveringModels { networkManager.fetchAvailableModels(baseURL: baseURL, apiKey: currentAPIKey, selectedProvider: provider) }
-        if refreshingVoices { networkManager.fetchAvailableVoices(baseURL: baseURL, selectedProvider: provider) }
+        networkManager.fetchAvailableModels(baseURL: baseURL, selectedProvider: provider)
+        networkManager.fetchAvailableVoices(baseURL: baseURL, selectedProvider: provider)
     }
 
     /// Applies a model or voice edit, which changes neither suggestion list.
-    func applyModelOrVoiceChange() { syncSettings(discoveringModels: false, refreshingVoices: false) }
+    func applyModelOrVoiceChange() { syncSettings(refreshingLists: false) }
 
     /// Hands the form's current provider configuration to requests that start after this call.
     private func applyCredentialsToFutureRequests() {
@@ -387,7 +383,7 @@ struct SettingsView: View {
             set: {
                 secretState.saveSecret($0, for: provider)
                 refreshMigrationWarning()
-                syncSettings()
+                syncSettings(refreshingLists: false)
             }
         )
     }

@@ -31,10 +31,11 @@ extension TTSNetworkManager {
 
     /// Applies both redirect rules to a redirect the provider asks the app to follow.
     ///
-    /// This runs for metadata tasks as well, which URLSession consults here even though they carry
-    /// their own completion handler. A refused target records itself on the active speech request so
-    /// completion reports that refusal instead of the redirect status; a discovery task is not that
-    /// request, so its refusal stays silent, as every other metadata failure is.
+    /// This runs for every task the session starts, including an OpenAI Realtime handshake, which is
+    /// never the active data task. A refused target records itself on the active speech request so
+    /// completion reports that refusal instead of the redirect status; any other task is not that
+    /// request, so its refusal is recorded against nothing and the task simply fails, which a
+    /// Realtime request reports as a lost connection.
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
