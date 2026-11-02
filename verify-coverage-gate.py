@@ -84,7 +84,7 @@ class Draft:
             name: record(name, BASE_COVERED, BASE_EXECUTABLE, prefix) for name in self.names
         }
         self.extra = []
-        self.target_name = "ClipboardTTSApp.app"
+        self.target_name = "ClipboardTTS.app"
         self.files = None
         self.report = None
 
@@ -525,7 +525,7 @@ def main():
         )
 
         # A report the gate cannot read is unmeasurable, never insufficient: none of these exit 1.
-        v.refuses("missing-target", "missing-target", "ClipboardTTSApp.app target not found")
+        v.refuses("missing-target", "missing-target", "ClipboardTTS.app target not found")
         v.refuses("report-without-targets", "no-targets", "coverage report declares no targets")
         v.refuses("target-files-not-a-list", "files-not-a-list", "declares no files")
         v.refuses(

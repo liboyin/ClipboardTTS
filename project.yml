@@ -4,11 +4,17 @@ options:
 targets:
   ClipboardTTSApp:
     type: application
+    productName: ClipboardTTS
     platform: macOS
     deploymentTarget: "14.0"
     # Swift 5 language mode with complete concurrency checking, so new isolation warnings stay
-    # visible in every app build.
+    # visible in every app build. The product is ClipboardTTS.app while the target, scheme, Swift
+    # module, and bundle identifier keep the ClipboardTTSApp name, so `@testable import`, saved
+    # preferences, and Keychain items are unaffected. `productName` names the product reference and
+    # the test host path; PRODUCT_NAME names the built bundle and executable.
     settings:
+      PRODUCT_NAME: ClipboardTTS
+      PRODUCT_MODULE_NAME: ClipboardTTSApp
       SWIFT_STRICT_CONCURRENCY: complete
     sources:
       - Sources
@@ -35,7 +41,7 @@ targets:
           - NSMenuItem:
               default: "Speak Selected Text with Clipboard TTS"
             NSMessage: "handleServices"
-            NSPortName: "ClipboardTTSApp"
+            NSPortName: "ClipboardTTS"
             NSSendTypes:
               - "public.plain-text"
 

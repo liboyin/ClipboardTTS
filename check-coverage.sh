@@ -78,7 +78,7 @@ try:
 except ValueError:
     MIN_PCT = None
 APP_SOURCES = {name for name in os.environ["APP_SOURCES"].split("\n") if name}
-APP_TARGET = "ClipboardTTSApp.app"
+APP_TARGET = "ClipboardTTS.app"
 GATED_GROUP = "Managers/"
 
 # Sources that compile to no executable lines, so no coverage record names them. One that gains
