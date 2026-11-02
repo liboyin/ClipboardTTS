@@ -137,10 +137,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 
 ### Non-blocking
 
-#### NB27 — A later malformed Gemini inline part discards audio already validated ahead of it
-
-**Validated — source inspection.** `audioPayload(in:)` now reads every part before returning, so any part whose `inlineData` is unreadable or declares a non-audio media type makes the whole candidate `.invalid` and takes the fatal revocation path, dropping audio parts that passed validation earlier in the same event. Before `912bf09` the first audio part returned immediately and a later part was never read. The trade-off is deliberate and documented; the exposure is that a provider adding one non-audio inline part to an `AUDIO`-modality response would silence an utterance that previously played. **Paths:** [audioPayload](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [Gemini streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift), README. **Direction:** decide from provider evidence whether an unplayable part accompanying valid audio is a corrupt stream or an ignorable extra; keep the current rule until that evidence exists. **Acceptance:** the chosen rule and its evidence are stated in README, and both a malformed-only event and a mixed valid/malformed event keep a test.
-
 #### NB50 — Settings no longer reaches model discovery
 
 **Validated — source inspection, 2026-11-02.** D27 gives OpenAI a fixed catalog, and `SettingsView.syncSettings` never asks Custom to discover, so no production path now reaches `OpenAIModelDiscovery` or the discovery task bookkeeping in `TTSNetworkManager+Metadata`; manager-level tests still exercise it through Custom. **Paths:** [Metadata](Sources/Managers/TTSNetworkManager+Metadata.swift), [OpenAIModelDiscovery](Sources/Managers/OpenAIModelDiscovery.swift), [SettingsView](Sources/Views/SettingsView.swift). **Direction:** ask the user whether to remove the discovery layer, preserving its unique behavior under AGENTS' layer-removal rule, or to offer discovery for Custom endpoints that serve `/v1/models`. **Acceptance:** the chosen direction is implemented and README no longer describes an unreachable path as current behavior.
@@ -161,6 +157,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB27](completed_work/NB27.md) — Accepted without change (2026-11-02): live Gemini streams carry one audio part per event, so the whole-event rule never discards valid audio; both the mixed and the malformed-only event keep a test.
 - [NB24](completed_work/NB24.md) — Fixed (D8, D25): the clipboard-presence prints are gone, and a strict lint rule refuses console output calls in `Sources/`.
 - [NB28](completed_work/NB28.md) — Fixed: NB2, NB3 and NB7 each have recorded mutants for revert, regression and over-restriction, and the Gemini event-failure helper no longer lets completion stand in for a fatal event.
 - [NB43](completed_work/NB43.md) — Fixed: the runner reads test logs as UTF-8 whatever the locale and prints names the locale cannot encode escaped, and its verifier passes under UTF-8, ISO 8859-1, `C` and US-ASCII locales.
