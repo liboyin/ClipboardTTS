@@ -133,27 +133,31 @@ struct MenuBarView: View {
         }
     }
 
-    /// The maximum `input` length OpenAI documents for every model its Speech API accepts.
+    /// The most clipboard text one OpenAI request is sent.
+    ///
+    /// The retired Speech API documented this maximum for `input`. The Realtime API documents none,
+    /// and the cap was kept rather than raised because live trials on 2026-11-02 found
+    /// `gpt-realtime-2.1-mini` going silent partway through long responses while reporting success,
+    /// so no evidence supported a higher one.
     private static let openAICharacterLimit = 4096
 
     /// Reports oversized OpenAI clipboard text to the user, and answers whether speech must not start.
     ///
-    /// A longer value buys a request that can only fail, and the provider's rejection reaches the
-    /// user as the same generic HTTP failure any other error produces. Checking it here keeps the
-    /// refusal local: no request, no second network call, and no delay for a value that fits.
+    /// Checking it here keeps the refusal local and explained: no request, no network call, and no
+    /// delay for a value that fits.
     ///
     /// Only this click path checks it. Services and Settings' Test Voice are outside the boundary
-    /// this rule was agreed for, and neither Gemini nor a Custom endpoint documents this limit.
+    /// this rule was agreed for, and the cap is OpenAI's alone.
     /// The provider identity comes from the manager rather than a second endpoint inference beside
     /// it, and is the one selected when the click was revalidated: a provider the user switches
     /// inside the request's own start window is out of scope, because a Settings edit advances no
     /// request generation for the deferred action to observe.
     private func refusesOversizedOpenAIText(_ text: String) -> Bool {
         guard networkManager.isCurrentProvider(.openAI) else { return false }
-        // OpenAI documents the maximum as "characters" without naming a Unicode unit. Scalars are
-        // the unit a code-point count reaches first: grapheme clusters would let text the provider
-        // rejects through, while UTF-16 units or UTF-8 bytes would refuse non-Latin text the
-        // provider accepts.
+        // The Speech API documented the maximum as "characters" without naming a Unicode unit, and
+        // the cap keeps its reading. Scalars are the unit a code-point count reaches first: grapheme
+        // clusters would let longer text through, while UTF-16 units or UTF-8 bytes would refuse
+        // non-Latin text far below the cap.
         let characterCount = text.unicodeScalars.count
         guard characterCount > Self.openAICharacterLimit else { return false }
         alertPresenter.presentAlert(
@@ -174,7 +178,7 @@ struct MenuBarView: View {
         let locale = Locale(identifier: "en_US")
         let limit = openAICharacterLimit.formatted(.number.locale(locale))
         let count = characterCount.formatted(.number.locale(locale))
-        return "OpenAI accepts at most \(limit) characters per request. The copied text is "
+        return "Clipboard TTS sends OpenAI at most \(limit) characters per request. The copied text is "
             + "\(count) characters. Copy a shorter passage and try again."
     }
 

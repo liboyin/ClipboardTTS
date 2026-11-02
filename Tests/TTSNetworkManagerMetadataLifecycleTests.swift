@@ -55,14 +55,14 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
         // provider connection in flight per character.
         let manager = TestNetworkFactory.makeManager()
         let endpoint = "https://api.openai.com/v1/audio/speech"
-        let partialKey = "openai-ke"
-        let completeKey = "openai-key"
+        let partialKey = "custom-ke"
+        let completeKey = "custom-key"
         manager.updateSettings(
             baseURL: endpoint,
             apiKey: partialKey,
             model: "tts-1",
             voice: "alloy",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
 
         let replacedRequestStarted = expectation(description: "The replaced model request started")
@@ -82,14 +82,14 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
             return metadataResponse(for: request, json: "{ \"data\": [] }")
         }
 
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: partialKey, selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: partialKey, selectedProvider: "Custom")
         wait(for: [replacedRequestStarted], timeout: 1.0)
         guard let replacedTask = manager.modelMetadataTaskForTesting() else {
             XCTFail("Expected the first refresh to own a pending model metadata task.")
             return
         }
 
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: completeKey, selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: completeKey, selectedProvider: "Custom")
         XCTAssertNotEqual(
             replacedTask.state,
             .running,
@@ -100,19 +100,20 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
         wait(for: [replacedRequestReleased, replacementCompleted], timeout: 3.0)
     }
 
-    func testOneSettingsRefreshPublishesBothTheModelListAndTheVoiceCatalog() {
+    func testAVoiceRefreshCannotCancelTheModelDiscoveryStartedBesideIt() {
         // WHY: This is the trade-off the replacement guard has to respect. `syncSettings` asks
         // for models and then voices in a single refresh, and both go through the same guard, so
         // one that did not distinguish the two kinds would let the voice request cancel the model
-        // request started beside it and leave the model picker permanently empty.
-        let manager = TestNetworkFactory.makeManager()
-        let endpoint = "https://api.openai.com/v1/audio/speech"
+        // request started beside it and leave the model picker permanently empty. Custom is the
+        // provider whose models need a discovery request, so it is the one that can lose it.
+        let (manager, completions) = makeMetadataManager()
+        let endpoint = "https://custom.example/v1/audio/speech"
         manager.updateSettings(
             baseURL: endpoint,
-            apiKey: "openai-key",
+            apiKey: "custom-key",
             model: "tts-1",
             voice: "alloy",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
 
         // The models response is withheld until the voice half of the refresh has been asked for.
@@ -131,25 +132,20 @@ final class TTSNetworkManagerMetadataLifecycleTests: MetadataTestCase {
 
         let modelsPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .openAI, values: ["tts-1"]),
+            of: ProviderSuggestions(provider: .custom, values: ["tts-1"]),
             "The model list published"
-        )
-        let voicesPublished = expectPublication(
-            manager.$voiceSuggestions,
-            of: ProviderSuggestions(
-                provider: .openAI,
-                values: ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-            ),
-            "The voice catalog published"
         )
 
         // The order `SettingsView.syncSettings` uses.
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
         wait(for: [modelsRequestStarted], timeout: 2.0)
-        manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "OpenAI")
+        manager.fetchAvailableVoices(baseURL: endpoint, selectedProvider: "Custom")
+        waitForCompletions(in: completions, count: 1, "The voice request finished without a catalog") {
+            $0.kind == .voices && $0.outcome == .abandoned
+        }
 
         releaseModelsResponse.signal()
-        wait(for: [modelsResponseReturned, modelsPublished, voicesPublished], timeout: 2.0)
+        wait(for: [modelsResponseReturned, modelsPublished], timeout: 2.0)
     }
 
     func testAnAbandonedModelRequestCannotClearTheRequestThatReplacedIt() {

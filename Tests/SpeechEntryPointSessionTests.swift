@@ -32,7 +32,7 @@ final class SpeechEntryPointSessionTests: MockURLProtocolTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         MockURLProtocol.installRequestHandler { request in
             (mockHTTPResponse(for: request, statusCode: 200), Data(repeating: 0, count: 2_048))

@@ -170,7 +170,7 @@ final class MockURLProtocolRecoveryTests: XCTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         let requestStarted = expectation(description: "Request is active during background revocation")
         MockURLProtocol.installRequestHandler { request in

@@ -12,10 +12,10 @@ final class TTSNetworkManagerRequestLifecycleTests: MockURLProtocolTestCase {
             apiKey: "fake-key",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         manager.streamTTS(text: "Create generation one") { _ in }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         let replacementStarted = expectation(description: "Nested replacement starts")
         let releaseResponse = DispatchSemaphore(value: 0)

@@ -9,7 +9,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // a silent 24-kHz fallback.
         let audioPlayer = makeOwnedAudioPlayer(sampleRate: 48_001)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
         MockURLProtocol.installRequestHandler { _ in
             XCTFail("An invalid Custom PCM rate must not start a Services request")
             return (HTTPURLResponse(), Data())
@@ -33,21 +33,20 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // WHY: The 4,096-character refusal belongs to the menu click the user asked it for, not to
         // every entry point. Services carries a selection the user made in another app, where no
         // dialog of ours is expected, so putting the rule in `streamTTS` would silently change this
-        // path too. Long selected text must still reach the provider and fail there, as it does now.
+        // path too. Long selected text must still reach the provider whole.
         let audioPlayer = makeOwnedAudioPlayer()
-        let networkManager = TestNetworkFactory.makeManager()
+        let requestStarted = expectation(description: "Oversized selected text reaches the provider")
+        let oversizedText = String(repeating: "a", count: 5_000)
+        let connections = ScriptedRealtimeConnections { _ in requestStarted.fulfill() }
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let networkManager = TestNetworkFactory.makeManager(realtimeConnections: connections)
         networkManager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
+            baseURL: OpenAIRealtimeSpeech.endpoint,
             apiKey: "test",
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
-        let requestStarted = expectation(description: "Oversized selected text reaches the provider")
-        MockURLProtocol.installRequestHandler { request in
-            requestStarted.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
 
         let center = NotificationCenter()
         let coordinator = ServicesCoordinator(
@@ -56,12 +55,13 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         )
 
         withExtendedLifetime(coordinator) {
-            center.post(
-                name: ServicesCoordinator.speakSelectedTextNotification,
-                object: String(repeating: "a", count: 5_000)
-            )
+            center.post(name: ServicesCoordinator.speakSelectedTextNotification, object: oversizedText)
             wait(for: [requestStarted], timeout: 2.0)
         }
+        let sentText = connections.all.first?.sentEvents
+            .compactMap { (($0["item"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String }
+            .first
+        XCTAssertEqual(sentText, oversizedText, "The whole selection must reach the provider.")
     }
 
     func testServiceNotificationStreamsSelectedTextToAudio() {
@@ -73,7 +73,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         let audioPublications = AudioStateUpdateRecorder()
         let audioPlayer = makeOwnedAudioPlayer(audioStateObserver: audioPublications.record)
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
         MockURLProtocol.installRequestHandler { request in
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
                     Data(repeating: 0, count: 2048))
@@ -100,7 +100,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // background post must use the coordinator's full main-action handoff before speaking.
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
         let requestReceived = expectation(description: "Main action starts its speech request")
         MockURLProtocol.installRequestHandler { request in
             requestReceived.fulfill()
@@ -133,7 +133,7 @@ final class ServicesCoordinatorTests: MockURLProtocolTestCase {
         // handler makes that regression fail the test rather than silently hit the live API.
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
         MockURLProtocol.installRequestHandler { request in
             XCTFail("Malformed notification must not start a network request")
             return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())

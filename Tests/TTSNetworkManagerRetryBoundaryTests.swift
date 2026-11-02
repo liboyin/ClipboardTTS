@@ -126,7 +126,7 @@ final class TTSNetworkManagerRetryBoundaryTests: MockURLProtocolTestCase {
         // Custom endpoints promise nothing about a second attempt, so resending the user's text
         // there would be a guess made on their behalf with their credentials and quota.
         let providers = [
-            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI"),
+            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "Custom"),
             (baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom")
         ]
         for provider in providers {

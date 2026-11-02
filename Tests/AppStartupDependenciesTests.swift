@@ -103,9 +103,9 @@ final class AppStartupDependenciesTests: XCTestCase {
         assertRequestInputs(
             defaultDependencies.networkManager,
             match: .init(
-                baseURL: "https://api.openai.com/v1/audio/speech",
+                baseURL: "wss://api.openai.com/v1/realtime",
                 apiKey: "",
-                model: "tts-1",
+                model: "gpt-realtime-2.1-mini",
                 voice: "alloy",
                 provider: .openAI
             )
@@ -231,6 +231,7 @@ final class AppStartupDependenciesTests: XCTestCase {
                 "The \(graph) hosted graph must not take the production branch's routing."
             )
             assertRefusesLoopbackRequestLocally(dependencies.networkManager, graph: graph)
+            assertRefusesLoopbackWebSocketLocally(dependencies.networkManager, graph: graph)
             assertClaimsOffMachineRequests(dependencies.networkManager, graph: graph)
         }
     }

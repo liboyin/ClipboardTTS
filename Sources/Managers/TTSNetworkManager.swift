@@ -38,6 +38,10 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// Session-lifecycle and request-body seams used by production setup and focused tests.
     private let sessionInvalidated: ((URLSession) -> Void)?
     let requestBodyEncoder: (Data) throws -> Data
+    /// Opens the connection an OpenAI Realtime request runs on, from the manager's session and the
+    /// handshake request. Production builds a WebSocket task from that session, so its policy and
+    /// routing apply; tests substitute a scripted connection.
+    let realtimeConnectionFactory: @Sendable (URLSession, URLRequest) -> RealtimeSpeechConnection
     /// The two points on the request-state path whose invariant is about what may interleave there.
     /// Production does nothing at either; both exist because such an invariant can only be stated
     /// from inside the window it protects.
@@ -85,7 +89,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
 
     /// Returns the active task for debug-only delegate-ordering tests.
     #if DEBUG
-    var activeTaskForTesting: URLSessionDataTask? { stateQueue.sync { activeRequest?.task } }
+    var activeTaskForTesting: URLSessionDataTask? {
+        stateQueue.sync {
+            guard case .http(let task)? = activeRequest?.transport else { return nil }
+            return task
+        }
+    }
     #endif
 
     /// The values used to create one request, captured before the task is resumed.
@@ -97,10 +106,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         let provider: APIKeyProvider
     }
 
-    /// State that belongs exclusively to the active URL session task and is guarded by `stateQueue`.
+    /// State that belongs exclusively to the active request attempt and is guarded by `stateQueue`.
     struct ActiveRequestContext {
-        let task: URLSessionDataTask
-        let taskIdentifier: Int
+        let transport: RequestTransport
+        /// The data task's identifier, which is what URL-session delegate callbacks are matched on.
+        /// A Realtime attempt has none, so no data-task callback can ever match it.
+        let taskIdentifier: Int?
         let requestGeneration: UInt64
         let provider: APIKeyProvider
         /// The request this attempt sent, retained so its permitted retry replays exactly it.
@@ -140,11 +151,15 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          secretStore: SecretStoring = KeychainSecretStore(),
          defaults: UserDefaults,
          requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
+         realtimeConnectionFactory: @escaping @Sendable (URLSession, URLRequest) -> RealtimeSpeechConnection = {
+             $0.webSocketTask(with: $1)
+         },
          audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery"),
          callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
          revocationTransactionObserver: @escaping @Sendable () -> Void = {},
          retryInstallationObserver: @escaping @Sendable () -> Void = {},
          metadataCompletionObserver: @escaping @Sendable (MetadataCompletion) -> Void = { _ in }) {
+        RequestSettings.migrateRetiredOpenAISpeechSettings(in: defaults)
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         let secretStartupState = APIKeyStartupState.load(
@@ -154,6 +169,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             provider: provider, apiKey: secretStartupState.apiKey, defaults: defaults
         )
         self.requestBodyEncoder = requestBodyEncoder
+        self.realtimeConnectionFactory = realtimeConnectionFactory
         self.requestObservers = (revocationTransaction: revocationTransactionObserver,
                                  retryInstallation: retryInstallationObserver)
         self.metadataCompletionObserver = metadataCompletionObserver
@@ -220,16 +236,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         stateQueue.sync {
             requestSettings.provider == provider
         }
-    }
-
-    /// Returns the model that future requests will use.
-    ///
-    /// Deliberately reads the model alone: the voice-catalog path is the only caller, and the one
-    /// catalog that depends on the model depends on nothing else. Handing it an aggregate would deliver the saved API key,
-    /// endpoint, and provider identity to a metadata-only path that would discard all three, so a
-    /// credential must not be added back here.
-    func currentModel() -> String {
-        stateQueue.sync { requestSettings.model }
     }
 
     /// Captures the immutable settings one request attempt owns from start to finish.

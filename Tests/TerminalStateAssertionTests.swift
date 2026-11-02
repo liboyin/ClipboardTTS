@@ -67,7 +67,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase, @unchecked Sen
             apiKey: "fake-key",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         manager.streamTTS(text: "Earlier failing attempt") { _ in }
         XCTAssertEqual(manager.lastError, staleFailure)
@@ -92,7 +92,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase, @unchecked Sen
             apiKey: "fake-key",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         manager.streamTTS(text: "Earlier failing attempt") { _ in }
         XCTAssertEqual(manager.lastError, staleFailure)
@@ -155,7 +155,7 @@ final class TerminalStateAssertionTests: MockURLProtocolTestCase, @unchecked Sen
         let manager = TestNetworkFactory.makeManager { _ in
             throw TerminalStateAssertionEncodingError.failed
         }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         assertTerminalState(
             of: manager,

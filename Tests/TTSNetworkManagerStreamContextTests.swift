@@ -2,11 +2,11 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
-    func testOpenAIHandlerCanStopStreamingWithoutReceivingLaterData() {
+    func testRawPCMHandlerCanStopStreamingWithoutReceivingLaterData() {
         // WHY: Audio handlers may stop playback synchronously. They must run after stateQueue is
         // released, otherwise stopStreaming recursively enters the same serial queue and hangs.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let handlerStoppedStream = expectation(description: "Re-entrant handler stopped the stream")
         let requestStarted = expectation(description: "Request context is active")
@@ -76,7 +76,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
         // data to the replacement handler. URLSession cancellation cannot guarantee that a queued
         // callback never arrives, so the task identifier remains the final ownership check.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let firstRequestStarted = expectation(description: "First request started")
         let replacementRequestStarted = expectation(description: "Replacement request started")
@@ -181,14 +181,14 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             apiKey: "next-openai-key",
             model: "next-openai-model",
             voice: "next-openai-voice",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         releaseResponse.signal()
 
         wait(for: [audioDelivered], timeout: 1.0)
     }
 
-    func testOpenAIStreamKeepsItsCapturedDecoderAfterSettingsSwitch() {
+    func testRawPCMStreamKeepsItsCapturedDecoderAfterSettingsSwitch() {
         // WHY: A provider switch must not make an in-flight PCM stream use Gemini's buffered JSON
         // decoder, or the raw audio is discarded when completion tries to parse it as JSON.
         let manager = TestNetworkFactory.makeManager()
@@ -197,10 +197,10 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             apiKey: "original-openai-key",
             model: "original-openai-model",
             voice: "original-openai-voice",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
 
-        let requestStarted = expectation(description: "OpenAI request started")
+        let requestStarted = expectation(description: "Raw PCM request started")
         let audioDelivered = expectation(description: "Unchanged PCM delivered")
         let releaseResponse = DispatchSemaphore(value: 0)
         let expectedAudio = Data([8, 7, 6, 5])
@@ -218,7 +218,7 @@ final class TTSNetworkManagerStreamContextTests: MockURLProtocolTestCase {
             return (response, expectedAudio)
         }
 
-        manager.streamTTS(text: "OpenAI request") { data in
+        manager.streamTTS(text: "Raw PCM request") { data in
             XCTAssertEqual(data, expectedAudio)
             audioDelivered.fulfill()
         }

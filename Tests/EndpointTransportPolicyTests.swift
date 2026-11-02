@@ -3,11 +3,14 @@ import XCTest
 
 final class EndpointTransportPolicyTests: XCTestCase {
     func testHTTPSAnywhereAndLoopbackHTTPMayCarryCredentials() throws {
-        // WHY: HTTPS protects the key wherever the endpoint lives, and a local engine has no
+        // WHY: HTTPS, and the secure WebSocket OpenAI's Realtime API uses, protect the key wherever
+        // the endpoint lives, and a local engine has no
         // certificate to present. Refusing either would make the rule unusable rather than safe:
         // the documented local-engine setup would stop working the moment the rule shipped.
         let permitted = [
             "https://api.openai.com/v1/audio/speech",
+            "wss://api.openai.com/v1/realtime",
+            "WSS://api.openai.com/v1/realtime",
             "https://custom.example:8443/v1/audio/speech",
             "HTTPS://custom.example/v1/audio/speech",
             "http://localhost:8080/v1/audio/speech",
@@ -30,10 +33,13 @@ final class EndpointTransportPolicyTests: XCTestCase {
 
     func testCleartextRemoteAndPrivateNetworkEndpointsAreRefused() throws {
         // WHY: These are exactly the endpoints that would put the saved key and the user's
-        // clipboard text on the wire. A private-LAN address is not loopback: the app cannot tell
+        // clipboard text on the wire. Plain WebSocket is refused even to loopback, because no
+        // endpoint the app speaks needs it. A private-LAN address is not loopback: the app cannot tell
         // from the endpoint alone whether that traffic stays on the user's own machine.
         let refused = [
             "http://tts.example.com/v1/audio/speech",
+            "ws://api.openai.com/v1/realtime",
+            "ws://127.0.0.1:8080/v1/realtime",
             "http://192.168.1.10:8080/v1/audio/speech",
             "http://10.0.0.5/v1/audio/speech",
             "http://172.16.0.3/v1/audio/speech",

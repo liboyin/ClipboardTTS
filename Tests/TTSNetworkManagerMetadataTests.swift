@@ -2,20 +2,20 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerMetadataTests: MetadataTestCase {
-    func testDelayedOpenAIModelsCannotReplaceGeminiModels() {
-        // WHY: Cancellation races with URLSession completion, so a delayed OpenAI response must not
+    func testDelayedDiscoveredModelsCannotReplaceGeminiModels() {
+        // WHY: Cancellation races with URLSession completion, so a delayed discovery response must not
         // overwrite the Gemini models that the user selected after starting the original request.
         let (manager, completions) = makeMetadataManager()
         manager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-test-key",
+            baseURL: "https://custom.example/v1/audio/speech",
+            apiKey: "custom-test-key",
             model: "tts-1",
             voice: "alloy",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
 
-        let oldRequestStarted = expectation(description: "OpenAI metadata request started")
-        let oldResponseReturned = expectation(description: "OpenAI metadata response returned")
+        let oldRequestStarted = expectation(description: "Custom metadata request started")
+        let oldResponseReturned = expectation(description: "Custom metadata response returned")
         let releaseOldResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.installRequestHandler { request in
             oldRequestStarted.fulfill()
@@ -28,13 +28,13 @@ final class TTSNetworkManagerMetadataTests: MetadataTestCase {
         }
 
         manager.fetchAvailableModels(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-test-key",
-            selectedProvider: "OpenAI"
+            baseURL: "https://custom.example/v1/audio/speech",
+            apiKey: "custom-test-key",
+            selectedProvider: "Custom"
         )
         wait(for: [oldRequestStarted], timeout: 1.0)
         guard let staleToken = manager.metadataTokenForTesting(for: .models) else {
-            XCTFail("Expected the delayed OpenAI request to own model metadata state.")
+            XCTFail("Expected the delayed Custom request to own model metadata state.")
             releaseOldResponse.signal()
             return
         }

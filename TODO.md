@@ -104,6 +104,16 @@ A follow-up sequential review on 2026-09-18 covered the Codex commits `afccaff`�
 |---|---|---|
 | D25 | Keep D8's removal by a strict SwiftLint rule that refuses a free `print`, `debugPrint` or `NSLog` call in `Sources/`, leaving `Tests/` free to print. No test can observe a reinstated print, because stdout is shared with the test runner, so the guard is lint rather than XCTest. | NB24 |
 
+### Accepted user decisions — 2026-11-02
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D26 | Migrate the OpenAI provider from the retiring `/v1/audio/speech` models (`tts-1`, `tts-1-hd`, and the dated `gpt-4o-mini-tts` snapshots, reported retiring 2027-01-06) to the Realtime API over WebSocket, with `gpt-realtime-2.1-mini` as the default. Custom keeps the OpenAI-compatible HTTP speech contract, because local engines such as Kokoro-FastAPI do not speak Realtime. | OpenAI Realtime migration |
+| D27 | Offer a fixed OpenAI model catalog, `gpt-realtime-2.1-mini` then `gpt-realtime-2.1`, instead of `/v1/models` discovery, whose list also names Realtime models that cannot speak. | OpenAI Realtime migration, NB50 |
+| D28 | Keep `alloy` as the OpenAI default voice. On launch, rewrite a saved `fable`, `nova`, or `onyx` (rejected by the Realtime API) to `alloy`, and a saved model naming a `tts` speech model to the default Realtime model; keep every other saved value, including a model the catalog does not list. | OpenAI Realtime migration |
+| D29 | Keep the 4,096-character OpenAI clipboard cap, reworded as the app's own cap. This supersedes the same day's choice to raise it: live trials then showed `gpt-realtime-2.1-mini` going silent partway through responses at every tested length (NB51), so no evidence supports a higher cap. | OpenAI Realtime migration, NB51 |
+| D30 | Keep `gpt-realtime-2.1-mini` as the default despite NB51, documenting the silent-gap defect as a known limitation, with `gpt-realtime-2.1` selectable in Settings. | NB51 |
+
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
 ### Constraints that remain in force
@@ -130,6 +140,14 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 #### NB27 — A later malformed Gemini inline part discards audio already validated ahead of it
 
 **Validated — source inspection.** `audioPayload(in:)` now reads every part before returning, so any part whose `inlineData` is unreadable or declares a non-audio media type makes the whole candidate `.invalid` and takes the fatal revocation path, dropping audio parts that passed validation earlier in the same event. Before `912bf09` the first audio part returned immediately and a later part was never read. The trade-off is deliberate and documented; the exposure is that a provider adding one non-audio inline part to an `AUDIO`-modality response would silence an utterance that previously played. **Paths:** [audioPayload](Sources/Managers/TTSNetworkManager+GeminiStreaming.swift), [Gemini streaming tests](Tests/TTSNetworkManagerGeminiStreamingTests.swift), README. **Direction:** decide from provider evidence whether an unplayable part accompanying valid audio is a corrupt stream or an ignorable extra; keep the current rule until that evidence exists. **Acceptance:** the chosen rule and its evidence are stated in README, and both a malformed-only event and a mixed valid/malformed event keep a test.
+
+#### NB50 — Settings no longer reaches model discovery
+
+**Validated — source inspection, 2026-11-02.** D27 gives OpenAI a fixed catalog, and `SettingsView.syncSettings` never asks Custom to discover, so no production path now reaches `OpenAIModelDiscovery` or the discovery task bookkeeping in `TTSNetworkManager+Metadata`; manager-level tests still exercise it through Custom. **Paths:** [Metadata](Sources/Managers/TTSNetworkManager+Metadata.swift), [OpenAIModelDiscovery](Sources/Managers/OpenAIModelDiscovery.swift), [SettingsView](Sources/Views/SettingsView.swift). **Direction:** ask the user whether to remove the discovery layer, preserving its unique behavior under AGENTS' layer-removal rule, or to offer discovery for Custom endpoints that serve `/v1/models`. **Acceptance:** the chosen direction is implemented and README no longer describes an unreachable path as current behavior.
+
+#### NB51 — `gpt-realtime-2.1-mini` intermittently goes silent mid-response while reporting success
+
+**Validated — live trials, 2026-11-02, outside the repository.** Python `websockets` clients reproduced the app's session settings: read-verbatim instructions, `alloy`, 24-kHz PCM, no turn detection. In 11 of 34 mini responses (500 to 12,000 characters, sequential and concurrent), the voice read normally and then produced at least 15 s of near-silence (5-s RMS below 400, against about 3,500 for speech), usually for the rest of the response; a 12th ended with about 6 s of trailing silence that may be ordinary padding, while `response.done` reported `completed` and the text transcript claimed every word was read. Whisper transcription of one affected 12,000-character response recovered about 141 of 2,080 words. `gpt-realtime-2.1` had 0 of 6 affected responses (1,000 and 4,000 characters). **Limitations:** most inputs were synthetic, repetitive sentences; the natural-prose trial was refused when the account's credit ran out; sample sizes are small; the app cannot detect the defect from protocol events. **Direction:** with credit available, repeat on natural prose for both models; then decide between the default model (D30), client-side silence detection with re-request, or shorter per-response chunks. **Acceptance:** README's limitation states current evidence, and any mitigation has a test that fails when a silent response is reported as success.
 
 ### Nits
 

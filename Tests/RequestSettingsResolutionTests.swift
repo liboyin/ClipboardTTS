@@ -24,7 +24,7 @@ final class RequestSettingsResolutionTests: XCTestCase {
         let openAI = TTSNetworkManager.RequestSettings.resolved(
             provider: .openAI, apiKey: "openai-key", defaults: defaults
         )
-        XCTAssertEqual(openAI.baseURL, "https://api.openai.com/v1/audio/speech")
+        XCTAssertEqual(openAI.baseURL, "wss://api.openai.com/v1/realtime")
         XCTAssertEqual(openAI.model, "stored-openai-model")
         XCTAssertEqual(openAI.voice, "stored-openai-voice")
         XCTAssertEqual(openAI.provider, .openAI)
@@ -54,7 +54,7 @@ final class RequestSettingsResolutionTests: XCTestCase {
 
         XCTAssertEqual(
             TTSNetworkManager.RequestSettings.resolved(provider: .openAI, apiKey: "k", defaults: defaults).baseURL,
-            "https://api.openai.com/v1/audio/speech"
+            "wss://api.openai.com/v1/realtime"
         )
         XCTAssertEqual(
             TTSNetworkManager.RequestSettings.resolved(provider: .gemini, apiKey: "k", defaults: defaults).baseURL,
@@ -74,7 +74,8 @@ final class RequestSettingsResolutionTests: XCTestCase {
         let defaults = makeOwnedDefaults()
 
         let openAI = TTSNetworkManager.RequestSettings.resolved(provider: .openAI, apiKey: "", defaults: defaults)
-        XCTAssertEqual(openAI.model, "tts-1")
+        XCTAssertEqual(openAI.baseURL, "wss://api.openai.com/v1/realtime")
+        XCTAssertEqual(openAI.model, "gpt-realtime-2.1-mini")
         XCTAssertEqual(openAI.voice, "alloy")
 
         let gemini = TTSNetworkManager.RequestSettings.resolved(provider: .gemini, apiKey: "", defaults: defaults)
@@ -85,6 +86,40 @@ final class RequestSettingsResolutionTests: XCTestCase {
         XCTAssertEqual(custom.baseURL, "https://api.openai.com/v1/audio/speech")
         XCTAssertEqual(custom.model, "")
         XCTAssertEqual(custom.voice, "")
+    }
+
+    func testASavedSpeechModelOrRetiredVoiceIsRewrittenForTheRealtimeAPI() {
+        // WHY: OpenAI speech now runs on the Realtime API, which rejects every `tts` speech model and
+        // the speech-only voices outright. A user upgrading with either saved would otherwise find
+        // speech failing until they visited Settings, so both are rewritten to working defaults.
+        for (savedModel, savedVoice) in [("tts-1", "nova"), ("tts-1-hd", "fable"), ("gpt-4o-mini-tts", "onyx")] {
+            let defaults = makeOwnedDefaults([SettingsKeys.openAIModel: savedModel, SettingsKeys.openAIVoice: savedVoice])
+
+            TTSNetworkManager.RequestSettings.migrateRetiredOpenAISpeechSettings(in: defaults)
+
+            XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIModel), "gpt-realtime-2.1-mini", savedModel)
+            XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIVoice), "alloy", savedVoice)
+        }
+    }
+
+    func testTheRealtimeMigrationKeepsEveryValueTheRealtimeAPICanUse() {
+        // WHY: The rewrite exists only for values that can no longer work. A supported model, a model
+        // the user typed deliberately, a voice both APIs accept, and settings never saved must all
+        // survive it, or every launch would undo a choice the user made.
+        let defaults = makeOwnedDefaults([SettingsKeys.openAIModel: "gpt-realtime-2.1", SettingsKeys.openAIVoice: "marin"])
+        TTSNetworkManager.RequestSettings.migrateRetiredOpenAISpeechSettings(in: defaults)
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIModel), "gpt-realtime-2.1")
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIVoice), "marin")
+
+        let typed = makeOwnedDefaults([SettingsKeys.openAIModel: "gpt-realtime-future", SettingsKeys.openAIVoice: "alloy"])
+        TTSNetworkManager.RequestSettings.migrateRetiredOpenAISpeechSettings(in: typed)
+        XCTAssertEqual(typed.string(forKey: SettingsKeys.openAIModel), "gpt-realtime-future")
+        XCTAssertEqual(typed.string(forKey: SettingsKeys.openAIVoice), "alloy")
+
+        let unsaved = makeOwnedDefaults()
+        TTSNetworkManager.RequestSettings.migrateRetiredOpenAISpeechSettings(in: unsaved)
+        XCTAssertNil(unsaved.object(forKey: SettingsKeys.openAIModel))
+        XCTAssertNil(unsaved.object(forKey: SettingsKeys.openAIVoice))
     }
 
     func testTheKeyIsTheOneSuppliedRatherThanOneReadFromPreferences() {

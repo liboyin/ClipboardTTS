@@ -2,7 +2,11 @@ import XCTest
 @testable import ClipboardTTSApp
 
 final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
-    func testOpenAIStopWaitsForAnAuthorizedCallbackBeforeReturning() {
+    func testRawPCMStopWaitsForAnAuthorizedCallbackBeforeReturning() {
+        assertConcurrentStopCannotOutrunAuthorizedCallback(provider: .custom)
+    }
+
+    func testRealtimeStopWaitsForAnAuthorizedCallbackBeforeReturning() {
         assertConcurrentStopCannotOutrunAuthorizedCallback(provider: .openAI)
     }
 
@@ -122,11 +126,22 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
     private func assertConcurrentStopCannotOutrunAuthorizedCallback(provider: APIKeyProvider) {
         let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.callback-authority")
         let callbackAuthority = ObservedCallbackAuthority()
+        let connections = ScriptedRealtimeConnections()
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
         let manager = TestNetworkFactory.makeManager(
+            realtimeConnections: connections,
             audioDeliveryQueue: audioDeliveryQueue,
             callbackAuthority: callbackAuthority
         )
         switch provider {
+        case .openAI:
+            manager.updateSettings(
+                baseURL: OpenAIRealtimeSpeech.endpoint,
+                apiKey: "test",
+                model: "test",
+                voice: "test",
+                selectedProvider: "OpenAI"
+            )
         case .gemini:
             manager.updateSettings(
                 baseURL: "https://generativelanguage.googleapis.com/v1beta",
@@ -135,17 +150,18 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
                 voice: "test",
                 selectedProvider: "Gemini"
             )
-        case .openAI, .custom:
+        case .custom:
             manager.updateSettings(
                 baseURL: "https://mock.api/v1/audio/speech",
                 apiKey: "test",
                 model: "test",
                 voice: "test",
-                selectedProvider: "OpenAI"
+                selectedProvider: "Custom"
             )
         }
 
         let requestStarted = expectation(description: "Request started")
+        requestStarted.isInverted = provider == .openAI
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
@@ -162,18 +178,23 @@ final class TTSNetworkManagerCallbackAuthorityTests: MockURLProtocolTestCase {
             _ = releaseCallback.wait(timeout: .now() + 2.0)
             callbackFinished.fulfill()
         }
-        wait(for: [requestStarted], timeout: 1.0)
-        guard let task = manager.activeTaskForTesting else {
+        // A Realtime request reaches no HTTP endpoint, so its wait is the inverted one: it must not.
+        wait(for: [requestStarted], timeout: provider == .openAI ? 0.1 : 1.0)
+        let task = manager.activeTaskForTesting
+        let connection = connections.all.first
+        guard provider == .openAI ? connection != nil : task != nil else {
             XCTFail("Expected an active request before testing callback authority.")
             return
         }
 
         callbackAuthority.observeNextRevocationAttempt()
         switch provider {
+        case .openAI:
+            connection?.deliverAudio(Data([1, 2]))
         case .gemini:
-            manager.urlSession(manager.session, dataTask: task, didReceive: geminiEvent(containing: Data([1, 2])))
-        case .openAI, .custom:
-            manager.urlSession(manager.session, dataTask: task, didReceive: Data([1, 2]))
+            task.map { manager.urlSession(manager.session, dataTask: $0, didReceive: geminiEvent(containing: Data([1, 2]))) }
+        case .custom:
+            task.map { manager.urlSession(manager.session, dataTask: $0, didReceive: Data([1, 2])) }
         }
         wait(for: [callbackEntered], timeout: 1.0)
 

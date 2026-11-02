@@ -42,9 +42,9 @@ final class TTSNetworkManagerResponseFormatTests: MockURLProtocolTestCase {
     }
 
     func testASuccessDeclaringNoContentTypeStillDeliversItsPCM() {
-        // WHY: OpenAI documents no content type for its speech endpoint, so this is the shape a
-        // conforming response is allowed to have. A rule that required a declaration would silence
-        // the provider the app ships pointed at.
+        // WHY: OpenAI's speech contract, which Custom endpoints follow, documents no content type,
+        // so this is the shape a conforming response is allowed to have. A rule that required a
+        // declaration would silence every endpoint that follows it to the letter.
         let manager = makeOpenAICompatibleManager()
         let expectedPCM = Data([0x10, 0x20])
 
@@ -55,7 +55,7 @@ final class TTSNetworkManagerResponseFormatTests: MockURLProtocolTestCase {
 
     func testACustomEndpointRefusesADeclaredNonAudioBodyAsWell() {
         // WHY: Custom is the provider most likely to be pointed at the wrong URL, because the user
-        // types it. It sends the same raw-sample request as OpenAI, so it must get the same answer.
+        // types it. It sends the same raw-sample request as any compatible endpoint, so it must get the same answer.
         let manager = makeCustomManager()
         let deliveredAudio = LockedValue<[Data]>([])
 
@@ -228,7 +228,7 @@ final class TTSNetworkManagerResponseFormatTests: MockURLProtocolTestCase {
             apiKey: "fake-key",
             model: "tts-test",
             voice: "test-voice",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         return manager
     }

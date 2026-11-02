@@ -36,6 +36,7 @@ enum TestNetworkFactory {
         secretStore: SecretStoring = InMemorySecretStore(),
         defaults: UserDefaults = InMemoryDefaults(),
         requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
+        realtimeConnections: ScriptedRealtimeConnections? = nil,
         audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.tests.audiodelivery"),
         callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
         revocationTransactionObserver: @escaping @Sendable () -> Void = {},
@@ -44,6 +45,15 @@ enum TestNetworkFactory {
     ) -> TTSNetworkManager {
         let testIdentifier = MockURLProtocol.beginManagerConstructionForCurrentTest()
         defer { MockURLProtocol.managerConstructionDidFinish(forTestIdentifier: testIdentifier) }
+        // Without scripted connections the production factory stays in place, so a Realtime request
+        // the test did not script still opens a WebSocket task on this mock-routed session, which
+        // `MockURLProtocol` claims like any other request rather than letting it leave the machine.
+        let realtimeConnectionFactory: @Sendable (URLSession, URLRequest) -> RealtimeSpeechConnection
+        if let realtimeConnections {
+            realtimeConnectionFactory = realtimeConnections.factory
+        } else {
+            realtimeConnectionFactory = { @Sendable session, request in session.webSocketTask(with: request) }
+        }
         let manager = TTSNetworkManager(
             routing: mockRouting(testIdentifier: testIdentifier),
             sessionCreated: { MockURLProtocol.register(session: $0, forTestIdentifier: testIdentifier) },
@@ -51,6 +61,7 @@ enum TestNetworkFactory {
             secretStore: secretStore,
             defaults: defaults,
             requestBodyEncoder: requestBodyEncoder,
+            realtimeConnectionFactory: realtimeConnectionFactory,
             audioDeliveryQueue: audioDeliveryQueue,
             callbackAuthority: callbackAuthority,
             revocationTransactionObserver: revocationTransactionObserver,

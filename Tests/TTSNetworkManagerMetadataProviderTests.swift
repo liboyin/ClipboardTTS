@@ -39,24 +39,23 @@ final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
         )
         wait(for: [geminiModelsPublished], timeout: 1.0)
 
-        MockURLProtocol.installRequestHandler { request in
-            let data = Data("{ \"data\": [{\"id\": \"tts-1\"}, {\"id\": \"tts-1-hd\"}, {\"id\": \"gpt-4\"}] }".utf8)
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
-        }
+        // OpenAI's models are the app's own answer too: its model list names Realtime models that
+        // cannot speak, so no handler is installed and an unhandled discovery request would fail
+        // this scope's accounting.
         manager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
+            baseURL: OpenAIRealtimeSpeech.endpoint,
             apiKey: "openai-token",
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
         let openAIModelsPublished = expectPublication(
             manager.$modelSuggestions,
-            of: ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"]),
+            of: ProviderSuggestions(provider: .openAI, values: ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"]),
             "OpenAI models published"
         )
         manager.fetchAvailableModels(
-            baseURL: "https://api.openai.com/v1/audio/speech",
+            baseURL: OpenAIRealtimeSpeech.endpoint,
             apiKey: "openai-token",
             selectedProvider: "OpenAI"
         )
@@ -97,69 +96,30 @@ final class TTSNetworkManagerMetadataProviderTests: MetadataTestCase {
         wait(for: [discoveryRequested, modelsPublished], timeout: 2.0)
     }
 
-    func testVoiceCatalogsReflectProviderAndModelCapabilities() {
+    func testVoiceCatalogsReflectProviderCapabilities() {
         let (manager, completions) = makeMetadataManager()
-        let openAIVoices = ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
-        manager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "OpenAI"
-        )
-        let openAIVoicesPublished = expectPublication(
-            manager.$voiceSuggestions,
-            of: ProviderSuggestions(provider: .openAI, values: openAIVoices),
-            "OpenAI voices published"
-        )
-        manager.fetchAvailableVoices(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            selectedProvider: "OpenAI"
-        )
-        wait(for: [openAIVoicesPublished], timeout: 1.0)
-
-        manager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
-            model: "tts-1-hd",
-            voice: "alloy",
-            selectedProvider: "OpenAI"
-        )
-        // The same list as before, so only a publication made after this point can satisfy it.
-        let openAIHDVoicesPublished = expectPublication(
-            manager.$voiceSuggestions,
-            of: ProviderSuggestions(provider: .openAI, values: openAIVoices),
-            "OpenAI HD voices published"
-        )
-        manager.fetchAvailableVoices(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            selectedProvider: "OpenAI"
-        )
-        wait(for: [openAIHDVoicesPublished], timeout: 1.0)
-
-        manager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "openai-token",
-            model: "gpt-4o-mini-tts",
-            voice: "marin",
-            selectedProvider: "OpenAI"
-        )
-        let currentOpenAIVoicesPublished = expectPublication(
-            manager.$voiceSuggestions,
-            of: ProviderSuggestions(
-                provider: .openAI,
-                values: [
-                    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
-                    "shimmer", "verse", "marin", "cedar"
-                ]
-            ),
-            "Current OpenAI voices published"
-        )
-        manager.fetchAvailableVoices(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            selectedProvider: "OpenAI"
-        )
-        wait(for: [currentOpenAIVoicesPublished], timeout: 1.0)
+        // WHY: Every Realtime model offers the same voices, so the published catalog is the same
+        // whichever model is configured.
+        for model in ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"] {
+            manager.updateSettings(
+                baseURL: OpenAIRealtimeSpeech.endpoint,
+                apiKey: "openai-token",
+                model: model,
+                voice: "alloy",
+                selectedProvider: "OpenAI"
+            )
+            // The same list each time, so only a publication made after this point can satisfy it.
+            let openAIVoicesPublished = expectPublication(
+                manager.$voiceSuggestions,
+                of: ProviderSuggestions(
+                    provider: .openAI,
+                    values: ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]
+                ),
+                "OpenAI voices published for \(model)"
+            )
+            manager.fetchAvailableVoices(baseURL: OpenAIRealtimeSpeech.endpoint, selectedProvider: "OpenAI")
+            wait(for: [openAIVoicesPublished], timeout: 1.0)
+        }
 
         manager.updateSettings(
             baseURL: "https://generativelanguage.googleapis.com/v1beta",

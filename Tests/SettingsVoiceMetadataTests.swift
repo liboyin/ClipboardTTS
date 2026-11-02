@@ -193,10 +193,6 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        MockURLProtocol.installRequestHandler { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{ \"data\": [{\"id\": \"tts-1\"}, {\"id\": \"tts-1-hd\"}] }".utf8))
-        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,
@@ -205,7 +201,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             testCase: self
         )
 
-        XCTAssertEqual(settings.suggestionLists().first, ["tts-1", "tts-1-hd"])
+        XCTAssertEqual(settings.suggestionLists().first, ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"])
 
         settings.selectProvider("Gemini")
 

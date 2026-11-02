@@ -2,7 +2,7 @@ import XCTest
 import AppKit
 @testable import ClipboardTTSApp
 
-/// Covers the click-time refusal of clipboard text longer than OpenAI's documented `input` maximum.
+/// Covers the click-time refusal of OpenAI clipboard text longer than the app's 4,096-character cap.
 /// `MenuBarView` and the AppKit controls a hosted menu builds are main-actor isolated, so every
 /// test here runs on the main actor.
 @MainActor
@@ -10,7 +10,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
     private static let alertTitle = "Copied text is too long"
 
     private func expectedAlertMessage(characterCount: String) -> String {
-        "OpenAI accepts at most 4,096 characters per request. The copied text is "
+        "Clipboard TTS sends OpenAI at most 4,096 characters per request. The copied text is "
             + "\(characterCount) characters. Copy a shorter passage and try again."
     }
 
@@ -59,12 +59,20 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         )
     }
 
-    private func makeOpenAIManager() -> TTSNetworkManager {
-        let networkManager = TestNetworkFactory.makeManager()
+    /// An OpenAI manager whose Realtime connections are scripted, calling `onConnection` as each
+    /// request opens one. By default reaching OpenAI fails the test.
+    private func makeOpenAIManager(
+        onConnection: @escaping @Sendable (ScriptedRealtimeConnection) -> Void = { _ in
+            XCTFail("Oversized OpenAI text must not reach the provider.")
+        }
+    ) -> TTSNetworkManager {
+        let connections = ScriptedRealtimeConnections(opened: onConnection)
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let networkManager = TestNetworkFactory.makeManager(realtimeConnections: connections)
         networkManager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
+            baseURL: OpenAIRealtimeSpeech.endpoint,
             apiKey: "test",
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             selectedProvider: "OpenAI"
         )
@@ -72,19 +80,14 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
     }
 
     func testOversizedOpenAIClipboardTextPresentsTheLimitAlertInsteadOfRequestingSpeech() {
-        // WHY: OpenAI documents one 4,096-character maximum for `input`, so a longer clipboard
-        // value buys a request that can only fail, and the provider's rejection reaches the user as
-        // the same generic HTTP failure every other error produces — no indication that the text
-        // was simply too long. The click must say what is wrong before spending the request, and
-        // must leave the pipeline idle so the next Speak click needs no Clear Buffer first.
+        // WHY: The Speech API documented one 4,096-character maximum for `input`, and the Realtime
+        // API that replaced it was kept to that cap because longer speech showed silent gaps. A
+        // longer clipboard value must be refused with a reason before a request is spent on it, and
+        // the pipeline left idle so the next Speak click needs no Clear Buffer first.
         let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_097))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
         let networkManager = makeOpenAIManager()
-        MockURLProtocol.installRequestHandler { request in
-            XCTFail("Oversized OpenAI text must not reach the provider.")
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
         let deferral = CapturingDeferralScheduler()
         let alerts = RecordingMenuAlertPresenter()
         let view = makeMenu(
@@ -111,19 +114,15 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         )
     }
 
-    func testOpenAIClipboardTextAtTheDocumentedLimitStartsExactlyOneRequest() {
-        // WHY: The limit is a maximum, not a threshold to stay under. Refusing text OpenAI accepts
+    func testOpenAIClipboardTextAtTheLimitStartsExactlyOneRequest() {
+        // WHY: The limit is a maximum, not a threshold to stay under. Refusing text at the cap
         // would block work the user is entitled to, and this boundary is what an off-by-one in
         // either direction moves.
         let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_096))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
-        let networkManager = makeOpenAIManager()
-        let requestStarted = expectation(description: "Text at the documented limit reaches the provider")
-        MockURLProtocol.installRequestHandler { request in
-            requestStarted.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
+        let requestStarted = expectation(description: "Text at the limit reaches the provider")
+        let networkManager = makeOpenAIManager { _ in requestStarted.fulfill() }
         let deferral = CapturingDeferralScheduler()
         let alerts = RecordingMenuAlertPresenter()
         let view = makeMenu(
@@ -146,8 +145,8 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
     func testOpenAILimitRefusesFewerGraphemeClustersWhoseScalarsExceedIt() {
         // WHY: The unit is the whole rule. Swift's default `String.count` counts grapheme clusters,
         // so accented text written as a base letter plus a combining mark reads as half its scalar
-        // length: this value is 2,049 clusters but 4,098 code points, which is what a provider
-        // counting characters as code points sees. Counting clusters would send it and lose the
+        // length: this value is 2,049 clusters but 4,098 code points, which is what the cap,
+        // counted in code points, sees. Counting clusters would send it and lose the
         // request the check exists to save.
         let combiningAccentText = String(repeating: "e\u{0301}", count: 2_049)
         XCTAssertEqual(combiningAccentText.count, 2_049, "The value must stay under the limit by cluster count.")
@@ -155,11 +154,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: combiningAccentText)
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
-        let networkManager = makeOpenAIManager()
-        MockURLProtocol.installRequestHandler { request in
-            XCTFail("Text over the scalar limit must not reach the provider.")
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
+        let networkManager = makeOpenAIManager { _ in XCTFail("Text over the scalar limit must not reach the provider.") }
         let deferral = CapturingDeferralScheduler()
         let alerts = RecordingMenuAlertPresenter()
         let view = makeMenu(
@@ -183,19 +178,15 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         // WHY: The trade-off of choosing a unit runs both ways. Non-BMP characters cost two UTF-16
         // units and four UTF-8 bytes each, so counting either would refuse this value — 4,096 code
         // points, the exact maximum — and every ordinary non-Latin passage far below the limit. A
-        // false refusal blocks work OpenAI would have accepted, which no later failure can undo.
+        // false refusal blocks work the cap allows, which no later failure can undo.
         let emojiText = String(repeating: "\u{1F600}", count: 4_096)
         XCTAssertEqual(emojiText.unicodeScalars.count, 4_096, "The value must sit exactly at the limit in scalars.")
         XCTAssertEqual(emojiText.utf16.count, 8_192, "It must exceed the limit in UTF-16 units.")
         XCTAssertEqual(emojiText.utf8.count, 16_384, "It must exceed the limit in UTF-8 bytes.")
         let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: emojiText))
-        let networkManager = makeOpenAIManager()
         let requestStarted = expectation(description: "Text within the scalar limit reaches the provider")
-        MockURLProtocol.installRequestHandler { request in
-            requestStarted.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
+        let networkManager = makeOpenAIManager { _ in requestStarted.fulfill() }
         let deferral = CapturingDeferralScheduler()
         let alerts = RecordingMenuAlertPresenter()
         let view = makeMenu(
@@ -212,7 +203,7 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
 
         wait(for: [requestStarted], timeout: 2.0)
         assertRequestsStarted(1, by: networkManager, from: generationBefore)
-        XCTAssertTrue(alerts.presentedTitles.isEmpty, "Only OpenAI's own maximum may refuse a click.")
+        XCTAssertTrue(alerts.presentedTitles.isEmpty, "Only the scalar count may refuse a click.")
     }
 
     func testOversizedGeminiClipboardTextStillStartsItsRequest() {
@@ -302,12 +293,8 @@ final class MenuBarOpenAILimitTests: MockURLProtocolTestCase {
         let audioPlayer = makeOwnedAudioPlayer()
         let pasteboard = FakePasteboardReader(text: String(repeating: "a", count: 4_097))
         let textExtraction = TextExtractionManager(pasteboard: pasteboard)
-        let networkManager = makeOpenAIManager()
         let onlyRequest = expectation(description: "Only the Services request reaches the provider")
-        MockURLProtocol.installRequestHandler { request in
-            onlyRequest.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
+        let networkManager = makeOpenAIManager { _ in onlyRequest.fulfill() }
         let deferral = CapturingDeferralScheduler()
         let alerts = RecordingMenuAlertPresenter()
         let view = makeMenu(

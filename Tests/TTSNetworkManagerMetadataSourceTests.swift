@@ -40,29 +40,31 @@ final class TTSNetworkManagerMetadataSourceTests: MetadataTestCase {
     }
 
     func testAProviderOnlySwitchInvalidatesMetadataFetchedForTheSameEndpoint() throws {
-        // WHY: OpenAI and a Custom provider with no saved endpoint share OpenAI's speech endpoint,
-        // so switching between them changes the provider alone. Metadata fetched for OpenAI is not
-        // Custom's, so that switch must invalidate it exactly as an endpoint change does: cancel the
-        // discovery still in flight, clear both lists, and refuse whatever the old requests publish
-        // late. The same-scope edit made first is the counterweight: changing the key, model, and
-        // voice leaves the provider and endpoint alone, so it must invalidate nothing, and it is what
-        // attributes the invalidation below to the provider rather than to any edit at all.
+        // WHY: Metadata belongs to a provider and an endpoint together, so a direct caller that
+        // keeps the endpoint and changes only the provider must invalidate it exactly as an endpoint
+        // change does: cancel the discovery still in flight, clear both lists, and refuse whatever
+        // the old request publishes late. The same-scope edit made first is the counterweight:
+        // changing the key, model, and voice leaves the provider and endpoint alone, so it must
+        // invalidate nothing, and it is what attributes the invalidation below to the provider
+        // rather than to any edit at all. Custom is the provider that discovers, so it is the one
+        // switched away from; refusing a stale voice catalog after a switch is
+        // `testAVoiceCatalogPublishedForTheOldProviderCannotReplaceTheNewOne`'s concern.
         let (manager, completions) = makeMetadataManager()
         let sharedEndpoint = "https://api.openai.com/v1/audio/speech"
         manager.updateSettings(
             baseURL: sharedEndpoint,
-            apiKey: "openai-key",
+            apiKey: "custom-key",
             model: "tts-1",
             voice: "alloy",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
-        let openAIModels = ProviderSuggestions(provider: .openAI, values: ["tts-1"])
-        let openAIVoices = ProviderSuggestions(provider: .openAI, values: ["alloy"])
-        manager.modelSuggestions = openAIModels
-        manager.voiceSuggestions = openAIVoices
+        let customModels = ProviderSuggestions(provider: .custom, values: ["tts-1"])
+        let customVoices = ProviderSuggestions(provider: .custom, values: ["alloy"])
+        manager.modelSuggestions = customModels
+        manager.voiceSuggestions = customVoices
 
-        let modelRequestStarted = expectation(description: "The OpenAI model request started")
-        let modelRequestReleased = expectation(description: "The OpenAI model request released")
+        let modelRequestStarted = expectation(description: "The Custom model request started")
+        let modelRequestReleased = expectation(description: "The Custom model request released")
         let releaseModelRequest = DispatchSemaphore(value: 0)
         defer { releaseModelRequest.signal() }
         MockURLProtocol.installRequestHandler { request in
@@ -72,56 +74,45 @@ final class TTSNetworkManagerMetadataSourceTests: MetadataTestCase {
             return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"stale-tts-model\"}] }")
         }
 
-        manager.fetchAvailableModels(baseURL: sharedEndpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: sharedEndpoint, apiKey: "custom-key", selectedProvider: "Custom")
         wait(for: [modelRequestStarted], timeout: 2.0)
         let modelTask = try XCTUnwrap(manager.modelMetadataTaskForTesting(), "Expected a pending model request.")
         let staleModelToken = try XCTUnwrap(manager.metadataTokenForTesting(for: .models))
 
         manager.updateSettings(
             baseURL: sharedEndpoint,
-            apiKey: "openai-replacement-key",
+            apiKey: "custom-replacement-key",
             model: "tts-1-hd",
             voice: "ash",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         XCTAssertEqual(modelTask.state, .running, "An edit within one provider and endpoint must not cancel discovery.")
         XCTAssertEqual(manager.metadataTokenForTesting(for: .models), staleModelToken)
-        XCTAssertEqual(manager.modelSuggestions, openAIModels)
-        XCTAssertEqual(manager.voiceSuggestions, openAIVoices)
-
-        // Its publication is queued for the main queue and has not run yet, so the switch below
-        // must also refuse a voice catalog that is already on its way.
-        manager.fetchAvailableVoices(baseURL: sharedEndpoint, selectedProvider: "OpenAI")
-        let staleVoiceToken = try XCTUnwrap(manager.metadataTokenForTesting(for: .voices))
+        XCTAssertEqual(manager.modelSuggestions, customModels)
+        XCTAssertEqual(manager.voiceSuggestions, customVoices)
 
         manager.updateSettings(
             baseURL: sharedEndpoint,
-            apiKey: "custom-key",
-            model: "custom-model",
-            voice: "custom-voice",
-            selectedProvider: "Custom"
+            apiKey: "openai-key",
+            model: "gpt-realtime-2.1-mini",
+            voice: "alloy",
+            selectedProvider: "OpenAI"
         )
         XCTAssertNotEqual(modelTask.state, .running, "A provider-only switch must cancel the pending model request.")
         XCTAssertNil(manager.metadataTokenForTesting(for: .models))
-        XCTAssertNil(manager.metadataTokenForTesting(for: .voices))
         XCTAssertEqual(manager.modelSuggestions, .unpublished)
         XCTAssertEqual(manager.voiceSuggestions, .unpublished)
 
         // URLSession can cancel before delivering the mock response, but a production completion
-        // might already be queued; deliver both late answers through the same publication guard.
+        // might already be queued; deliver a late answer through the same publication guard.
         manager.publishMetadataForTesting(["stale-tts-model"], for: .models, token: staleModelToken)
-        manager.publishMetadataForTesting(["alloy"], for: .voices, token: staleVoiceToken)
         releaseModelRequest.signal()
         wait(for: [modelRequestReleased], timeout: 2.0)
 
-        // Each stale token completes twice: models through the synthetic publication and the
-        // cancelled task's own completion, voices through the synthetic publication and the
-        // catalog's own queued one. All four must have been refused before the lists are read.
-        waitForCompletions(in: completions, count: 2, "Both late OpenAI model completions were refused") {
+        // The stale token completes twice: through the synthetic publication and through the
+        // cancelled task's own completion. Both must have been refused before the lists are read.
+        waitForCompletions(in: completions, count: 2, "Both late Custom model completions were refused") {
             $0.kind == .models && $0.token == staleModelToken && $0.outcome == .superseded
-        }
-        waitForCompletions(in: completions, count: 2, "Both late OpenAI voice completions were refused") {
-            $0.kind == .voices && $0.token == staleVoiceToken && $0.outcome == .superseded
         }
         XCTAssertEqual(manager.modelSuggestions, .unpublished)
         XCTAssertEqual(manager.voiceSuggestions, .unpublished)
@@ -191,10 +182,10 @@ final class TTSNetworkManagerMetadataSourceTests: MetadataTestCase {
         let endpoint = "https://api.openai.com/v1/audio/speech"
         manager.updateSettings(
             baseURL: endpoint,
-            apiKey: "openai-key",
+            apiKey: "custom-key",
             model: "tts-1",
             voice: "alloy",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
 
         let scopeChangeObserved = expectation(description: "Reentrant scope change observed")
@@ -214,7 +205,7 @@ final class TTSNetworkManagerMetadataSourceTests: MetadataTestCase {
         MockURLProtocol.installRequestHandler { request in
             sourceTestResponse(for: request, json: "{ \"data\": [{\"id\": \"stale-tts-model\"}] }")
         }
-        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "openai-key", selectedProvider: "OpenAI")
+        manager.fetchAvailableModels(baseURL: endpoint, apiKey: "custom-key", selectedProvider: "Custom")
         wait(for: [scopeChangeObserved], timeout: 1.0)
 
         let staleMetadataCleared = expectation(description: "Stale metadata cleared after publication")

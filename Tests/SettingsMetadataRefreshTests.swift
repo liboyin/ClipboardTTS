@@ -84,19 +84,16 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
     func testEachSettingsEditRefreshesOnlyTheSuggestionListsThatDependOnIt() throws {
         // WHY: Model discovery is a provider request authorized with the user's key, and it depends
         // only on the provider, endpoint, and key. Refreshing it on every model or voice keystroke
-        // spent a request per character on a list the edit could not change. The OpenAI voice
-        // catalog does depend on the model, so a model edit must still republish it, after the edit
-        // reaches the manager the catalog reads. A key edit must still rediscover models.
-        // Each edit is also checked against what the manager will send, because refreshing nothing
-        // is not the same as applying nothing.
+        // spent a request per character on a list the edit could not change, and no voice catalog
+        // depends on the model either, so neither edit may refresh anything. A key edit must still
+        // refresh both lists. Each edit is also checked against what the manager will send, because
+        // refreshing nothing is not the same as applying nothing. OpenAI's lists need no request, so
+        // no handler is installed and one sent would fail this scope's accounting.
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-openai-key", for: .openAI)
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        MockURLProtocol.installRequestHandler { request in
-            metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}, {\"id\": \"gpt-4o-mini-tts\"}] }")
-        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,
@@ -106,41 +103,26 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         )
         var begun = metadataRequestsBegun(by: networkManager)
 
-        settings.type("nova", into: .providerVoice, expecting: "alloy")
+        settings.type("marin", into: .providerVoice, expecting: "alloy")
         XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the voice.")
-        XCTAssertEqual(networkManager.requestSettingsSnapshot().voice, "nova")
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().voice, "marin")
         begun = metadataRequestsBegun(by: networkManager)
 
-        settings.type("gpt-4o-mini-tts", into: .providerModel, expecting: "tts-1")
-        XCTAssertEqual(
-            metadataRequestsBegun(by: networkManager) - begun,
-            1,
-            "A model edit must republish the voice catalog alone, without rediscovering models."
-        )
-        XCTAssertEqual(networkManager.requestSettingsSnapshot().model, "gpt-4o-mini-tts")
-        XCTAssertEqual(
-            networkManager.voiceSuggestions,
-            ProviderSuggestions(provider: .openAI, values: currentOpenAIVoices),
-            "The republished catalog must be the one the edited model offers."
-        )
+        settings.type("gpt-realtime-2.1", into: .providerModel, expecting: "gpt-realtime-2.1-mini")
+        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the model.")
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().model, "gpt-realtime-2.1")
         begun = metadataRequestsBegun(by: networkManager)
 
         settings.typeAPIKey("replacement-openai-key")
         XCTAssertEqual(
             metadataRequestsBegun(by: networkManager) - begun,
             2,
-            "A key edit must rediscover models and republish the voice catalog."
+            "A key edit must refresh the model list and republish the voice catalog."
         )
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "replacement-openai-key")
         settings.release()
     }
 }
-
-/// The OpenAI voices every model other than `tts-1` and `tts-1-hd` offers, as the manager lists them.
-private let currentOpenAIVoices = [
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage",
-    "shimmer", "verse", "marin", "cedar"
-]
 
 /// Returns how many model and voice metadata requests the manager has begun so far.
 ///

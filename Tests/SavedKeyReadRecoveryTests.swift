@@ -272,23 +272,17 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testRecoveringTheSelectedKeyRediscoversModelsWithIt() {
-        // WHY: Opening Settings discovered models without the key it could not read, so the
-        // suggestions stay empty until discovery runs again. Recovering the key changes it just as
-        // typing one does, and typing one rediscovers. The voice catalog does not follow a key.
+    func testRecoveringTheSelectedKeyRefreshesModelsWithIt() {
+        // WHY: Opening Settings refreshed models without the key it could not read. Recovering the
+        // key changes it just as typing one does, and typing one refreshes the model list, so a
+        // provider whose list depends on the key gets one built with it. The voice catalog does not
+        // follow a key. OpenAI's list needs no request, so no handler is installed and one sent
+        // would fail this scope's accounting.
         let defaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-saved-openai-key", for: .openAI)
         secretStore.failingProviders = [.openAI]
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        let rediscovered = expectation(description: "Model discovery carries the recovered key")
-        MockURLProtocol.installRequestHandler { request in
-            if request.value(forHTTPHeaderField: "Authorization") == "Bearer test-saved-openai-key" {
-                XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/models")
-                rediscovered.fulfill()
-            }
-            return metadataResponse(for: request, json: "{ \"data\": [{\"id\": \"tts-1\"}] }")
-        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: makeOwnedAudioPlayer(),
@@ -301,9 +295,8 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         secretStore.failingProviders = []
         settings.click(retryTitle)
 
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 1, "Only model discovery follows the key.")
+        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 1, "Only the model list follows the key.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "test-saved-openai-key")
-        wait(for: [rediscovered], timeout: 2.0)
         settings.release()
     }
 

@@ -41,7 +41,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         let requestStarted = expectation(description: "Request started before queuing audio")
         let responseReleased = expectation(description: "Mock response was released")
@@ -189,7 +189,7 @@ final class MockURLProtocolAudioScopeTests: XCTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         let requestStarted = expectation(description: "Request started before queuing audio")
         MockURLProtocol.installRequestHandler { request in

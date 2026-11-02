@@ -9,7 +9,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
 
         let manager = TestNetworkFactory.makeManager()
 
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "secret_token", model: "tts-test", voice: "test-voice", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "secret_token", model: "tts-test", voice: "test-voice", selectedProvider: "Custom")
 
         let expectation = XCTestExpectation(description: "Wait for request to be formed")
 
@@ -122,7 +122,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // sends data, the network manager relays it to the completion handler properly.
 
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let expectation = XCTestExpectation(description: "Wait for data chunk")
 
@@ -144,7 +144,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // to save bandwidth and instantly transition the state.
 
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let requestStarted = XCTestExpectation(description: "Mock request started")
         let requestFinished = XCTestExpectation(description: "Mock request finished")
@@ -183,7 +183,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         // active one, because URLSession suppresses callbacks for a cancelled task, so the real
         // network path can never exercise the stale-callback guard.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let dataReceived = LockedValue(false)
         let requestStarted = XCTestExpectation(description: "Mock request started")
@@ -268,7 +268,7 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
     func testNetworkManagerHandlesAPIError() {
         let manager = TestNetworkFactory.makeManager()
 
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let expectation = XCTestExpectation(description: "Wait for error completion")
 
@@ -287,16 +287,35 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
-    func testNetworkManagerInitReadsProviderSpecificDefaults() {
+    func testAManagerBuiltOverRetiredSpeechSettingsSpeaksWithTheRealtimeDefaults() throws {
+        // WHY: The rewrite has to run before construction reads the settings, and has to persist, or
+        // the first launch after the update would still request a speech model the Realtime API
+        // rejects, and Settings would show it as configured.
+        let defaults = makeOwnedDefaults([SettingsKeys.openAIModel: "tts-1", SettingsKeys.openAIVoice: "nova"])
+        let connections = ScriptedRealtimeConnections()
+        let manager = TestNetworkFactory.makeManager(defaults: defaults, realtimeConnections: connections)
+
+        manager.streamTTS(text: "test") { _ in }
+
+        let connection = try XCTUnwrap(connections.all.first)
+        addTeardownBlock { connection.cancel(); connection.drain() }
+        XCTAssertEqual(connection.request.url?.query, "model=gpt-realtime-2.1-mini")
+        let session = connection.sentEvents.first?["session"] as? [String: Any]
+        let output = (session?["audio"] as? [String: Any])?["output"] as? [String: Any]
+        XCTAssertEqual(output?["voice"] as? String, "alloy")
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIModel), "gpt-realtime-2.1-mini")
+        XCTAssertEqual(defaults.string(forKey: SettingsKeys.openAIVoice), "alloy")
+    }
+
+    func testNetworkManagerInitReadsProviderSpecificDefaults() throws {
         // WHY: SettingsView persists model/voice under provider-specific UserDefaults keys
         // (openaiModel/openaiVoice, geminiModel/geminiVoice). The manager's init must read the
         // same keys so user-chosen settings survive an app restart even before the settings
         // window is opened. A regression here would silently fall back to hardcoded defaults
-        // (tts-1/alloy) on every cold start until the user re-opens settings.
-        // OpenAI: persisted model/voice/key should drive the outgoing request. Each provider gets
+        // (gpt-realtime-2.1-mini/alloy) on every cold start until the user re-opens settings.
+        // OpenAI: persisted model/voice/key should drive the Realtime connection. Each provider gets
         // its own store because each manager reads its settings once, when it is constructed.
         let openaiDefaults = makeOwnedDefaults([
-            SettingsKeys.ttsProvider: "OpenAI",
             SettingsKeys.openAIModel: "persisted-openai-model",
             SettingsKeys.openAIVoice: "persisted-openai-voice",
             SettingsKeys.legacyOpenAIAPIKey: "persisted-openai-key"
@@ -308,39 +327,16 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
             SettingsKeys.legacyGeminiAPIKey: "persisted-gemini-key"
         ])
 
-        let openaiManager = TestNetworkFactory.makeManager(defaults: openaiDefaults)
-        let openaiExpectation = XCTestExpectation(description: "OpenAI request uses persisted values")
-
-        MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer persisted-openai-key")
-
-            var extractedData: Data? = request.httpBody
-            if extractedData == nil, let stream = request.httpBodyStream {
-                stream.open()
-                var buffer = [UInt8](repeating: 0, count: 1024)
-                var data = Data()
-                while stream.hasBytesAvailable {
-                    let bytesRead = stream.read(&buffer, maxLength: 1024)
-                    if bytesRead > 0 { data.append(buffer, count: bytesRead) } else { break }
-                }
-                stream.close()
-                extractedData = data
-            }
-
-            if let bodyData = extractedData,
-               let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
-                XCTAssertEqual(json["model"] as? String, "persisted-openai-model")
-                XCTAssertEqual(json["voice"] as? String, "persisted-openai-voice")
-            } else {
-                XCTFail("OpenAI request body missing")
-            }
-
-            openaiExpectation.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
-        }
-
+        let connections = ScriptedRealtimeConnections()
+        let openaiManager = TestNetworkFactory.makeManager(defaults: openaiDefaults, realtimeConnections: connections)
         openaiManager.streamTTS(text: "test") { _ in }
-        wait(for: [openaiExpectation], timeout: 2.0)
+        let connection = try XCTUnwrap(connections.all.first)
+        addTeardownBlock { connection.cancel(); connection.drain() }
+        XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer persisted-openai-key")
+        XCTAssertEqual(connection.request.url?.query, "model=persisted-openai-model")
+        let session = connection.sentEvents.first?["session"] as? [String: Any]
+        let output = (session?["audio"] as? [String: Any])?["output"] as? [String: Any]
+        XCTAssertEqual(output?["voice"] as? String, "persisted-openai-voice")
 
         // Gemini: persisted model embeds in URL path, voice embeds in request body.
 

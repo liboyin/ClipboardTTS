@@ -9,7 +9,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // message before URLSession can start a request.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
 
         manager.streamTTS(text: "Test invalid endpoint") { _ in
             XCTFail("An invalid endpoint must not produce audio.")
@@ -25,7 +25,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         let manager = TestNetworkFactory.makeManager { _ in
             throw TestRequestEncodingError.failed
         }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         manager.streamTTS(text: "Test encoding failure") { _ in
             XCTFail("An unencoded request must not produce audio.")
@@ -40,7 +40,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // copy, never server-provided text that could contain the configured key.
         let manager = TestNetworkFactory.makeManager()
         let serverSecret = "customcredential123456"
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: serverSecret, model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: serverSecret, model: "test", voice: "test", selectedProvider: "Custom")
 
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil)!
@@ -62,7 +62,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // WHY: Authentication failure is actionable differently from a generic API rejection;
         // the user must know to check the configured key rather than their network connection.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
@@ -86,7 +86,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // WHY: Heuristic redaction cannot safely recognize every credential-bearing URL. HTTP
         // errors therefore use application-owned copy regardless of a provider response body.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
         let body = "https://user:opaquecredential@example.test/v1/audio/speech"
 
         MockURLProtocol.installRequestHandler { request in
@@ -108,7 +108,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // WHY: A transport failure has no provider HTTP status, so it needs distinct guidance
         // instead of being mistaken for a rejected API request.
         let manager = TestNetworkFactory.makeManager()
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         MockURLProtocol.installRequestHandler { _ in
             throw URLError(.notConnectedToInternet)
@@ -180,10 +180,10 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
     }
 
     func testOpenAICompatibleResponsesWithoutACompletePCMFramePublishProviderAudioError() {
-        // WHY: OpenAI and Custom both request 16-bit PCM, so an empty response or one byte must
+        // WHY: Every OpenAI-compatible request asks for 16-bit PCM, so an empty response or one byte must
         // report the same failure instead of silently completing without playback or guidance.
         let providers = [
-            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI"),
+            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "Custom"),
             (baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom")
         ]
         for provider in providers {
@@ -216,11 +216,11 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // menu bar would claim the current request failed while its audio is actually playing.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
         manager.streamTTS(text: "Create failure") { _ in }
         XCTAssertNotNil(manager.lastError)
 
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
         let audioDelivered = expectation(description: "Successful retry delivers audio")
         MockURLProtocol.installRequestHandler { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
@@ -245,7 +245,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // started, an older queued clear must not erase the newer request's failure message.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
         manager.streamTTS(text: "First invalid attempt") { _ in }
         manager.streamTTS(text: "Second invalid attempt") { _ in }
 
@@ -261,7 +261,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         // request during a stale failure must run after that failure's state mutation completes.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
         manager.streamTTS(text: "Create generation one") { _ in }
 
         let replacementStarted = expectation(description: "Reentrant replacement starts")
@@ -277,7 +277,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
         let observation = manager.objectWillChange.sink {
             guard !didRequestReplacement else { return }
             didRequestReplacement = true
-            manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+            manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
             manager.streamTTS(text: "Generation two") { _ in }
         }
         defer { observation.cancel() }
@@ -311,9 +311,9 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
 
         DispatchQueue.global(qos: .userInitiated).async {
             manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                                   model: "test", voice: "test", selectedProvider: "OpenAI")
+                                   model: "test", voice: "test", selectedProvider: "Custom")
             manager.streamTTS(text: "Invalid attempt") { _ in }
-            manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+            manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
             manager.streamTTS(text: "Valid replacement") { _ in }
             attemptsSubmitted.fulfill()
         }
@@ -350,7 +350,7 @@ final class TTSNetworkManagerFailureTests: MockURLProtocolTestCase {
             }
             return body
         }
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "OpenAI")
+        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key", model: "test", voice: "test", selectedProvider: "Custom")
 
         MockURLProtocol.installRequestHandler { request in
             secondRequestStarted.fulfill()

@@ -5,8 +5,8 @@ import Network
 /// a redirect target is still the origin that was given them.
 ///
 /// Application Transport Security is a platform layer this app neither configures nor controls, so
-/// the rule below is the app's own contract: a request leaves the process only over HTTPS, or over
-/// plain HTTP to a loopback literal. Loopback is the one case where the traffic never reaches a
+/// the rule below is the app's own contract: a request leaves the process only over HTTPS or secure
+/// WebSocket, or over plain HTTP to a loopback literal. Loopback is the one case where the traffic never reaches a
 /// network, which is why a local engine that cannot present a certificate stays usable. Transport
 /// protects that traffic in flight and says nothing about who receives it, which is what the origin
 /// rule below decides.
@@ -17,7 +17,7 @@ enum EndpointTransportPolicy {
         // endpoint that only *decodes* to a loopback name is refused rather than trusted.
         guard let host = url.host(percentEncoded: true), !host.isEmpty else { return false }
         switch url.scheme?.lowercased() {
-        case "https":
+        case "https", "wss":
             return true
         case "http":
             return isLoopbackLiteral(host)

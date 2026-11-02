@@ -8,7 +8,7 @@ struct SettingsView: View {
     private enum Fallback {
         static let ttsProvider = "OpenAI"
         static let apiBaseURL = "https://api.openai.com/v1/audio/speech"
-        static let openAIModel = "tts-1"
+        static let openAIModel = "gpt-realtime-2.1-mini"
         static let openAIVoice = "alloy"
         static let geminiModel = "gemini-3.8-flash-lite-tts"
         static let geminiVoice = "Aoede"
@@ -81,7 +81,7 @@ struct SettingsView: View {
     private var currentBaseURL: String {
         switch selectedProvider {
         case .openAI:
-            return "https://api.openai.com/v1/audio/speech"
+            return OpenAIRealtimeSpeech.endpoint
         case .gemini:
             return "https://generativelanguage.googleapis.com/v1beta"
         case .custom:
@@ -173,7 +173,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
+                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
 
             testVoiceButton
         }
@@ -189,7 +189,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
+                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
 
             testVoiceButton
         }
@@ -209,7 +209,7 @@ struct SettingsView: View {
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
                                         networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelChange, onVoiceChange: applyVoiceChange)
+                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
 
             Section(header: Text("Audio Format").font(.headline)) {
                 TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)
@@ -303,8 +303,8 @@ struct SettingsView: View {
     }
 
     /// Applies the form to future requests, then refreshes the lists the edit can alter: discovered
-    /// models follow only the provider, endpoint, and key, and the voice catalog also follows the
-    /// OpenAI model the manager now holds. A Custom endpoint has no discovery contract.
+    /// models follow only the provider, endpoint, and key, and the voice catalog only the provider.
+    /// A Custom endpoint has no discovery contract.
     func syncSettings(discoveringModels: Bool = true, refreshingVoices: Bool = true) {
         normalizeSelectedProvider()
         applyCredentialsToFutureRequests()
@@ -316,8 +316,8 @@ struct SettingsView: View {
         if refreshingVoices { networkManager.fetchAvailableVoices(baseURL: baseURL, selectedProvider: provider) }
     }
 
-    func applyModelChange() { syncSettings(discoveringModels: false) }
-    func applyVoiceChange() { syncSettings(discoveringModels: false, refreshingVoices: false) }
+    /// Applies a model or voice edit, which changes neither suggestion list.
+    func applyModelOrVoiceChange() { syncSettings(discoveringModels: false, refreshingVoices: false) }
 
     /// Hands the form's current provider configuration to requests that start after this call.
     private func applyCredentialsToFutureRequests() {

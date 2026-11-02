@@ -149,7 +149,7 @@ extension MockURLProtocolTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         return OwnedSpeechSession(
             heldAutomaticPlayback: heldAutomaticPlayback,

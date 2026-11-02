@@ -71,24 +71,21 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         let otherDefaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         let audioPlayer = makeOwnedAudioPlayer()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: otherDefaults)
+        let requestEmitted = expectation(description: "The injected domain's key reaches the next request")
+        let connections = ScriptedRealtimeConnections { connection in
+            XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-injected-legacy-key")
+            requestEmitted.fulfill()
+        }
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let networkManager = TestNetworkFactory.makeManager(
+            secretStore: secretStore, defaults: otherDefaults, realtimeConnections: connections
+        )
         // Each domain holds a different provider's key, so a form that read the wrong one would
         // both rescue the wrong secret and leave the one it was given behind. Both are seeded after
         // the manager is built, because a manager migrates its own store as it starts up.
         injectedDefaults.set("test-injected-legacy-key", forKey: SettingsKeys.legacyOpenAIAPIKey)
         otherDefaults.set("test-other-domain-legacy-key", forKey: SettingsKeys.legacyCustomAPIKey)
 
-        let requestEmitted = expectation(description: "The injected domain's key reaches the next request")
-        MockURLProtocol.installRequestHandler { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            // Opening Settings on OpenAI also fetches its model and voice suggestions.
-            guard request.url?.absoluteString == "https://api.openai.com/v1/audio/speech" else {
-                return (response, Data("{ \"data\": [] }".utf8))
-            }
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-injected-legacy-key")
-            requestEmitted.fulfill()
-            return (response, Data([0, 1]))
-        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,
@@ -130,20 +127,16 @@ final class SettingsMigrationRecoveryTests: MockURLProtocolTestCase {
         secretStore.seed("test-newer-keychain-key", for: .openAI)
         secretStore.failingProviders = [.openAI]
         let audioPlayer = makeOwnedAudioPlayer()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        secretStore.failingProviders = []
-
         let requestEmitted = expectation(description: "Test Voice still uses the newer saved key")
-        MockURLProtocol.installRequestHandler { request in
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            // Opening Settings on OpenAI also fetches its model and voice suggestions.
-            guard request.url?.absoluteString == "https://api.openai.com/v1/audio/speech" else {
-                return (response, Data("{ \"data\": [] }".utf8))
-            }
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-newer-keychain-key")
+        let connections = ScriptedRealtimeConnections { connection in
+            XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-newer-keychain-key")
             requestEmitted.fulfill()
-            return (response, Data([0, 1]))
         }
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let networkManager = TestNetworkFactory.makeManager(
+            secretStore: secretStore, defaults: defaults, realtimeConnections: connections
+        )
+        secretStore.failingProviders = []
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,

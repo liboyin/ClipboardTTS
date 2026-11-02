@@ -25,7 +25,7 @@ final class TTSNetworkManagerSessionPolicyTests: MockURLProtocolTestCase {
             apiKey: "test-key",
             model: "test-model",
             voice: "test-voice",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         manager.streamTTS(text: "Test session policy") { _ in }
 

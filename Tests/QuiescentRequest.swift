@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import ClipboardTTSApp
 
 /// What `sendOneRoutedRequestLeavingNoCompletion` accepts as a routed configuration, and the
 /// observation points its own tests use.
@@ -92,5 +93,42 @@ extension XCTestCase {
                 return state.error
             }
         }
+    }
+}
+
+extension XCTestCase {
+    /// Opens one WebSocket through a manager's own Realtime connection factory and asserts the
+    /// refusing protocol failed it.
+    ///
+    /// OpenAI speech runs on a WebSocket task, which the graph's routing must refuse as it refuses a
+    /// data task. The loopback address, with no listener expected, keeps the attempt on the machine
+    /// even if that routing were lost, failing then with `cannotConnectToHost` rather than the
+    /// refusal's `cannotLoadFromNetwork`. Only the code is compared: a WebSocket task reports the
+    /// refusing protocol's error code but not its description (observed on macOS 26.7.1). The receive
+    /// completes before this returns, and the connection is cancelled, so nothing is left able to
+    /// write the outcome.
+    func assertRefusesLoopbackWebSocketLocally(_ manager: TTSNetworkManager,
+                                               graph: String,
+                                               file: StaticString = #filePath,
+                                               line: UInt = #line) {
+        let connection = manager.realtimeConnectionFactory(
+            manager.session, URLRequest(url: URL(string: "ws://127.0.0.1:9/v1/realtime")!)
+        )
+        let outcome = LockedValue<NSError?>(nil)
+        let received = expectation(description: "The \(graph) graph's WebSocket receive completed")
+        connection.resume()
+        connection.receive { result in
+            if case .failure(let error) = result {
+                outcome.withValue { $0 = error as NSError }
+            }
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 2.0)
+        connection.cancel()
+
+        XCTAssertEqual(
+            outcome.value?.code, URLError.Code.cannotLoadFromNetwork.rawValue,
+            "The \(graph) graph's WebSocket must be failed locally by the refusing protocol.", file: file, line: line
+        )
     }
 }

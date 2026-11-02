@@ -1,12 +1,20 @@
 import Foundation
 
 extension TTSNetworkManager {
-    /// The single owner of the message shown when Gemini reports that it stopped before finishing.
+    /// The single owner of the message shown when Gemini or OpenAI reports that it stopped before
+    /// finishing.
     ///
     /// It names the early stop rather than reusing the no-playable-audio text, because this outcome
     /// leaves already delivered PCM playable and the user can hear the speech it describes.
-    static let truncatedGeminiResponseFailure =
+    static let truncatedResponseFailure =
         "The TTS service stopped early. The speech that arrived is incomplete. Please try again."
+
+    /// The single owner of the message shown when a request ends without a playable PCM frame, or
+    /// with a provider stream the app cannot read.
+    static let noPlayableAudioFailure = "The TTS service returned no playable audio. Please try again."
+
+    /// The single owner of the message shown when the connection itself failed.
+    static let unreachableServiceFailure = "Couldn't reach the TTS service. Check your connection and try again."
 
     /// The single owner of the message shown when a success response declared a body that is not audio.
     ///
@@ -147,7 +155,7 @@ extension TTSNetworkManager {
     /// definite reason this request delivered nothing, where a transport error that arrived
     /// afterwards only says the body the app had already decided to discard stopped arriving.
     private func userFacingFailure(for result: TaskCompletionResult, error: Error?) -> String? {
-        let noPlayableAudio = "The TTS service returned no playable audio. Please try again."
+        let noPlayableAudio = Self.noPlayableAudioFailure
         if let refusedRedirect = result.refusedRedirect {
             return refusedRedirect.failureMessage
         } else if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
@@ -157,15 +165,14 @@ extension TTSNetworkManager {
         } else if result.provider == .gemini && result.hasGeminiStreamFailure {
             return noPlayableAudio
         } else if error != nil {
-            return "Couldn't reach the TTS service. Check your connection and try again."
+            return Self.unreachableServiceFailure
         } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
             return noPlayableAudio
         } else if result.provider == .gemini && declaresProviderTruncation(result.geminiDeclaredFinishReason) {
-            return Self.truncatedGeminiResponseFailure
+            return Self.truncatedResponseFailure
         } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
             return noPlayableAudio
-        } else if (result.provider == .openAI || result.provider == .custom)
-                    && !containsCompletePCMFrame(result.providerAudioByteCount) {
+        } else if result.provider == .custom && !containsCompletePCMFrame(result.providerAudioByteCount) {
             return noPlayableAudio
         }
         return nil
@@ -175,7 +182,7 @@ extension TTSNetworkManager {
     ///
     /// A response may end halfway through its next frame. The player retains only complete frames,
     /// so that final byte must not turn otherwise playable audio into a no-audio failure.
-    private func containsCompletePCMFrame(_ byteCount: Int) -> Bool {
+    func containsCompletePCMFrame(_ byteCount: Int) -> Bool {
         byteCount >= 2
     }
 

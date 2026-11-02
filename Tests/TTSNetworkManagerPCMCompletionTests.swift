@@ -27,10 +27,10 @@ final class TTSNetworkManagerPCMCompletionTests: MockURLProtocolTestCase {
     }
 
     func testOpenAICompatibleResponsesKeepACompleteFrameBeforeTrailingPartialBytes() {
-        // WHY: OpenAI and Custom both request 16-bit PCM. They must keep a frame when a final byte
+        // WHY: Every OpenAI-compatible request asks for 16-bit PCM. A response must keep a frame when a final byte
         // cannot form the next one; requiring total parity loses audible PCM the player accepts.
         let providers = [
-            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI"),
+            (baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "Custom"),
             (baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom")
         ]
         let cases = [Data([0, 1]), Data([0, 1, 2])]

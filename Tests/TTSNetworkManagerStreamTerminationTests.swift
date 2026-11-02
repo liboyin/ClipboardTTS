@@ -10,7 +10,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // "the stream ended" before the last chunk it was sent would treat delivered speech as
         // audio that never arrived. Holding the PCM handler open across the completion callback is
         // what distinguishes a genuinely ordered handoff from one that merely usually wins the race.
-        let manager = makeOpenAIManager()
+        let manager = makeRawPCMManager()
         let events = SessionEventLog()
         let audioDelivered = expectation(description: "The request's PCM reaches its client")
         audioDelivered.assertForOverFulfill = false
@@ -54,7 +54,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // WHY: The session has to be able to tell speech that finished from speech that stopped
         // because the request broke. Publishing the failure to the menu bar alone leaves the client
         // holding a stream it cannot classify, which is the distinction underrun recovery turns on.
-        let manager = makeOpenAIManager()
+        let manager = makeRawPCMManager()
         let events = SessionEventLog()
         let terminated = expectation(description: "The failed request terminates its session")
 
@@ -94,7 +94,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // arrives afterwards must find nothing to report. The stop releases the active request, so
         // this is the staleness check rather than the delivery queue's generation guard; the test
         // below covers the guard, and both have to hold for a cancelled session to stay silent.
-        let manager = makeOpenAIManager()
+        let manager = makeRawPCMManager()
         let events = SessionEventLog()
         let client = SpeechStreamClient(
             didReceiveAudio: { data in events.record(.audio(data)) },
@@ -117,7 +117,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // synchronously, which advances the generation from inside the delivery queue itself —
         // after the completion callback queued this request's ending, and before that ending can
         // run. Nothing may be told the request ended, because its session is already gone.
-        let manager = makeOpenAIManager()
+        let manager = makeRawPCMManager()
         let events = SessionEventLog()
         let audioDelivered = expectation(description: "The request's PCM reaches its client")
         audioDelivered.assertForOverFulfill = false
@@ -155,7 +155,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // WHY: URLSession is not the only caller: a refused redirect, a revoked Gemini stream, and
         // the delegate itself can all reach completion for one task. The client's contract is one
         // terminal event per session, so a second completion must find nothing left to report.
-        let manager = makeOpenAIManager()
+        let manager = makeRawPCMManager()
         let events = SessionEventLog()
         let terminated = expectation(description: "The request terminates its session")
 
@@ -246,7 +246,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
         // generation check alone cannot provide this: it decides whether a callback runs, not
         // whether cancellation may return before one that already started has finished.
         let authority = WaitObservingCallbackAuthority()
-        let manager = makeOpenAIManager(callbackAuthority: authority)
+        let manager = makeRawPCMManager(callbackAuthority: authority)
         let events = SessionEventLog()
         let terminationStarted = expectation(description: "The terminal callback has begun")
         terminationStarted.assertForOverFulfill = false
@@ -293,7 +293,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
 
     // MARK: - Support
 
-    private func makeOpenAIManager(
+    private func makeRawPCMManager(
         callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority()
     ) -> TTSNetworkManager {
         let manager = TestNetworkFactory.makeManager(callbackAuthority: callbackAuthority)
@@ -302,7 +302,7 @@ final class TTSNetworkManagerStreamTerminationTests: MockURLProtocolTestCase {
             apiKey: "test",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         return manager
     }

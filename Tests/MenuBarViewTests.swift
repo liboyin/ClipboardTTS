@@ -112,7 +112,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         let audioPlayer = makeOwnedAudioPlayer()
         let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader(text: "Speak me"))
         let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "OpenAI")
+        networkManager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
         let requestStarted = expectation(description: "Clipboard text starts a TTS request")
         MockURLProtocol.installRequestHandler { request in
             requestStarted.fulfill()
@@ -140,7 +140,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             apiKey: "fake-key",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         networkManager.streamTTS(text: "Create an error before clearing") { _ in }
         XCTAssertNotNil(networkManager.lastError)
@@ -181,7 +181,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
             apiKey: "fake-key",
             model: "test",
             voice: "test",
-            selectedProvider: "OpenAI"
+            selectedProvider: "Custom"
         )
         networkManager.streamTTS(text: "Show error") { _ in }
 

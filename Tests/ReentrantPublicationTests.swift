@@ -18,7 +18,7 @@ final class ReentrantPublicationTests: MockURLProtocolTestCase {
         // then stored over it, leaving the menu reporting a request that no longer exists.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
         let releaseResponse = DispatchSemaphore(value: 0)
         MockURLProtocol.installRequestHandler { request in
             _ = releaseResponse.wait(timeout: .now() + 1.0)
@@ -66,7 +66,7 @@ final class ReentrantPublicationTests: MockURLProtocolTestCase {
         let failure = "TTS configuration is invalid. Check the API endpoint and try again."
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "not a valid endpoint", apiKey: "fake-key",
-                               model: "test", voice: "test", selectedProvider: "OpenAI")
+                               model: "test", voice: "test", selectedProvider: "Custom")
         var storedErrorWhenClearIsAnnounced: [String?] = []
         var didStop = false
         let errors = manager.$lastError.dropFirst().sink { error in

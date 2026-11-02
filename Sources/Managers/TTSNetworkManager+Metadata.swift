@@ -258,16 +258,13 @@ extension TTSNetworkManager {
     /// endpoint documents nothing, which is why `SettingsView.syncSettings` does not ask for one.
     /// The catalog still travels the guarded token path, because publication is asynchronous and a
     /// provider or endpoint the user changes in that window must invalidate it.
-    ///
-    /// The configured model is read for every provider, because which catalogs depend on it is the
-    /// catalog's own contract rather than this caller's; only OpenAI's answer uses it.
     func fetchAvailableVoices(baseURL: String, selectedProvider: String) {
         let source = MetadataSource(
             baseURL: baseURL,
             provider: APIKeyProvider(selectedProvider: selectedProvider)
         )
         guard let token = beginMetadataRequest(for: .voices, source: source) else { return }
-        guard let voices = ProviderMetadataCatalog.voices(for: source.provider, model: currentModel()) else {
+        guard let voices = ProviderMetadataCatalog.voices(for: source.provider) else {
             finishMetadataRequest(for: .voices, token: token)
             return
         }

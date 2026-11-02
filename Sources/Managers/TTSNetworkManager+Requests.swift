@@ -1,7 +1,7 @@
 import Foundation
 
 extension TTSNetworkManager {
-    /// The required payload accepted by OpenAI-compatible speech endpoints.
+    /// The required payload accepted by OpenAI-compatible speech endpoints, which Custom speaks.
     private struct OpenAICompatibleSpeechRequest: Encodable {
         let model: String
         let input: String
@@ -42,7 +42,8 @@ extension TTSNetworkManager {
     /// back from the request that authorized it, so a credential introduced at a request-building
     /// call site has to be named here too or a redirect would silently drop it.
     enum CredentialHeaderField {
-        /// The bearer field OpenAI-compatible speech and model discovery authenticate with.
+        /// The bearer field OpenAI's Realtime handshake, OpenAI-compatible speech, and model
+        /// discovery authenticate with.
         static let authorization = "Authorization"
         /// The field Gemini's own endpoint authenticates with.
         static let googleAPIKey = "x-goog-api-key"
@@ -53,15 +54,28 @@ extension TTSNetworkManager {
     /// Builds a valid provider endpoint from a settings snapshot, refusing unprotected transport.
     ///
     /// Every speech request resolves its endpoint here, so the transport rule cannot be skipped by
-    /// a provider whose base URL is configurable. The fixed OpenAI and Gemini endpoints are HTTPS
-    /// and pass unchanged.
+    /// a provider whose base URL is configurable. The fixed OpenAI and Gemini endpoints are secure
+    /// and pass unchanged. OpenAI always connects to its one Realtime endpoint, whatever base URL a
+    /// caller supplied, so no provider identity a direct caller passes can send the OpenAI key
+    /// elsewhere. Only OpenAI connects over WebSocket, so a WebSocket scheme is malformed for the
+    /// providers that speak HTTP.
     func requestEndpoint(for settings: RequestSettings) -> RequestEndpoint {
-        let urlString = settings.provider == .gemini
-            ? "\(settings.baseURL)/models/\(settings.model):streamGenerateContent?alt=sse"
-            : settings.baseURL
-        guard let url = URL(string: urlString),
+        let url: URL?
+        let schemes: Set<String>
+        switch settings.provider {
+        case .openAI:
+            url = OpenAIRealtimeSpeech.url(model: settings.model)
+            schemes = ["wss"]
+        case .gemini:
+            url = URL(string: "\(settings.baseURL)/models/\(settings.model):streamGenerateContent?alt=sse")
+            schemes = ["http", "https"]
+        case .custom:
+            url = URL(string: settings.baseURL)
+            schemes = ["http", "https"]
+        }
+        guard let url,
               let scheme = url.scheme,
-              ["http", "https"].contains(scheme.lowercased()),
+              schemes.contains(scheme.lowercased()),
               url.host != nil else {
             return .malformed
         }

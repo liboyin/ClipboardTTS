@@ -10,6 +10,23 @@ import Foundation
 /// the retry continues that same request, so it inherits the generation and captured request
 /// instead of claiming new ones.
 extension TTSNetworkManager {
+    /// The connection one request attempt owns: an HTTP data task, or a Realtime WebSocket.
+    enum RequestTransport {
+        case http(URLSessionDataTask)
+        case realtime(RealtimeSpeechConnection)
+
+        /// Ends the attempt. A callback it already queued is refused by the ownership check its
+        /// handler makes, not by this call.
+        func cancel() {
+            switch self {
+            case .http(let task):
+                task.cancel()
+            case .realtime(let connection):
+                connection.cancel()
+            }
+        }
+    }
+
     /// The inputs a finished attempt hands to the one automatic retry it is allowed.
     ///
     /// It carries the request that was actually sent rather than a way to rebuild one, so the retry
@@ -23,20 +40,28 @@ extension TTSNetworkManager {
         let client: SpeechStreamClient
     }
 
-    private func replaceActiveRequest(with task: URLSessionDataTask,
-                                      request: URLRequest,
-                                      provider: APIKeyProvider,
-                                      requestGeneration: UInt64,
-                                      client: SpeechStreamClient,
-                                      isRetryAttempt: Bool = false) -> Bool {
+    /// Installs `transport` as the attempt that owns the pipeline, unless `requestGeneration` was
+    /// superseded first, and reports whether it did.
+    func replaceActiveRequest(with transport: RequestTransport,
+                              request: URLRequest,
+                              provider: APIKeyProvider,
+                              requestGeneration: UInt64,
+                              client: SpeechStreamClient,
+                              isRetryAttempt: Bool = false) -> Bool {
         stateQueue.sync {
             // Swap all task-owned state together so a previous task cannot deliver its data to
             // the new handler in the window between cancellation and context replacement.
             guard self.requestGeneration == requestGeneration else { return false }
-            activeRequest?.task.cancel()
+            activeRequest?.transport.cancel()
+            let taskIdentifier: Int?
+            if case .http(let task) = transport {
+                taskIdentifier = task.taskIdentifier
+            } else {
+                taskIdentifier = nil
+            }
             activeRequest = ActiveRequestContext(
-                task: task,
-                taskIdentifier: task.taskIdentifier,
+                transport: transport,
+                taskIdentifier: taskIdentifier,
                 requestGeneration: requestGeneration,
                 provider: provider,
                 request: request,
@@ -60,7 +85,7 @@ extension TTSNetworkManager {
         let task = session.dataTask(with: attempt.request)
         requestObservers.retryInstallation()
         guard replaceActiveRequest(
-            with: task,
+            with: .http(task),
             request: attempt.request,
             provider: attempt.provider,
             requestGeneration: attempt.requestGeneration,
@@ -85,7 +110,7 @@ extension TTSNetworkManager {
         callbackAuthority.lock()
         defer { callbackAuthority.unlock() }
         return stateQueue.sync {
-            activeRequest?.task.cancel()
+            activeRequest?.transport.cancel()
             activeRequest = nil
             requestGeneration &+= 1
             return requestGeneration
@@ -130,15 +155,19 @@ extension TTSNetworkManager {
         }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
         if settings.provider == .gemini {
             request.setValue(settings.apiKey, forHTTPHeaderField: CredentialHeaderField.googleAPIKey)
         } else {
             request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: CredentialHeaderField.authorization)
         }
+        if settings.provider == .openAI {
+            startRealtimeRequest(request, text: text, voice: settings.voice,
+                                 requestGeneration: requestGeneration, client: client)
+            return
+        }
 
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         do {
             request.httpBody = try encodedRequestBody(text: text, settings: settings)
         } catch {
@@ -149,7 +178,7 @@ extension TTSNetworkManager {
 
         let task = session.dataTask(with: request)
         guard replaceActiveRequest(
-            with: task,
+            with: .http(task),
             request: request,
             provider: settings.provider,
             requestGeneration: requestGeneration,
@@ -170,7 +199,7 @@ extension TTSNetworkManager {
     /// waiting for PCM it can never receive, which is exactly what the terminal event exists to
     /// rule out. It is queued through the same guarded handoff a delivered request uses, so a
     /// replacement that already claimed the pipeline withdraws it.
-    private func failRequestBeforeItStarts(_ message: String, requestGeneration: UInt64, client: SpeechStreamClient) {
+    func failRequestBeforeItStarts(_ message: String, requestGeneration: UInt64, client: SpeechStreamClient) {
         publishFailure(message, requestGeneration: requestGeneration)
         enqueueStreamTermination(.failed, client: client, requestGeneration: requestGeneration)
     }
@@ -215,7 +244,7 @@ extension TTSNetworkManager {
         return stateQueue.sync {
             guard let context = activeRequest, context.requestGeneration == requestGeneration else { return nil }
             requestObservers.revocationTransaction()
-            context.task.cancel()
+            context.transport.cancel()
             activeRequest = nil
             requestGeneration &+= 1
             return requestGeneration

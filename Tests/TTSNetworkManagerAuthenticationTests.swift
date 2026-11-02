@@ -13,19 +13,20 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             SettingsKeys.apiBaseURL: "https://custom.example/v1/audio/speech"
         ])
 
-        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults)
-        let requestEmitted = expectation(description: "A normalized OpenAI request is emitted")
+        let connections = ScriptedRealtimeConnections()
+        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults, realtimeConnections: connections)
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/audio/speech")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
-            XCTAssertFalse(request.url?.absoluteString.contains("test-openai-api-key") ?? true)
-            requestEmitted.fulfill()
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data([0, 1]))
+            XCTFail("A normalized OpenAI request must not reach \(request.url?.absoluteString ?? "an HTTP endpoint").")
+            return (HTTPURLResponse(), Data())
         }
 
         manager.streamTTS(text: "Normalize persisted provider") { _ in }
-        wait(for: [requestEmitted], timeout: 2.0)
+
+        let connection = try XCTUnwrap(connections.all.first, "A normalized OpenAI request must open a Realtime connection.")
+        addTeardownBlock { connection.cancel(); connection.drain() }
+        XCTAssertEqual(connection.request.url?.absoluteString, "wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1-mini")
+        XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
+        XCTAssertFalse(connection.request.url?.absoluteString.contains("test-openai-api-key") ?? true)
     }
 
     // Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so this test runs
@@ -43,21 +44,20 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
         ])
 
         let audioPlayer = makeOwnedAudioPlayer()
-        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults)
         let requestEmitted = expectation(description: "Settings uses a normalized OpenAI request")
-        MockURLProtocol.installRequestHandler { request in
-            let url = request.url?.absoluteString ?? ""
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            // Opening Settings also fetches the normalized provider's model and voice suggestions,
-            // which carry the same key and so must not reach the corrupted endpoint either.
-            guard url == "https://api.openai.com/v1/audio/speech" else {
-                XCTAssertFalse(url.contains("custom.example"), "Settings must not contact the corrupted Custom endpoint.")
-                return (response, Data("{ \"data\": [] }".utf8))
-            }
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
-            XCTAssertFalse(url.contains("test-openai-api-key"))
+        let connections = ScriptedRealtimeConnections { connection in
+            XCTAssertEqual(connection.request.url?.host, "api.openai.com")
+            XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
+            XCTAssertFalse(connection.request.url?.absoluteString.contains("test-openai-api-key") ?? true)
             requestEmitted.fulfill()
-            return (response, Data([0, 1]))
+        }
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let manager = TestNetworkFactory.makeManager(secretStore: store, defaults: defaults, realtimeConnections: connections)
+        // Opening Settings publishes the normalized provider's catalogs, which need no request, so
+        // nothing that carries the key may reach the corrupted Custom endpoint or any other.
+        MockURLProtocol.installRequestHandler { request in
+            XCTFail("Settings must not contact \(request.url?.absoluteString ?? "an HTTP endpoint") for a normalized OpenAI provider.")
+            return (HTTPURLResponse(), Data())
         }
         let settings = HostedSettings(
             networkManager: manager,
@@ -138,11 +138,10 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
         XCTAssertEqual(manager.lastError, requestFailure)
     }
 
-    func testProviderCredentialsUseOnlyTheirDocumentedHeaders() {
+    func testProviderCredentialsUseOnlyTheirDocumentedHeaders() throws {
         // WHY: Keys in a URL can escape through proxies and diagnostics. Each provider must send
         // its token only in its authentication header, while app-owned state remains secret-free.
         let providers = [
-            (name: "OpenAI", baseURL: "https://mock.api/v1/audio/speech", selectedProvider: "OpenAI", header: "Authorization", value: "Bearer test-openai-api-key"),
             (name: "Gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta", selectedProvider: "Gemini", header: "x-goog-api-key", value: "test-gemini-api-key"),
             (name: "Custom", baseURL: "https://custom.api/v1/audio/speech", selectedProvider: "Custom", header: "Authorization", value: "Bearer test-custom-api-key")
         ]
@@ -178,6 +177,21 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             wait(for: [requestEmitted], timeout: 2.0)
             XCTAssertFalse(SettingsKeys.allUserDefaultsKeys.contains { defaults.string(forKey: $0) == token })
         }
+
+        // OpenAI authenticates its Realtime handshake the same way, and its query names only the model.
+        let defaults = makeOwnedDefaults()
+        let connections = ScriptedRealtimeConnections()
+        let manager = TestNetworkFactory.makeManager(defaults: defaults, realtimeConnections: connections)
+        manager.updateSettings(baseURL: OpenAIRealtimeSpeech.endpoint, apiKey: "test-openai-api-key",
+                               model: "test-model", voice: "test-voice", selectedProvider: "OpenAI")
+        manager.streamTTS(text: "Verify OpenAI authentication") { _ in }
+        let connection = try XCTUnwrap(connections.all.first)
+        addTeardownBlock { connection.cancel(); connection.drain() }
+        XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer test-openai-api-key")
+        XCTAssertNil(connection.request.value(forHTTPHeaderField: "x-goog-api-key"))
+        XCTAssertEqual(connection.request.url?.query, "model=test-model")
+        XCTAssertFalse(connection.sentFrames.contains { $0.contains("test-openai-api-key") })
+        XCTAssertFalse(SettingsKeys.allUserDefaultsKeys.contains { defaults.string(forKey: $0) == "test-openai-api-key" })
     }
 
     func testCustomGoogleLookingHostUsesTheOpenAICompatibleSpeechContract() {
@@ -214,11 +228,14 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
         wait(for: [requestEmitted], timeout: 2.0)
     }
 
-    func testMalformedDirectProviderIdentityNormalizesToOpenAI() {
+    func testMalformedDirectProviderIdentityNormalizesToOpenAI() throws {
         // WHY: Direct callers bypass the Settings sidebar, so normalization must happen before
         // the manager snapshots its request settings rather than only while the form is rendered.
+        // Normalizing to OpenAI also means its one fixed endpoint, so the endpoint this caller
+        // supplied must not receive the key.
         let endpoint = "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech"
-        let manager = TestNetworkFactory.makeManager()
+        let connections = ScriptedRealtimeConnections()
+        let manager = TestNetworkFactory.makeManager(realtimeConnections: connections)
         manager.updateSettings(
             baseURL: endpoint,
             apiKey: "normalized-token",
@@ -227,17 +244,17 @@ final class TTSNetworkManagerAuthenticationTests: MockURLProtocolTestCase {
             selectedProvider: "Malformed identity"
         )
         XCTAssertTrue(manager.isCurrentProvider(.openAI))
-
-        let requestEmitted = expectation(description: "Normalized compatible request is emitted")
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertEqual(request.url?.absoluteString, endpoint)
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer normalized-token")
-            XCTAssertNil(request.value(forHTTPHeaderField: "x-goog-api-key"))
-            requestEmitted.fulfill()
-            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data([0, 1]))
+            XCTFail("A normalized OpenAI request must not reach \(request.url?.absoluteString ?? "an HTTP endpoint").")
+            return (HTTPURLResponse(), Data())
         }
 
         manager.streamTTS(text: "Normalize direct input") { _ in }
-        wait(for: [requestEmitted], timeout: 2.0)
+
+        let connection = try XCTUnwrap(connections.all.first)
+        addTeardownBlock { connection.cancel(); connection.drain() }
+        XCTAssertEqual(connection.request.url?.absoluteString, "wss://api.openai.com/v1/realtime?model=openai-model")
+        XCTAssertEqual(connection.request.value(forHTTPHeaderField: "Authorization"), "Bearer normalized-token")
+        XCTAssertNil(connection.request.value(forHTTPHeaderField: "x-goog-api-key"))
     }
 }

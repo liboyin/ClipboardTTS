@@ -189,7 +189,7 @@ extension TTSNetworkManager {
             }
             activeRequest = nil
             return FailedGeminiRevocation(
-                task: context.task,
+                task: task,
                 requestGeneration: requestGeneration,
                 client: context.client
             )
@@ -247,7 +247,7 @@ extension TTSNetworkManager {
             return
         }
         revocation.task.cancel()
-        publishFailure("The TTS service returned no playable audio. Please try again.", requestGeneration: revocation.requestGeneration)
+        publishFailure(Self.noPlayableAudioFailure, requestGeneration: revocation.requestGeneration)
         enqueueStreamTermination(.failed, client: revocation.client, requestGeneration: revocation.requestGeneration)
     }
 

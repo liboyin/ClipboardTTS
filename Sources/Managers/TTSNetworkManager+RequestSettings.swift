@@ -1,8 +1,13 @@
 import Foundation
 
 extension TTSNetworkManager.RequestSettings {
-    /// OpenAI's fixed speech endpoint, which a Custom provider also falls back to.
+    /// OpenAI's speech endpoint, which a Custom provider falls back to before one is typed. OpenAI
+    /// itself now speaks through `OpenAIRealtimeSpeech.endpoint`.
     private static let openAISpeechEndpoint = "https://api.openai.com/v1/audio/speech"
+    /// The OpenAI voice a retired speech-only voice is replaced with, which is also the default.
+    static let defaultOpenAIVoice = "alloy"
+    /// The speech-only OpenAI voices the Realtime API rejects.
+    private static let retiredOpenAIVoices: Set = ["fable", "nova", "onyx"]
     /// Gemini's fixed API root. Its speech path is built per request from the configured model,
     /// so what is stored here is the root rather than a complete endpoint.
     private static let geminiAPIRoot = "https://generativelanguage.googleapis.com/v1beta"
@@ -28,10 +33,10 @@ extension TTSNetworkManager.RequestSettings {
         switch provider {
         case .openAI:
             return Self(
-                baseURL: openAISpeechEndpoint,
+                baseURL: OpenAIRealtimeSpeech.endpoint,
                 apiKey: apiKey,
-                model: defaults.string(forKey: SettingsKeys.openAIModel) ?? "tts-1",
-                voice: defaults.string(forKey: SettingsKeys.openAIVoice) ?? "alloy",
+                model: defaults.string(forKey: SettingsKeys.openAIModel) ?? "gpt-realtime-2.1-mini",
+                voice: defaults.string(forKey: SettingsKeys.openAIVoice) ?? defaultOpenAIVoice,
                 provider: provider
             )
         case .gemini:
@@ -50,6 +55,23 @@ extension TTSNetworkManager.RequestSettings {
                 voice: defaults.string(forKey: SettingsKeys.customVoice) ?? "",
                 provider: provider
             )
+        }
+    }
+
+    /// Rewrites a saved OpenAI model or voice that only the retired speech API accepted.
+    ///
+    /// OpenAI speech now runs on the Realtime API, which rejects every `tts` speech model and the
+    /// speech-only voices outright, so a saved one could only fail. A saved speech model becomes the
+    /// default Realtime model and a retired voice becomes the default voice, so speech keeps working
+    /// after the update without the user visiting Settings. Any other saved value is kept, including
+    /// a model the catalog does not list, because the user may have typed one deliberately. Runs at
+    /// manager construction, before anything reads either setting.
+    static func migrateRetiredOpenAISpeechSettings(in defaults: UserDefaults) {
+        if let model = defaults.string(forKey: SettingsKeys.openAIModel), model.contains("tts") {
+            defaults.set(ProviderMetadataCatalog.openAIModels[0], forKey: SettingsKeys.openAIModel)
+        }
+        if let voice = defaults.string(forKey: SettingsKeys.openAIVoice), retiredOpenAIVoices.contains(voice) {
+            defaults.set(defaultOpenAIVoice, forKey: SettingsKeys.openAIVoice)
         }
     }
 }
