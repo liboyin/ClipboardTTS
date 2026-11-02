@@ -209,4 +209,23 @@ struct RequestErrorView: NSViewRepresentable {
     func updateNSView(_ label: NSTextField, context: Context) {
         label.stringValue = message
     }
+
+    /// Reports the height the message needs when wrapped at the offered width.
+    ///
+    /// Without this, SwiftUI sizes the label from its intrinsic size, which measures the text as one
+    /// unwrapped line: the width is then narrowed to the menu's, but the height stays one line's and
+    /// every further line is clipped.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView label: NSTextField, context: Context) -> CGSize? {
+        label.cell.map { Self.size(of: $0, wrappedAt: proposal.width) }
+    }
+
+    /// The size of `cell`'s text wrapped at `width`, which it spans as the label always has.
+    ///
+    /// An unspecified or unbounded width leaves nothing to wrap at, so the text keeps its one-line
+    /// size rather than reporting a width no layout can use.
+    static func size(of cell: NSCell, wrappedAt width: CGFloat?) -> CGSize {
+        guard let width, width.isFinite else { return cell.cellSize }
+        let wrapped = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(wrapped.height))
+    }
 }

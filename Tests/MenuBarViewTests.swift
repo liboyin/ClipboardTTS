@@ -195,6 +195,98 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         wait(for: [rendered], timeout: 1.0)
     }
 
+    func testRenderedErrorMessageWrapsToShowEveryLineWithinTheMenuWidth() {
+        // WHY: Most request errors are longer than one line of the menu. The menu window takes its
+        // content's fitting size, so the label must report the height its text needs at the width
+        // it is given; a label sized for its unwrapped text keeps one line's height and clips the
+        // rest, which is what hides the corrective advice the message ends with.
+        let audioPlayer = makeOwnedAudioPlayer()
+        let textExtraction = TextExtractionManager(pasteboard: FakePasteboardReader())
+        let networkManager = TestNetworkFactory.makeManager()
+        let view = makeMenu(audioPlayer: audioPlayer, textExtraction: textExtraction, networkManager: networkManager)
+        let host = NSHostingView(rootView: view)
+
+        networkManager.updateSettings(
+            baseURL: "not a valid endpoint",
+            apiKey: "fake-key",
+            model: "test",
+            voice: "test",
+            selectedProvider: "Custom"
+        )
+        networkManager.streamTTS(text: "Show a long error") { _ in }
+
+        let errorMessage = "TTS configuration is invalid. Check the API endpoint and try again."
+        let rendered = expectation(description: "Error message laid out at the menu's fitting size")
+        DispatchQueue.main.async {
+            host.frame.size = host.fittingSize
+            host.layoutSubtreeIfNeeded()
+            defer { rendered.fulfill() }
+            guard let label = host.descendantText(equalTo: errorMessage) else {
+                return XCTFail("The request error must be rendered.")
+            }
+            let frame = label.convert(label.bounds, to: host)
+            XCTAssertLessThanOrEqual(frame.maxX, host.bounds.width, "The label must stay within the menu width.")
+            let singleLine = label.cell!.cellSize(forBounds: NSRect(
+                x: 0, y: 0, width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude
+            ))
+            let wrapped = label.cell!.cellSize(forBounds: NSRect(
+                x: 0, y: 0, width: frame.width, height: CGFloat.greatestFiniteMagnitude
+            ))
+            XCTAssertGreaterThan(wrapped.height, singleLine.height, "This message must need more than one line.")
+            XCTAssertGreaterThanOrEqual(frame.height, wrapped.height, "Every wrapped line must be visible.")
+        }
+        wait(for: [rendered], timeout: 1.0)
+    }
+
+    func testRequestErrorWithNoOfferedWidthKeepsItsUnwrappedSingleLineSize() {
+        // WHY: Wrapping needs a width to wrap at. When SwiftUI asks for the label's ideal size it
+        // offers none, and the label must then answer with its text on one line, as its intrinsic
+        // size does, rather than inventing a width and reporting a narrow, needlessly tall column.
+        let message = "TTS configuration is invalid. Check the API endpoint and try again."
+        let host = NSHostingView(rootView: RequestErrorView(message: message).fixedSize())
+        host.frame.size = host.fittingSize
+        host.layoutSubtreeIfNeeded()
+
+        guard let label = host.descendantText(equalTo: message) else {
+            return XCTFail("The request error must be rendered.")
+        }
+        let unwrapped = label.intrinsicContentSize
+        XCTAssertGreaterThanOrEqual(label.frame.width, unwrapped.width, "The text must not be wrapped.")
+        XCTAssertEqual(label.frame.height, unwrapped.height, "The label must stay one line tall.")
+    }
+
+    func testShortRequestErrorStillSpansTheOfferedWidth() {
+        // WHY: Before the label wrapped, it spanned the width the menu offered even when its message
+        // fit on one line, so the text started at the same leading edge as the controls above it.
+        // Sizing for wrapping must not shrink a short message to its text, which would let the
+        // menu's centered stack move it away from that edge.
+        let message = "Speech request failed (HTTP 500)."
+        let offeredWidth: CGFloat = 268
+        let host = NSHostingView(rootView: RequestErrorView(message: message).frame(width: offeredWidth))
+        host.frame.size = host.fittingSize
+        host.layoutSubtreeIfNeeded()
+
+        guard let label = host.descendantText(equalTo: message) else {
+            return XCTFail("The request error must be rendered.")
+        }
+        let frame = label.convert(label.bounds, to: host)
+        XCTAssertLessThan(label.cell!.cellSize.width, offeredWidth, "This message must fit on one line.")
+        // SwiftUI places a representable by its alignment rect, which for a text field excludes
+        // 2-point side insets, so the offered width is the alignment rect's rather than the frame's.
+        XCTAssertEqual(label.alignmentRect(forFrame: frame).width, offeredWidth, "The label must span the width.")
+        XCTAssertEqual(frame.height, ceil(label.cell!.cellSize.height), "The label must stay one line tall.")
+    }
+
+    func testRequestErrorSizeWithAnUnboundedWidthIsItsOneLineSize() {
+        // WHY: SwiftUI can offer an infinite width as well as none, and no hosted layout here does.
+        // Reporting that width back would be an invalid size, so an unbounded offer must measure
+        // the text on one line exactly as an absent one does.
+        let cell = NSTextField(wrappingLabelWithString: "TTS configuration is invalid. Check the API endpoint.").cell!
+
+        XCTAssertEqual(RequestErrorView.size(of: cell, wrappedAt: .infinity), cell.cellSize)
+        XCTAssertEqual(RequestErrorView.size(of: cell, wrappedAt: nil), cell.cellSize)
+    }
+
 }
 
 private extension NSView {
