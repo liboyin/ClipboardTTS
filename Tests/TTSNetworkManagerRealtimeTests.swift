@@ -122,6 +122,21 @@ final class TTSNetworkManagerRealtimeTests: MockURLProtocolTestCase {
         )
     }
 
+    func testAnExhaustedAccountIsNamedRatherThanReportedAsAProviderError() {
+        // WHY: Retrying cannot fix an account with no quota, so the message must send the user to
+        // billing instead of inviting another attempt, and must not repeat the provider's text.
+        assertRealtimeFailure(
+            expectedError: "OpenAI reports no remaining quota for this API key. "
+                + "Check the account's billing and usage limits, then try again.",
+            frames: { connection in
+                connection.deliverEvent(["type": "error", "error": [
+                    "type": "insufficient_quota", "code": "credit_balance_exhausted",
+                    "message": "Your credit balance is exhausted."
+                ]])
+            }
+        )
+    }
+
     func testARejectedRequestPointsAtTheModelAndVoice() {
         // WHY: An unsupported model or voice is the request error a user can fix, and only in Settings.
         assertRealtimeFailure(

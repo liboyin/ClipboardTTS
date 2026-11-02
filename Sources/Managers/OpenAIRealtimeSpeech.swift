@@ -90,6 +90,8 @@ enum OpenAIRealtimeSpeech {
     enum Failure: Equatable {
         /// The provider rejected the saved key.
         case authentication
+        /// The account behind the key has no quota left: it is out of credit or past a usage limit.
+        case quota
         /// The provider rejected the request itself, most often its model or voice.
         case invalidRequest
         /// The provider reported a failure of its own.
@@ -137,9 +139,18 @@ enum OpenAIRealtimeSpeech {
     ///
     /// A rejected key arrives as an `error` event with code `invalid_api_key`, never as a handshake
     /// status: the upgrade succeeds and the server then reports and closes (verified 2026-11-02).
+    ///
+    /// An exhausted account was observed the same day: the `error` event carried code
+    /// `credit_balance_exhausted`, and the server closed with reason
+    /// `insufficient_quota.credit_balance_exhausted`. That reason has the `type.code` form a rejected
+    /// key's close takes (`invalid_request_error.invalid_api_key`), which is what places the type at
+    /// `insufficient_quota`. Either field is enough, because only the code was read from the event.
     private static func failure(from error: [String: Any]?) -> Failure {
         if error?["code"] as? String == "invalid_api_key" {
             return .authentication
+        }
+        if error?["type"] as? String == "insufficient_quota" || error?["code"] as? String == "credit_balance_exhausted" {
+            return .quota
         }
         if error?["type"] as? String == "invalid_request_error" {
             return .invalidRequest

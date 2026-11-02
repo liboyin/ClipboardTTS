@@ -143,6 +143,8 @@ extension TTSNetworkManager {
             return Self.truncatedResponseFailure
         case .failed(.authentication)?:
             return "Authentication failed. Check your API key and try again."
+        case .failed(.quota)?:
+            return "OpenAI reports no remaining quota for this API key. Check the account's billing and usage limits, then try again."
         case .failed(.invalidRequest)?:
             return "The TTS service rejected the request. Check the model and voice in Settings and try again."
         case .failed(.provider)?:

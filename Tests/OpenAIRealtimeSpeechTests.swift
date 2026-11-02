@@ -60,6 +60,14 @@ final class OpenAIRealtimeSpeechTests: XCTestCase {
                        .failed(.authentication))
         XCTAssertEqual(classify(["type": "error", "error": ["type": "invalid_request_error", "code": "invalid_model"]]),
                        .failed(.invalidRequest))
+        // WHY: An exhausted account is the one failure only the account owner can fix, and the
+        // generic provider message would send them to retry instead. Either identifier names it,
+        // because the observed event carried the code and the type was read from the close reason.
+        XCTAssertEqual(classify(["type": "error", "error": ["type": "insufficient_quota", "code": "credit_balance_exhausted"]]),
+                       .failed(.quota))
+        XCTAssertEqual(classify(["type": "error", "error": ["type": "insufficient_quota", "code": "monthly_limit_reached"]]),
+                       .failed(.quota))
+        XCTAssertEqual(classify(["type": "error", "error": ["code": "credit_balance_exhausted"]]), .failed(.quota))
         // WHY: An error the app cannot place, including one with no detail at all, is still the
         // provider failing: it must never be mistaken for success or for the user's mistake.
         XCTAssertEqual(classify(["type": "error", "error": ["type": "server_error"]]), .failed(.provider))
