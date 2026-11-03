@@ -8,7 +8,7 @@ Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text a
 
 ## Requirements
 
-- macOS 14 or later, and Xcode.
+- A Mac with Apple silicon running macOS 14 or later, and Xcode. The app is distributed for Apple silicon only and does not run on Intel Macs.
 - `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them. Every app build runs `swiftlint --strict` over `Sources` and `Tests` and fails if SwiftLint is not on `PATH` or in Homebrew's `/opt/homebrew/bin` or `/usr/local/bin`.
 
 ## Build
@@ -123,4 +123,4 @@ Running natively removes most of Docker's latency. The GPU halves generation tim
 
 ## Packaging
 
-To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`. The right-click service stays out of the Services menu until it is enabled once in System Settings → Keyboard → Keyboard Shortcuts… → Services → Text → "Speak Selected Text with Clipboard TTS"; an app already open when it is enabled may need relaunching before its context menu lists it.
+To distribute locally without an Apple Developer Program account (ad-hoc signed, not notarized), run `./package.sh`. The right-click service stays out of the Services menu until it is enabled once in System Settings → Keyboard → Keyboard Shortcuts… → Services → Text → "Speak Selected Text with Clipboard TTS"; an app already open when it is enabled may need relaunching before its context menu lists it. `package.sh` names no destination, so `xcodebuild` builds for the first one it matches, which on an Apple silicon Mac is `arm64` alone; package on Apple silicon, because the app is distributed for it only.
