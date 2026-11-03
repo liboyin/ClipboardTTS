@@ -1,5 +1,7 @@
 # Clipboard TTS App
 
+<img src="Sources/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png" width="256" height="256" alt="Clipboard TTS app icon">
+
 Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text aloud through OpenAI's Realtime API, an OpenAI-compatible TTS endpoint, or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
 [DESIGN.md](DESIGN.md) describes the architecture, design assumptions, and test-harness rules; [USER_STORIES.md](USER_STORIES.md) describes product behavior.

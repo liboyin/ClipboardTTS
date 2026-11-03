@@ -16,6 +16,11 @@ targets:
       PRODUCT_NAME: ClipboardTTS
       PRODUCT_MODULE_NAME: ClipboardTTSApp
       SWIFT_STRICT_CONCURRENCY: complete
+      # Sources/Assets.xcassets/AppIcon.appiconset is derived from assets/light_1800.png: the
+      # artwork is cropped to its visible bounds, scaled to 993 px tall (enlarged by request from
+      # Apple's 824 px macOS icon grid, so it shows larger on macOS 26's grey tile) and centred on
+      # a 1024 px canvas, then downsampled for each size.
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     sources:
       - Sources
       - path: LICENSE
