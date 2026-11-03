@@ -7,7 +7,7 @@ struct SettingsView: View {
     /// of them to the caller's store, which leaves the declarations without an initializer.
     private enum Fallback {
         static let ttsProvider = "OpenAI"
-        static let apiBaseURL = "https://api.openai.com/v1/audio/speech"
+        static let apiBaseURL = "http://127.0.0.1:8881/v1/audio/speech"
         static let openAIModel = "gpt-realtime-2.1-mini"
         static let openAIVoice = "alloy"
         static let geminiModel = "gemini-3.8-flash-lite-tts"

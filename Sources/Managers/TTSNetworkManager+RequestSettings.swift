@@ -1,9 +1,9 @@
 import Foundation
 
 extension TTSNetworkManager.RequestSettings {
-    /// OpenAI's speech endpoint, which a Custom provider falls back to before one is typed. OpenAI
-    /// itself now speaks through `OpenAIRealtimeSpeech.endpoint`.
-    private static let openAISpeechEndpoint = "https://api.openai.com/v1/audio/speech"
+    /// The native Kokoro server's speech URL from README, which a Custom provider falls back to
+    /// before one is typed (D34). Plain HTTP is allowed because the host is a loopback literal.
+    private static let nativeKokoroSpeechEndpoint = "http://127.0.0.1:8881/v1/audio/speech"
     /// The OpenAI voice a retired speech-only voice is replaced with, which is also the default.
     static let defaultOpenAIVoice = "alloy"
     /// The speech-only OpenAI voices the Realtime API rejects.
@@ -24,9 +24,9 @@ extension TTSNetworkManager.RequestSettings {
     ///
     /// Only a Custom deployment's endpoint is configurable; OpenAI's and Gemini's are fixed, because
     /// the app sends their speech requests to one documented address. A Custom provider selected
-    /// before an endpoint was typed falls back to OpenAI's address rather than to nothing, so the
-    /// configuration always names a real HTTPS endpoint, and an empty Custom model or voice is what
-    /// the request path refuses by name.
+    /// before an endpoint was typed falls back to the native Kokoro server on this Mac rather than
+    /// to nothing, so the configuration always names a buildable endpoint and the Custom key stays
+    /// on the machine, and an empty Custom model or voice is what the request path refuses by name.
     static func resolved(provider: APIKeyProvider,
                          apiKey: String,
                          defaults: UserDefaults) -> Self {
@@ -49,7 +49,7 @@ extension TTSNetworkManager.RequestSettings {
             )
         case .custom:
             return Self(
-                baseURL: defaults.string(forKey: SettingsKeys.apiBaseURL) ?? openAISpeechEndpoint,
+                baseURL: defaults.string(forKey: SettingsKeys.apiBaseURL) ?? nativeKokoroSpeechEndpoint,
                 apiKey: apiKey,
                 model: defaults.string(forKey: SettingsKeys.customModel) ?? "",
                 voice: defaults.string(forKey: SettingsKeys.customVoice) ?? "",

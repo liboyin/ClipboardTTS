@@ -41,6 +41,26 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         settings.release()
     }
 
+    func testAFreshCustomFormShowsAndRequestsTheNativeKokoroEndpoint() {
+        // WHY: Before a Base URL is typed, the form and the requests it configures must agree on the
+        // native Kokoro server (D34). A form showing one address while requests used another would
+        // misreport where speech and the Custom key go.
+        let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "Custom"])
+        let secretStore = InMemorySecretStore()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: makeOwnedAudioPlayer(),
+            secretStore: secretStore,
+            defaults: defaults,
+            testCase: self
+        )
+
+        XCTAssertEqual(settings.text(in: .customBaseURL), "http://127.0.0.1:8881/v1/audio/speech")
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().baseURL, "http://127.0.0.1:8881/v1/audio/speech")
+        settings.release()
+    }
+
     func testInvalidCustomSampleRateIsReportedWithoutStartingTestVoice() {
         // WHY: The Settings field must refuse invalid PCM rates before a Test Voice request can
         // stream bytes into an unchanged graph, and its established error is rendered inline.

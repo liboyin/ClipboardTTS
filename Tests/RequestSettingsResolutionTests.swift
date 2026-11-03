@@ -70,7 +70,8 @@ final class RequestSettingsResolutionTests: XCTestCase {
         // WHY: Nothing is stored before Settings is first opened. OpenAI and Gemini must still be
         // usable, so each falls back to a model and voice its own endpoint accepts. Custom cannot be
         // guessed, so its model and voice stay empty for the request path to refuse by name, while
-        // its endpoint falls back to a real HTTPS address rather than to a URL nothing can build.
+        // its endpoint falls back to the native Kokoro server README documents (D34), which keeps
+        // the Custom key on this Mac rather than sending it to a provider the user never chose.
         let defaults = makeOwnedDefaults()
 
         let openAI = TTSNetworkManager.RequestSettings.resolved(provider: .openAI, apiKey: "", defaults: defaults)
@@ -83,7 +84,7 @@ final class RequestSettingsResolutionTests: XCTestCase {
         XCTAssertEqual(gemini.voice, "Aoede")
 
         let custom = TTSNetworkManager.RequestSettings.resolved(provider: .custom, apiKey: "", defaults: defaults)
-        XCTAssertEqual(custom.baseURL, "https://api.openai.com/v1/audio/speech")
+        XCTAssertEqual(custom.baseURL, "http://127.0.0.1:8881/v1/audio/speech")
         XCTAssertEqual(custom.model, "")
         XCTAssertEqual(custom.voice, "")
     }
