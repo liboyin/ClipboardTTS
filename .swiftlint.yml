@@ -26,7 +26,7 @@ type_body_length:
   warning: 320
 
 # Three declarations nest one extra level, which reads fine: the speech request body's coding keys,
-# one Gemini event's audio classification, and the discovery response's own model.
+# one Gemini event's audio classification, and a metadata completion report's outcome.
 nesting:
   type_level: 2
 
