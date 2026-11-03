@@ -1,4 +1,3 @@
-import Network
 import XCTest
 @testable import ClipboardTTSApp
 
@@ -27,13 +26,13 @@ final class RealtimeSpeechConnectionTests: XCTestCase {
         let server = LoopbackWebSocketServer()
         addTeardownBlock {
             server.requestStop()
-            Self.finishOrEndRun("The loopback server", awaitStopped: server.awaitStopped(timeout:))
+            finishStoppingOrEndRun("The loopback server", awaitStopped: server.awaitStopped(timeout:))
         }
         let port = try server.start(timeout: 2.0)
         let session = OwnedWebSocketSession.make()
         addTeardownBlock {
             session.requestInvalidation()
-            Self.finishOrEndRun("The WebSocket session", awaitStopped: session.awaitInvalidated(timeout:))
+            finishStoppingOrEndRun("The WebSocket session", awaitStopped: session.awaitInvalidated(timeout:))
         }
         let connection: RealtimeSpeechConnection = session.webSocketTask(
             with: try XCTUnwrap(URL(string: "ws://127.0.0.1:\(port)/v1/realtime"))
@@ -52,19 +51,6 @@ final class RealtimeSpeechConnectionTests: XCTestCase {
         XCTAssertNil(sendError.value)
         XCTAssertEqual(server.waitForFirstFrame(timeout: 2.0), .text(event))
         connection.cancel()
-    }
-
-    /// Waits for an owner to stop, failing the test past the teardown deadline and ending the run
-    /// past the recovery bound, as `MockURLProtocolTestCase.finishClosingScopeOrEndRun` does.
-    private static func finishOrEndRun(_ owner: String, awaitStopped: (TimeInterval) -> Bool) {
-        guard !awaitStopped(2.0) else { return }
-        XCTFail("\(owner) did not stop before the test ended.")
-        guard awaitStopped(5.0) else {
-            fatalError(
-                "\(owner) did not stop within the recovery bound; ending the run rather than hand "
-                    + "a live callback owner to the next test."
-            )
-        }
     }
 }
 
@@ -112,107 +98,5 @@ private final class OwnedWebSocketSession: NSObject, URLSessionDelegate, @unchec
 
     func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
         invalidated.signal()
-    }
-}
-
-/// A WebSocket server on the loopback literal that records the frames it receives.
-///
-/// Every handler runs on the server's own serial queue and only records into locked state or signals
-/// a semaphore. `requestStop()` cancels the listener and each connection; `awaitStopped(timeout:)`
-/// waits for the listener to report `.cancelled`, then drains that queue.
-private final class LoopbackWebSocketServer: @unchecked Sendable {
-    enum Frame: Equatable, Sendable {
-        case text(String)
-        case binary(Data)
-        case other(String)
-    }
-
-    private let queue = DispatchQueue(label: "com.clipboardtts.tests.loopback-websocket", qos: .userInteractive)
-    private let frames = LockedValue([Frame]())
-    private let frameArrived = DispatchSemaphore(value: 0)
-    private let ready = DispatchSemaphore(value: 0)
-    private let cancelled = DispatchSemaphore(value: 0)
-    /// Read and written only on `queue`.
-    private var listener: NWListener?
-    /// Read and written only on `queue`.
-    private var connections: [NWConnection] = []
-
-    /// Starts listening on an ephemeral `127.0.0.1` port and returns it once the listener is ready.
-    func start(timeout: TimeInterval) throws -> UInt16 {
-        let parameters = NWParameters.tcp
-        parameters.defaultProtocolStack.applicationProtocols.insert(NWProtocolWebSocket.Options(), at: 0)
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
-        let listener = try NWListener(using: parameters)
-        listener.stateUpdateHandler = { [ready, cancelled] state in
-            switch state {
-            case .ready:
-                ready.signal()
-            case .cancelled:
-                cancelled.signal()
-            default:
-                break
-            }
-        }
-        listener.newConnectionHandler = { [weak self] connection in
-            guard let self else { return }
-            self.connections.append(connection)
-            connection.start(queue: self.queue)
-            self.receive(on: connection)
-        }
-        queue.sync { self.listener = listener }
-        listener.start(queue: queue)
-        guard ready.wait(timeout: .now() + timeout) == .success,
-              let port = queue.sync(execute: { self.listener?.port?.rawValue }) else {
-            throw URLError(.cannotConnectToHost)
-        }
-        return port
-    }
-
-    private func receive(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] content, context, _, error in
-            guard let self, error == nil else { return }
-            let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition)
-                as? NWProtocolWebSocket.Metadata
-            let data = content ?? Data()
-            let frame: Frame
-            switch metadata?.opcode {
-            case .text?:
-                frame = .text(String(bytes: data, encoding: .utf8) ?? "")
-            case .binary?:
-                frame = .binary(data)
-            default:
-                frame = .other(String(describing: metadata?.opcode))
-            }
-            self.frames.withValue { $0.append(frame) }
-            self.frameArrived.signal()
-            self.receive(on: connection)
-        }
-    }
-
-    /// The first frame received, or nil when none arrives in time.
-    func waitForFirstFrame(timeout: TimeInterval) -> Frame? {
-        guard frameArrived.wait(timeout: .now() + timeout) == .success else { return nil }
-        return frames.value.first
-    }
-
-    /// Cancels the listener and every connection.
-    func requestStop() {
-        queue.sync {
-            connections.forEach { $0.cancel() }
-            listener?.cancel()
-        }
-    }
-
-    /// Reports whether the listener confirmed cancellation, then drains the server's queue. A server
-    /// that never created a listener has nothing to cancel and reports success. Once it has returned
-    /// true, later calls do too.
-    func awaitStopped(timeout: TimeInterval) -> Bool {
-        let hadListener = queue.sync { listener != nil }
-        if hadListener {
-            guard cancelled.wait(timeout: .now() + timeout) == .success else { return false }
-            cancelled.signal()
-        }
-        queue.sync {}
-        return true
     }
 }
