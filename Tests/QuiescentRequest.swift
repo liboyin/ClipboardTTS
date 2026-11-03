@@ -96,6 +96,62 @@ extension XCTestCase {
     }
 }
 
+/// Test-only observation points of `receiveOnceLeavingNoCallback`, for the tests that prove its
+/// guarantees; every other caller omits them.
+enum GatedReceive {
+    struct Observer {
+        /// Runs in every receive callback, inside the gate, once it has decided whether the callback
+        /// records its result and before it fulfils the expectation. `recorded` is false for a
+        /// callback that found the gate closed, which is how late work is accounted.
+        var receiveDecided: @Sendable (_ recorded: Bool) -> Void = { _ in }
+        /// Runs on the calling thread once the receive is armed and before the bounded wait begins,
+        /// so a test can make sure its callback is already in flight when that wait starts.
+        var beforeWait: () -> Void = {}
+    }
+}
+
+extension XCTestCase {
+    /// Resumes `connection`, arms one receive, waits up to `timeout` for it, closes the gate, then
+    /// cancels the connection, and returns the result that receive recorded: nil if it had not
+    /// started recording before the gate closed; an expired wait records a failure of its own. Once
+    /// it returns, no receive callback of `connection` can write the result or fulfil the expectation.
+    ///
+    /// WHY: the connection's callbacks run on a queue its owner chose — a manager's session builds
+    /// its own — so the queue barrier `sendOneRoutedRequestLeavingNoCompletion` relies on is not
+    /// available. The gate's lock serves instead: a callback decides, records, and fulfils while
+    /// holding it, so closing the gate waits out a callback already past its decision and bars every
+    /// later one. The gate closes before `cancel()`, which completes a pending receive afterwards,
+    /// so that completion always finds it closed.
+    func receiveOnceLeavingNoCallback(on connection: RealtimeSpeechConnection,
+                                      description: String,
+                                      timeout: TimeInterval,
+                                      observer: GatedReceive.Observer = .init())
+        -> Result<URLSessionWebSocketTask.Message, Error>? {
+        let received = expectation(description: description)
+        let receiveDecided = observer.receiveDecided
+        let gate = LockedValue<(isOpen: Bool, result: Result<URLSessionWebSocketTask.Message, Error>?)>(
+            (isOpen: true, result: nil)
+        )
+        connection.resume()
+        connection.receive { result in
+            gate.withValue { state in
+                let recorded = state.isOpen
+                if recorded { state.result = result }
+                receiveDecided(recorded)
+                if recorded { received.fulfill() }
+            }
+        }
+        observer.beforeWait()
+        wait(for: [received], timeout: timeout)
+        let result = gate.withValue { state in
+            state.isOpen = false
+            return state.result
+        }
+        connection.cancel()
+        return result
+    }
+}
+
 extension XCTestCase {
     /// Opens one WebSocket through a manager's own Realtime connection factory and asserts the
     /// refusing protocol failed it.
@@ -105,8 +161,8 @@ extension XCTestCase {
     /// even if that routing were lost, failing then with `cannotConnectToHost` rather than the
     /// refusal's `cannotLoadFromNetwork`. Only the code is compared: a WebSocket task reports the
     /// refusing protocol's error code but not its description (observed on macOS 26.7.1). The receive
-    /// completes before this returns, and the connection is cancelled, so nothing is left able to
-    /// write the outcome.
+    /// goes through `receiveOnceLeavingNoCallback`, so once this returns nothing is left able to
+    /// write the outcome or fulfil its expectation, whatever the wait's outcome.
     func assertRefusesLoopbackWebSocketLocally(_ manager: TTSNetworkManager,
                                                graph: String,
                                                file: StaticString = #filePath,
@@ -114,20 +170,14 @@ extension XCTestCase {
         let connection = manager.realtimeConnectionFactory(
             manager.session, URLRequest(url: URL(string: "ws://127.0.0.1:9/v1/realtime")!)
         )
-        let outcome = LockedValue<NSError?>(nil)
-        let received = expectation(description: "The \(graph) graph's WebSocket receive completed")
-        connection.resume()
-        connection.receive { result in
-            if case .failure(let error) = result {
-                outcome.withValue { $0 = error as NSError }
-            }
-            received.fulfill()
-        }
-        wait(for: [received], timeout: 2.0)
-        connection.cancel()
+        let result = receiveOnceLeavingNoCallback(
+            on: connection, description: "The \(graph) graph's WebSocket receive completed", timeout: 2.0
+        )
+        var code: Int?
+        if case .failure(let error)? = result { code = (error as NSError).code }
 
         XCTAssertEqual(
-            outcome.value?.code, URLError.Code.cannotLoadFromNetwork.rawValue,
+            code, URLError.Code.cannotLoadFromNetwork.rawValue,
             "The \(graph) graph's WebSocket must be failed locally by the refusing protocol.", file: file, line: line
         )
     }
