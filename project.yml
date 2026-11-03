@@ -41,7 +41,7 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleShortVersionString: "1.0.0"
+        CFBundleShortVersionString: "1.0.1"
         LSUIElement: true
         NSServices:
           - NSMenuItem:
