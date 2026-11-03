@@ -8,7 +8,7 @@ import XCTest
 /// into a WebSocket frame runs only against a real server. The Realtime API documents its client
 /// events as JSON text frames; a binary frame carrying the same bytes compiles, passes every scripted
 /// test, and leaves OpenAI speech broken. This suite is the documented exception to building sessions
-/// through `TestNetworkFactory` (README, Build & Test): a URL-loading protocol can refuse a WebSocket
+/// through `TestNetworkFactory` (DESIGN, Test Harness): a URL-loading protocol can refuse a WebSocket
 /// but cannot answer one, so the task has to reach a server. That server listens on the `127.0.0.1`
 /// literal inside the test process, and the task names that literal, so nothing can leave the machine
 /// even if the session's configuration were wrong.

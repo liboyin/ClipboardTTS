@@ -7,7 +7,8 @@ This file owns repository-wide working standards. All agents MUST follow them an
 - **[Adversarial review skill](.agents/skills/adversarial-review/SKILL.md):** how to conduct review, including dispatch, snapshots, investigation, triage, and reporting.
 - **[TODO.md](TODO.md):** future work, accepted decisions, dependencies, execution boundaries, and its own maintenance rules.
 - **[completed_work/](completed_work/):** completed-task boundaries, dispositions, validation evidence, review results, and limitations; [TODO maintenance](TODO.md#maintaining-this-plan) owns the archival procedure.
-- **[README.md](README.md):** current architecture, design assumptions, and operating procedures.
+- **[README.md](README.md):** installation, build, test, and operating procedures for human readers.
+- **[DESIGN.md](DESIGN.md):** current architecture, design assumptions, concurrency rules, coverage-gate rationale, and test-harness design.
 - **[USER_STORIES.md](USER_STORIES.md):** product requirements and user-visible behavior.
 
 Link to the owning document instead of duplicating its procedure. Skills and other operational instructions implement these standards; they do not override them, including the safety and ownership principles here. TODO proposals do not authorize implementation. If documents disagree, use the owning document; confirm any unresolved material conflict before dependent work.
