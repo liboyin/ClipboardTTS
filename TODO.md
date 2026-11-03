@@ -149,7 +149,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day; NB57, NB59, and N11 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day; NB57, NB59, N11, and N12 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -190,10 +190,6 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 **Non-blocking; source gap Validated, runtime announcements unverified — 2026-11-03 second review.** `Sources/Views/ModelVoiceConfigurationView.swift:46` and `:64` build the model and voice pickers as `Picker("")` with `.labelsHidden()` in a 30-point frame, beside text fields labelled only by their placeholders, so VoiceOver can reach two unnamed pop-up buttons. NB54 covers only the menu. **Outcome:** each picker and field says whether it chooses the model or the voice, preserving the layout and the exactly-once edit contract. **Validation:** as for NB54: inspect with VoiceOver first, record the manual result, and keep the existing picker coverage. **Dependencies:** none; may share a boundary and a manual session with NB54. If S5 lands first, apply this to the resulting view.
 
 ### Nits
-
-#### N12 — Toolchain statements still name Xcode 26.6
-
-**Nit; Validated — document inspection, 2026-11-03 second review.** `README.md:28` and `project.yml:57` justify the macOS 14 test target and a benign AppIntents message by Xcode 26.6 behavior, but the installed toolchain is Xcode 27.2 (27B52), and Evidence provenance above already notes that 26.6 claims were not revalidated on 27.0. **Outcome:** each claim is revalidated on the current toolchain and names the version it was verified with, or is marked historical. **Validation:** a clean build on the current Xcode confirms or refutes the AppIntents message and the XCTest minimum; only wording changes. **Dependencies:** none.
 
 #### N13 — Custom falls back to OpenAI's speech endpoint
 
@@ -237,6 +233,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [N12](completed_work/N12.md) — Fixed: README and `project.yml` name Xcode 27.2, which confirmed the XCTest minimum of macOS 14 and the benign AppIntents warning.
 - [N11](completed_work/N11.md) — Fixed: DESIGN no longer allows for discovery traffic or counts the coverage gate's exclusions, and the nesting comment names the current third declaration.
 - [NB57](completed_work/NB57.md) — Fixed (D32): README states that the app runs on Apple silicon only, and why `package.sh` builds `arm64` alone.
 - [NB59](completed_work/NB59.md) — Accepted without change (D35, superseding D33): API keys keep saving on every keystroke.

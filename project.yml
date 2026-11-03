@@ -54,7 +54,7 @@ targets:
   ClipboardTTSAppTests:
     type: bundle.unit-test
     platform: macOS
-    # Matches ClipboardTTSApp, so every gate runs on the app's own minimum. Xcode 26.6's XCTest
+    # Matches ClipboardTTSApp, so every gate runs on the app's own minimum. Xcode 27.2's XCTest
     # libraries also require macOS 14.
     deploymentTarget: "14.0"
     sources: [Tests]
