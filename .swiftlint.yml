@@ -147,3 +147,23 @@ custom_rules:
       - string
     message: "The app writes nothing to the console; remove the call rather than replacing it with another logging API, or disable this rule on the one line with the reason the output is needed."
     severity: error
+
+  # From macOS 27 SwiftUI draws `Picker` and `Slider` itself, with no AppKit view, so no hosted test
+  # can see one: a voice picker returned to the menu that way would pass the menu's absence check.
+  # D36 renders them through `SuggestionPicker` and `MenuSlider`, whose `NSPopUpButton` and
+  # `NSSlider` the tests do see, and this rule (D37) keeps it that way in `Sources/` by refusing the
+  # SwiftUI type names however they are spelled: `Picker(`, `SwiftUI.Picker`, `Picker<…>`, and
+  # `Picker.init` alike. A name ending in either word (`SuggestionPicker`, `MenuSlider`, `NSSlider`)
+  # and `.pickerStyle` are not refused. `Tests/` may still host SwiftUI controls on purpose. Like the
+  # rules above it guards a habit, not a proof: a type alias still gets through, and other
+  # self-drawn controls, such as a SwiftUI `Menu` used as a chooser, are not covered.
+  swiftui_self_drawn_control:
+    name: "SwiftUI Self-Drawn Control"
+    included: ".*/Sources/.*\\.swift"
+    regex: "(?<![\\w])(Picker|Slider)\\b"
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    message: "SwiftUI draws Picker and Slider itself from macOS 27, so hosted tests cannot see them; use SuggestionPicker or MenuSlider (D36, D37), or disable this rule on the one line with the reason."
+    severity: error
