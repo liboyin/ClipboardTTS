@@ -1,6 +1,7 @@
 import Foundation
 
-/// Starts, retries, replaces, and stops the one speech request this manager owns at a time.
+/// Starts, retries, replaces, and stops the one speech request this manager owns at a time, and
+/// queues what that request delivers to its client.
 ///
 /// The endpoint and request-body helpers each attempt calls live in `TTSNetworkManager+Requests`;
 /// this file owns the state machine that decides when to call them. Every request the user starts
@@ -202,6 +203,41 @@ extension TTSNetworkManager {
     func failRequestBeforeItStarts(_ message: String, requestGeneration: UInt64, client: SpeechStreamClient) {
         publishFailure(message, requestGeneration: requestGeneration)
         enqueueStreamTermination(.failed, client: client, requestGeneration: requestGeneration)
+    }
+
+    /// Queues PCM for a request generation and invokes its handler only while that generation
+    /// still owns delivery. Completion deliberately leaves the generation intact so audio accepted
+    /// before a normal URL-session completion remains playable.
+    func enqueueAudioDelivery(_ data: Data,
+                              dataHandler: @escaping @Sendable (Data) -> Void,
+                              requestGeneration: UInt64) {
+        audioDeliveryQueue.async { [weak self] in
+            guard let self else { return }
+            self.callbackAuthority.lock()
+            defer { self.callbackAuthority.unlock() }
+            guard self.isCurrentRequestGeneration(requestGeneration) else { return }
+            dataHandler(data)
+        }
+    }
+
+    /// Queues one request's terminal event, behind every delivery that request already queued.
+    ///
+    /// It takes the same serial delivery queue, callback authority, and generation guard as
+    /// `enqueueAudioDelivery`. The queue is what orders a session's terminal event behind its PCM:
+    /// URLSession delivers a task's data callbacks before its completion callback, and each of
+    /// those enqueues here in turn. The generation guard is what withdraws the event when something
+    /// else claimed the pipeline first, so a stopped or replaced session is never told that the
+    /// request it no longer owns has ended.
+    func enqueueStreamTermination(_ termination: SpeechStreamTermination,
+                                  client: SpeechStreamClient,
+                                  requestGeneration: UInt64?) {
+        audioDeliveryQueue.async { [weak self] in
+            guard let self else { return }
+            self.callbackAuthority.lock()
+            defer { self.callbackAuthority.unlock() }
+            guard self.isCurrentRequestGeneration(requestGeneration) else { return }
+            client.didTerminate(termination)
+        }
     }
 
     func stopStreaming() {

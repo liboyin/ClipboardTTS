@@ -25,56 +25,16 @@ extension TTSNetworkManager {
     static let unplayableResponseFormatFailure =
         "The TTS endpoint returned a response that is not audio. Check the API endpoint in Settings and try again."
 
-    private struct TaskCompletionResult {
-        let provider: APIKeyProvider?
-        let requestGeneration: UInt64?
-        let responseStatusCode: Int?
-        let providerAudioByteCount: Int
-        let refusedResponseFormat: Bool
-        let hasGeminiStreamFailure: Bool
-        let hasIncompleteGeminiEvent: Bool
-        let geminiDeclaredFinishReason: String?
-        let refusedRedirect: RefusedRedirect?
-        let retryAttempt: RetryAttempt?
-        /// The client to terminate. A stale completion carries an inert one: its task is not the
-        /// active request, so it owns no session and returns before this is read.
-        let client: SpeechStreamClient
-        let isStale: Bool
-    }
-
-    private func processCompletedTask(_ task: URLSessionTask, error: Error?) -> TaskCompletionResult {
+    /// Claims a finished task's request under `stateQueue`, or returns nil when the task is stale.
+    ///
+    /// The returned context is a value copy taken while `stateQueue` is held, so the caller can read
+    /// it after the queue is released. The retry it earns is decided in that same visit, because
+    /// whether it earned one decides whether ownership is released.
+    private func processCompletedTask(_ task: URLSessionTask,
+                                      error: Error?) -> (context: ActiveRequestContext, retryAttempt: RetryAttempt?)? {
         stateQueue.sync {
-            guard let context = activeRequest, task.taskIdentifier == context.taskIdentifier else {
-                return TaskCompletionResult(
-                    provider: nil,
-                    requestGeneration: nil,
-                    responseStatusCode: nil,
-                    providerAudioByteCount: 0,
-                    refusedResponseFormat: false,
-                    hasGeminiStreamFailure: false,
-                    hasIncompleteGeminiEvent: false,
-                    geminiDeclaredFinishReason: nil,
-                    refusedRedirect: nil,
-                    retryAttempt: nil,
-                    client: SpeechStreamClient(didReceiveAudio: { _ in }, didTerminate: { _ in }),
-                    isStale: true
-                )
-            }
-
-            let result = TaskCompletionResult(
-                provider: context.provider,
-                requestGeneration: context.requestGeneration,
-                responseStatusCode: context.responseStatusCode,
-                providerAudioByteCount: context.providerAudioByteCount,
-                refusedResponseFormat: context.refusedResponseFormat,
-                hasGeminiStreamFailure: context.hasGeminiStreamFailure,
-                hasIncompleteGeminiEvent: context.geminiEventParser.hasIncompleteEvent,
-                geminiDeclaredFinishReason: context.geminiDeclaredFinishReason,
-                refusedRedirect: context.refusedRedirect,
-                retryAttempt: context.hasGeminiStreamFailure ? nil : permittedRetryAttempt(for: context, error: error),
-                client: context.client,
-                isStale: false
-            )
+            guard let context = activeRequest, task.taskIdentifier == context.taskIdentifier else { return nil }
+            let retryAttempt = context.hasGeminiStreamFailure ? nil : permittedRetryAttempt(for: context, error: error)
             // Ownership is released only when this logical request is finished, and a completion
             // that earned a retry is not: the retry continues this same request, inheriting its
             // generation and client. Releasing it here would leave a window in which nothing owns
@@ -82,10 +42,10 @@ extension TTSNetworkManager {
             // arriving in that window would find nothing to cancel and let the retry stream into a
             // session already torn down. `startRetryAttempt` replaces this context; a generation
             // that moved in the meantime has already cleared or replaced it, and refuses the retry.
-            if !context.hasGeminiStreamFailure && result.retryAttempt == nil {
+            if !context.hasGeminiStreamFailure && retryAttempt == nil {
                 activeRequest = nil
             }
-            return result
+            return (context, retryAttempt)
         }
     }
 
@@ -113,13 +73,13 @@ extension TTSNetworkManager {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let result = processCompletedTask(task, error: error)
-        if result.isStale { return }
+        guard let completion = processCompletedTask(task, error: error) else { return }
+        let (context, retryAttempt) = completion
         // A retry that starts owns the rest of this logical request, including what it publishes.
-        if let retryAttempt = result.retryAttempt, startRetryAttempt(retryAttempt) { return }
-        let requestGeneration: UInt64?
+        if let retryAttempt, startRetryAttempt(retryAttempt) { return }
+        let requestGeneration: UInt64
         let client: SpeechStreamClient
-        if result.hasGeminiStreamFailure {
+        if context.hasGeminiStreamFailure {
             guard let dataTask = task as? URLSessionDataTask,
                   let revocation = revokeFailedGeminiRequest(for: dataTask) else {
                 return
@@ -127,11 +87,11 @@ extension TTSNetworkManager {
             requestGeneration = revocation.requestGeneration
             client = revocation.client
         } else {
-            requestGeneration = result.requestGeneration
-            client = result.client
+            requestGeneration = context.requestGeneration
+            client = context.client
         }
 
-        let failureMessage = userFacingFailure(for: result, error: error)
+        let failureMessage = userFacingFailure(for: context, error: error)
         if let failureMessage {
             publishFailure(failureMessage, requestGeneration: requestGeneration)
         } else {
@@ -154,25 +114,27 @@ extension TTSNetworkManager {
     /// error that may accompany them. A refused response format sits between the two: it is the
     /// definite reason this request delivered nothing, where a transport error that arrived
     /// afterwards only says the body the app had already decided to discard stopped arriving.
-    private func userFacingFailure(for result: TaskCompletionResult, error: Error?) -> String? {
+    ///
+    /// The frame rule comes last, after Gemini's declared truncation, so a truncation that arrived
+    /// with no audio at all still explains itself. It applies to every HTTP completion, which since
+    /// D26 is only Gemini or Custom: a Realtime request has no task identifier for one to match.
+    private func userFacingFailure(for context: ActiveRequestContext, error: Error?) -> String? {
         let noPlayableAudio = Self.noPlayableAudioFailure
-        if let refusedRedirect = result.refusedRedirect {
+        if let refusedRedirect = context.refusedRedirect {
             return refusedRedirect.failureMessage
-        } else if let statusCode = result.responseStatusCode, !(200...299).contains(statusCode) {
+        } else if let statusCode = context.responseStatusCode, !(200...299).contains(statusCode) {
             return userFacingHTTPError(statusCode: statusCode)
-        } else if result.refusedResponseFormat {
+        } else if context.refusedResponseFormat {
             return Self.unplayableResponseFormatFailure
-        } else if result.provider == .gemini && result.hasGeminiStreamFailure {
+        } else if context.provider == .gemini && context.hasGeminiStreamFailure {
             return noPlayableAudio
         } else if error != nil {
             return Self.unreachableServiceFailure
-        } else if result.provider == .gemini && result.hasIncompleteGeminiEvent {
+        } else if context.provider == .gemini && context.geminiEventParser.hasIncompleteEvent {
             return noPlayableAudio
-        } else if result.provider == .gemini && declaresProviderTruncation(result.geminiDeclaredFinishReason) {
+        } else if context.provider == .gemini && declaresProviderTruncation(context.geminiDeclaredFinishReason) {
             return Self.truncatedResponseFailure
-        } else if result.provider == .gemini && !containsCompletePCMFrame(result.providerAudioByteCount) {
-            return noPlayableAudio
-        } else if result.provider == .custom && !containsCompletePCMFrame(result.providerAudioByteCount) {
+        } else if !containsCompletePCMFrame(context.providerAudioByteCount) {
             return noPlayableAudio
         }
         return nil

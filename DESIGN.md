@@ -14,9 +14,9 @@ Sources/
     DeferredClipboardAction.swift # ownership of the menu's pending deferred clipboard read
     TTSNetworkManager.swift     # request settings, state publication, response delegate entry
     TTSNetworkManager+RequestSettings.swift # the configuration a launch resolves for one provider
-    TTSNetworkManager+RequestLifecycle.swift # starting, retrying, replacing, and stopping a request
+    TTSNetworkManager+RequestLifecycle.swift # starting, retrying, replacing, and stopping a request, and its guarded PCM and terminal delivery
     TTSNetworkManager+Requests.swift        # endpoint and request-body construction
-    TTSNetworkManager+GeminiStreaming.swift # Gemini SSE parsing and audio delivery
+    TTSNetworkManager+GeminiStreaming.swift # Gemini SSE parsing and HTTP response chunks
     TTSNetworkManager+RealtimeStreaming.swift # OpenAI Realtime frames: delivery and how a request ends
     OpenAIRealtimeSpeech.swift              # the Realtime contract: endpoint, client events, server events
     RealtimeSpeechConnection.swift          # the WebSocket seam a Realtime request runs on

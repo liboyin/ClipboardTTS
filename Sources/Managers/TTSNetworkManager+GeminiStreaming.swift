@@ -132,47 +132,11 @@ extension TTSNetworkManager {
         static let noAudio = GeminiEventContent(payload: .noAudio, declaredFinishReason: nil)
     }
 
-    /// Queues PCM for a request generation and invokes its handler only while that generation
-    /// still owns delivery. Completion deliberately leaves the generation intact so audio accepted
-    /// before a normal URL-session completion remains playable.
-    func enqueueAudioDelivery(_ data: Data,
-                              dataHandler: @escaping @Sendable (Data) -> Void,
-                              requestGeneration: UInt64) {
-        audioDeliveryQueue.async { [weak self] in
-            guard let self else { return }
-            self.callbackAuthority.lock()
-            defer { self.callbackAuthority.unlock() }
-            guard self.isCurrentRequestGeneration(requestGeneration) else { return }
-            dataHandler(data)
-        }
-    }
-
-    /// Queues one request's terminal event, behind every delivery that request already queued.
-    ///
-    /// It takes the same serial delivery queue, callback authority, and generation guard as
-    /// `enqueueAudioDelivery`. The queue is what orders a session's terminal event behind its PCM:
-    /// URLSession delivers a task's data callbacks before its completion callback, and each of
-    /// those enqueues here in turn. The generation guard is what withdraws the event when something
-    /// else claimed the pipeline first, so a stopped or replaced session is never told that the
-    /// request it no longer owns has ended.
-    func enqueueStreamTermination(_ termination: SpeechStreamTermination,
-                                  client: SpeechStreamClient,
-                                  requestGeneration: UInt64?) {
-        audioDeliveryQueue.async { [weak self] in
-            guard let self else { return }
-            self.callbackAuthority.lock()
-            defer { self.callbackAuthority.unlock() }
-            guard self.isCurrentRequestGeneration(requestGeneration) else { return }
-            client.didTerminate(termination)
-        }
-    }
-
     /// What a revoked malformed Gemini stream leaves its caller to finish reporting.
     ///
     /// The revocation clears the request context, so the generation its terminal state publishes
     /// against and the client that must be told the session ended both have to travel out with it.
     struct FailedGeminiRevocation {
-        let task: URLSessionDataTask
         let requestGeneration: UInt64
         let client: SpeechStreamClient
     }
@@ -189,7 +153,6 @@ extension TTSNetworkManager {
             }
             activeRequest = nil
             return FailedGeminiRevocation(
-                task: task,
                 requestGeneration: requestGeneration,
                 client: context.client
             )
@@ -246,7 +209,7 @@ extension TTSNetworkManager {
               let revocation = revokeFailedGeminiRequest(for: failedGeminiTask) else {
             return
         }
-        revocation.task.cancel()
+        failedGeminiTask.cancel()
         publishFailure(Self.noPlayableAudioFailure, requestGeneration: revocation.requestGeneration)
         enqueueStreamTermination(.failed, client: revocation.client, requestGeneration: revocation.requestGeneration)
     }
