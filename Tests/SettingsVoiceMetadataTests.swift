@@ -39,8 +39,9 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         // WHY: A published catalog outlives the request that fetched it, and the form renders a
         // newly selected provider's saved values one render before its own `onChange` can
         // resynchronize the manager. Offering that other provider's choices would both misdescribe
-        // this provider's contract and leave the picker showing no selected item. Custom is what holds that state still: it fetches no
-        // metadata, so nothing replaces the OpenAI lists this manager already published.
+        // this provider's contract and leave the picker showing no selected item. Custom is what
+        // holds that state still: it fetches no metadata, so nothing replaces the OpenAI lists this
+        // manager already published.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Custom",
             SettingsKeys.apiBaseURL: "https://custom.api/v1/audio/speech",
@@ -69,6 +70,11 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         XCTAssertEqual(networkManager.voiceSuggestions.values, ["alloy", "nova"])
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.customModel), "custom-model")
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.customVoice), "custom-voice")
+
+        // The first assertion holds only if this lookup can see a picker at all: the same hosted
+        // form, once its provider offers suggestions, must render one it finds for each row.
+        settings.selectProvider("OpenAI")
+        XCTAssertEqual(settings.suggestionControls().count, 2, "An OpenAI form must render a visible picker per row.")
         settings.release()
     }
 

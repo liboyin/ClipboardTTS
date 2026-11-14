@@ -54,6 +54,21 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         fields.type("other-voice", intoFieldAt: 1, expecting: "custom-voice")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 1))
         fields.release()
+
+        // The absence above holds only if this lookup can see a picker at all: rows that do offer
+        // suggestions, in the same host, must render one it finds for each row.
+        let suggestingManager = TestNetworkFactory.makeManager()
+        suggestingManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
+        suggestingManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
+        let suggestingFields = HostedEditableModelVoiceFields(
+            networkManager: suggestingManager,
+            provider: .openAI,
+            model: "tts-1",
+            voice: "alloy",
+            testCase: self
+        )
+        XCTAssertEqual(suggestingFields.suggestionControls().count, 2, "Rows with suggestions must render a visible picker.")
+        suggestingFields.release()
     }
 
     func testAPickerSelectionRunsItsFieldCallbackOnce() {

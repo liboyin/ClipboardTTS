@@ -161,7 +161,7 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12, and B5 and NB62 from the macOS 27 gate run above; B5, NB52, NB53, NB57, NB59, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12, and B5 and NB62 from the macOS 27 gate run above; B5, NB52, NB53, NB57, NB59, NB62, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
@@ -196,28 +196,6 @@ No Blocking finding is outstanding; [B5](completed_work/B5.md) was the last one.
 #### NB61 — Test Voice's stopped-graph test refuses an endpoint OpenAI no longer uses
 
 **Non-blocking; assertion gap Validated by source inspection, regression protection unverified — 2026-11-03 gap review of NB57, N11, and N12.** `testTestVoiceDoesNotStartRequestWhenDefaultRateEngineCannotRecover` (`Tests/SettingsViewTests.swift:139`) selects OpenAI and fails only a request to `https://api.openai.com/v1/audio/speech`, but OpenAI speech connects to `wss://api.openai.com/v1/realtime` (`Sources/Managers/OpenAIRealtimeSpeech.swift:16`) since D26; that HTTPS address was Custom's fallback until [N13](completed_work/N13.md). Its comment also says opening Settings fetches suggestions, which D31 removed, so the handler's tolerance for other requests no longer has a reason. The URL assertion therefore cannot fail. Whether its remaining assertions (`isStreaming`, `sampleRate`, `sampleRateError`) still fail when Test Voice ignores a stopped graph was not checked. **Outcome:** the test fails on any request, as DESIGN's hosted-Settings guidance now permits, and its comment states the current premise. **Validation:** a mutant that lets Test Voice start a request despite the stopped graph fails the changed test, and the record states whether it also failed the original. **Dependencies:** none; related to NB58's weak-assertion cleanup but separate code.
-
-#### NB62 — Hosted absence assertions pass without checking anything when the control cannot be seen
-
-**Non-blocking. Validated by the B5 probe and source inspection, 2026-11-14.** Three assertions prove a control is absent by finding no AppKit control. At `adff48a` on macOS 27 none could ever be found (B5), so they passed without checking anything. B5 has restored the two Settings lookups, but nothing in either test shows that the lookup can see a picker at all:
-
-- `XCTAssertNil(host?.descendantView(of: NSPopUpButton.self))` (`Tests/MenuBarViewTests.swift:92`).
-- `fields.suggestionControls() == []` for a Custom row (`Tests/SettingsMetadataRefreshTests.swift:49`).
-- `settings.suggestionControls() == []` for a Custom form holding OpenAI lists (`Tests/SettingsVoiceMetadataTests.swift:66`).
-
-`SettingsVoiceMetadataTests.swift:102` makes the same kind of check but is followed by a positive check at `:116`. That check failed at `adff48a`, so the test failed rather than passing silently. This pattern is the one the others lack.
-
-**Outcome:** each absence assertion is paired, in the same test and harness, with a check that the same lookup does find the control in a configuration that renders it. A lookup that cannot see the control then fails instead of passing. Where no such check is possible, the test states that limit and asserts only what it can protect.
-
-The menu assertion needs a separate decision. A voice picker reintroduced into the menu as a SwiftUI `Picker` would be invisible to any windowless lookup on macOS 27; only one built from `SuggestionPicker`, the representable B5 introduced (D36), would be seen. Decide whether to keep it with an honest scope comment beside the catalog-fetch assertion that still protects the property, or to remove it with the evidence AGENTS requires.
-
-**Validation:**
-
-- A mutant that renders the forbidden control as a `SuggestionPicker` fails each Settings test.
-- A mutant that makes the lookup see nothing fails the new positive check.
-- A removal names the retained test that kills the same mutant.
-
-**Dependencies:** none since [B5](completed_work/B5.md) closed. Under D36, the Settings lookups see `SuggestionPicker`'s `NSPopUpButton` again, so the two Settings assertions check something again on macOS 27, but they still have no positive check beside them.
 
 ### Nits
 
@@ -261,6 +239,7 @@ No task is currently expanded into a full boundary. Expand every assigned task i
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [NB62](completed_work/NB62.md) — Fixed: each hosted absence assertion for a picker now sits beside a positive check, in the same test and through the same lookup, so a lookup that cannot see the control fails instead of passing.
 - [B5](completed_work/B5.md) — Fixed (D36): on macOS 27 the coverage gate passes again because Settings' suggestion pickers and the menu's sliders render through the app-owned `SuggestionPicker` and `MenuSlider` wrappers over `NSPopUpButton` and `NSSlider`.
 - [NB53](completed_work/NB53.md) — Fixed: the loopback WebSocket server reports itself stopped only once its listener, every connection it accepted, every receive it armed, and every held callback have stopped, and arms nothing once stopping begins.
 - [NB52](completed_work/NB52.md) — Fixed: the WebSocket refusal assertion receives through a gate each callback holds while it records and fulfils, so once it returns no receive can act on the test.

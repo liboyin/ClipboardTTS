@@ -62,7 +62,8 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // is therefore not reachable from any hosted assertion here, and was deliberately not
         // asserted rather than asserted in a way no mutant could break. What is covered is what
         // could actually restore the feature: an offered control, and the fetch. The control lookup
-        // can see only an AppKit-backed picker, such as `SuggestionPicker`.
+        // can see only an AppKit-backed picker: `SuggestionPicker`, the app's picker since D36, which
+        // the test proves it finds, but not a SwiftUI `Picker`.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Gemini",
             SettingsKeys.geminiVoice: "Distinctive-Review-Voice"
@@ -92,6 +93,15 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         wait(for: [settled], timeout: 1.0)
 
         XCTAssertNil(host?.descendantView(of: NSPopUpButton.self), "The menu must offer no voice picker.")
+        // That absence means something only because the same lookup finds the app's picker.
+        var pickerHost: NSHostingView? = NSHostingView(rootView: SuggestionPicker(
+            choices: ["Distinctive-Review-Voice"],
+            selection: .constant("Distinctive-Review-Voice")
+        ))
+        pickerHost?.frame = NSRect(x: 0, y: 0, width: 30, height: 24)
+        pickerHost?.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(pickerHost?.descendantView(of: NSPopUpButton.self), "The lookup must see a SuggestionPicker.")
+        pickerHost = nil
         XCTAssertEqual(
             networkManager.voiceSuggestions,
             ProviderSuggestions.unpublished,
