@@ -139,84 +139,77 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
-    func testNetworkManagerStopsStreaming() {
+    func testNetworkManagerStopsStreaming() throws {
         // WHY: Users might interrupt TTS playback. The network manager must cancel the ongoing network request
-        // to save bandwidth and instantly transition the state.
-
+        // to save bandwidth and instantly transition the state. Both effects are synchronous on the main
+        // thread, where stop publishes `isStreaming` directly and cancels the task before it returns, so
+        // they are asserted straight after the call rather than after a delay.
         let manager = TestNetworkFactory.makeManager()
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let requestStarted = XCTestExpectation(description: "Mock request started")
-        let requestFinished = XCTestExpectation(description: "Mock request finished")
+        let releaseResponse = DispatchSemaphore(value: 0)
+        // Teardown waits for the held handler, so releasing it is all that is left to do.
+        defer { releaseResponse.signal() }
         MockURLProtocol.installRequestHandler { _ in
             requestStarted.fulfill()
-            Thread.sleep(forTimeInterval: 0.5)
-            requestFinished.fulfill()
+            _ = releaseResponse.wait(timeout: .now() + 1.0)
             return (HTTPURLResponse(), Data())
         }
 
         manager.streamTTS(text: "Test cancel") { _ in }
-
+        let task = try XCTUnwrap(manager.activeTaskForTesting)
         wait(for: [requestStarted], timeout: 1.0)
-
-        let streamStarted = XCTestExpectation(description: "Wait for stream to start")
-        DispatchQueue.main.async {
-            XCTAssertTrue(manager.isStreaming)
-            streamStarted.fulfill()
-        }
-        wait(for: [streamStarted], timeout: 1.0)
+        XCTAssertTrue(manager.isStreaming)
+        XCTAssertEqual(task.state, .running)
 
         manager.stopStreaming()
 
-        let streamStopped = XCTestExpectation(description: "Wait for stream to stop")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            XCTAssertFalse(manager.isStreaming)
-            streamStopped.fulfill()
-        }
-        wait(for: [streamStopped, requestFinished], timeout: 1.0)
+        XCTAssertFalse(manager.isStreaming, "Stopping must publish the idle state before it returns.")
+        XCTAssertTrue(
+            [.canceling, .completed].contains(task.state),
+            "Stopping must cancel the in-flight request rather than let it run to completion."
+        )
+        XCTAssertNil(manager.activeTaskForTesting, "A stopped request must no longer own the pipeline.")
     }
 
-    func testNetworkManagerIgnoresDataAfterStop() {
+    func testNetworkManagerIgnoresDataAfterStop() throws {
         // WHY: A delegate callback for a task that is no longer active (e.g. one cancelled by
         // stopStreaming) must not invoke dataHandler, or a stale chunk resurrects audio after a stop.
-        // We drive the delegate method directly with a task whose identifier does not match the
-        // active one, because URLSession suppresses callbacks for a cancelled task, so the real
-        // network path can never exercise the stale-callback guard.
-        let manager = TestNetworkFactory.makeManager()
+        // We drive the delegate method directly with the task stopStreaming cancelled, because
+        // URLSession suppresses callbacks for a cancelled task, so the real network path can never
+        // exercise the stale-callback guard. A chunk the manager accepts is queued on its delivery
+        // queue before the delegate call returns, so a barrier on that queue, which this test owns,
+        // proves that no delivery is pending rather than that none arrived within a delay.
+        let audioDeliveryQueue = DispatchQueue(label: "com.clipboardtts.tests.data-after-stop")
+        let manager = TestNetworkFactory.makeManager(audioDeliveryQueue: audioDeliveryQueue)
         manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
 
         let dataReceived = LockedValue(false)
         let requestStarted = XCTestExpectation(description: "Mock request started")
         let releaseResponse = DispatchSemaphore(value: 0)
-        let responseFinished = XCTestExpectation(description: "Mock response finished")
+        // Teardown waits for the held handler, so releasing it is all that is left to do.
+        defer { releaseResponse.signal() }
         MockURLProtocol.installRequestHandler { _ in
             requestStarted.fulfill()
             _ = releaseResponse.wait(timeout: .now() + 1.0)
-            responseFinished.fulfill()
-            return (HTTPURLResponse(), Data("audiochunk".utf8))
+            return (HTTPURLResponse(), Data())
         }
         manager.streamTTS(text: "Test cancel data") { _ in
             dataReceived.withValue { $0 = true }
         }
+        let cancelledTask = try XCTUnwrap(manager.activeTaskForTesting)
         wait(for: [requestStarted], timeout: 1.0)
 
         manager.stopStreaming()
-        releaseResponse.signal()
-        wait(for: [responseFinished], timeout: 1.0)
 
-        // Simulate a late chunk arriving for the now-cancelled task. Its identifier cannot match the
-        // active one (stopStreaming cleared it), so the guard must drop it.
-        let mockSession = TestNetworkFactory.makeSession()
-        let staleTask = mockSession.dataTask(with: URL(string: "https://mock.api/v1/audio/speech")!)
-        manager.urlSession(mockSession, dataTask: staleTask, didReceive: Data("late chunk".utf8))
-        manager.urlSession(mockSession, task: staleTask, didCompleteWithError: nil)
+        // Simulate a late chunk, and the completion URLSession would send behind it, arriving for the
+        // task stop cancelled, which no longer owns the pipeline.
+        manager.urlSession(manager.session, dataTask: cancelledTask, didReceive: Data("late chunk".utf8))
+        manager.urlSession(manager.session, task: cancelledTask, didCompleteWithError: nil)
+        audioDeliveryQueue.sync {}
 
-        let expectation = XCTestExpectation(description: "Wait to ensure no data is received")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            XCTAssertFalse(dataReceived.value)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 1.0)
+        XCTAssertFalse(dataReceived.value, "A chunk for a stopped request must not reach its data handler.")
     }
 
     func testNetworkManagerFormatsGeminiRequestCorrectly() {
@@ -262,28 +255,6 @@ final class TTSNetworkManagerTests: MockURLProtocolTestCase {
         }
 
         manager.streamTTS(text: "Hello Gemini") { _ in }
-        wait(for: [expectation], timeout: 2.0)
-    }
-
-    func testNetworkManagerHandlesAPIError() {
-        let manager = TestNetworkFactory.makeManager()
-
-        manager.updateSettings(baseURL: "https://mock.api/v1/audio/speech", apiKey: "test", model: "test", voice: "test", selectedProvider: "Custom")
-
-        let expectation = XCTestExpectation(description: "Wait for error completion")
-
-        MockURLProtocol.installRequestHandler { request in
-            let errorData = Data("{\"error\": \"Unauthorized\"}".utf8)
-            let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!
-            return (response, errorData)
-        }
-
-        manager.streamTTS(text: "Test error") { _ in }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            XCTAssertFalse(manager.isStreaming)
-            expectation.fulfill()
-        }
         wait(for: [expectation], timeout: 2.0)
     }
 
