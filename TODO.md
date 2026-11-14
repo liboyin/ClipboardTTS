@@ -140,6 +140,12 @@ The cause was isolated with a diagnostic XCTest added only to a `git archive` sc
 | D35 | Supersedes D33: Settings keeps saving an API key on every keystroke, because that leaves the user no decision to make and therefore nothing to be confused about. A Save button would raise whether an unsaved draft reaches requests and what an unsaved field shows after Settings closes. | NB59 |
 | D34 | Custom's default endpoint is the native Kokoro server on the Apple GPU, `127.0.0.1:8881`, replacing the OpenAI speech fallback. | N13, S6 |
 
+### Accepted user decisions — 2026-11-14
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D36 | B5 takes direction (a): Settings' model and voice suggestion pickers and the menu's position and speed sliders render through `NSViewRepresentable` wrappers over `NSPopUpButton` and `NSSlider`, and SwiftUI's `Picker` and `Slider` are no longer used there. The user asked for the approach recommended for macOS 27 and later and for execution to start. The recommendation's reasoning: a representable's AppKit view is part of the hosting view's tree by construction, so hosted tests depend only on views the app owns. macOS 27 showed that whether SwiftUI backs its own controls with AppKit is an implementation detail that changes between releases. The scratch probes found no public in-process route to SwiftUI's self-drawn controls (subviews, accessibility children, navigation order, and hit tests all return only the host). Direction (b) would leave the form's wiring (which provider's catalog a section renders, and whether a picker writes its binding) with no automated check. The accepted cost is production code for two control types and AppKit's drawing of these controls in place of SwiftUI's. | B5, NB62 |
+
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
 ### Constraints that remain in force
@@ -171,12 +177,10 @@ macOS 27's SwiftUI draws `Picker` and `Slider` itself and no longer backs them w
 
 Until this is fixed, several properties have no working protection on macOS 27. `ModelVoiceConfigurationView.pickerChoices` (`Sources/Views/ModelVoiceConfigurationView.swift:23`) has no direct test: only the rendered-picker tests cover its refusal of another provider's list and its prepending of an unlisted selection. Rendered-picker tests are also the only coverage that a picker selection reaches its binding and runs the row callback exactly once, and that the menu keeps its playback sliders. NB62 records the absence assertions that now pass without checking anything.
 
-**Decision needed: the direction.**
+**Direction: (a), accepted as D36 on 2026-11-14.** Its execution boundary is under [Ready for implementation](#ready-for-implementation). The options as recorded:
 
-- **(a) Recommended. Back each suggestion picker and both menu sliders with an `NSViewRepresentable`** over `NSPopUpButton` and `NSSlider`. DESIGN's UI section already does this for buttons with `SettingsActionButton`, for the same reason. The existing hosted tests and their assertions stay as they are, the behavior no longer depends on the macOS version, and the controls gain AppKit's own accessibility, which bears on NB54 and NB60. The cost is production code for two control types and a change in how they draw on macOS 27.
+- **(a) Back each suggestion picker and both menu sliders with an `NSViewRepresentable`** over `NSPopUpButton` and `NSSlider`. DESIGN's UI section already does this for buttons with `SettingsActionButton`, for the same reason. The existing hosted tests and their assertions stay as they are, the behavior no longer depends on the macOS version, and the controls gain AppKit's own accessibility, which bears on NB54 and NB60. The cost is production code for two control types and a change in how they draw on macOS 27.
 - **(b) Keep SwiftUI's controls and move the lost assertions to seams that are not rendered.** Unit-test `pickerChoices` and the rule that a row renders a picker only when its choices are non-empty, and deliver a selection by writing the bound storage, as `HostedSettings.selectProvider` does for the sidebar. This is smaller and leaves the UI alone. However, nothing automated would then prove that a picker or slider renders or that a picker is wired to its binding. That loss must be recorded and covered by a manual smoke check.
-
-Record the choice as a decision before expanding the boundary.
 
 **Compatibility surface.**
 
@@ -298,7 +302,27 @@ No Nit is outstanding.
 
 ## Ready for implementation
 
-No task is currently expanded into a full boundary. Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
+Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
+
+### B5 execution boundary (D36)
+
+**Intent:** restore `./check-coverage.sh` on macOS 27. The Settings model and voice suggestion pickers and the menu's position and speed sliders render through app-owned `NSViewRepresentable` wrappers over `NSPopUpButton` and `NSSlider`, so the hosted tests reach controls the app owns on any macOS version. B5's compact entry keeps the evidence, compatibility surface, non-goals, validation, and done criteria; this section adds only how to execute them.
+
+**Revalidated against `686d593`:** the pickers are at `Sources/Views/ModelVoiceConfigurationView.swift:45` and `:63` (`Picker("")`, `.labelsHidden()`, `.frame(width: 30)`, shown only while `pickerChoices` is non-empty, with each row's `.onChange` observing the binding). The sliders are at `Sources/Views/MenuBarView.swift:89`, a position slider whose setter calls `audioPlayer.seek(to:)` over `0...max(0.01, bufferDuration)` and is disabled without audio, and `:99`, a speed slider bound to `audioPlayer.playbackRate` over `0.5...2.5` with step 0.1. The existing helpers already look for `NSPopUpButton` (`itemTitles`, `titleOfSelectedItem`, `menu.performActionForItem(at:)`) and `NSSlider`, so those tests should pass unchanged once the controls are AppKit-backed.
+
+**Implementation direction:**
+
+1. **Picker wrapper**, following `SettingsActionButton`'s conventions. It is a `NSPopUpButton` with `pullsDown` false that takes the row's choices and its `Binding<String>`. It shows the bound value as its selected item. Choosing an item writes that choice to the binding through a coordinator that `updateNSView` keeps current. Updating the view must never write the binding, so the row's `.onChange` still runs once per edit, whichever control made it. Rebuild the menu only when the choices change. Add items so that a title is never silently deduplicated or reinterpreted, and verify that against the `NSPopUpButton` API. Keep the 30-point frame and the rendering rule (no control when the choices are empty).
+2. **Slider wrapper:** a continuous `NSSlider` taking the value, the range, an optional step, and a setter. Read `isEnabled` from the SwiftUI environment so the existing `.disabled` modifiers still apply. Update the range as `bufferDuration` changes. The speed slider must deliver the same stepped values SwiftUI's `Slider(step: 0.1)` did. Decide from the macOS 27 app, recorded manually, whether tick marks appear. While the user is dragging, `updateNSView` must not pull the thumb back to a value published mid-drag. Choose and document the mechanism, and state whether a test can protect it or why it cannot. Keep seeking continuous during a drag; NB55 owns changing that.
+3. **Sizing:** the sliders keep their horizontal fill and the pickers their 30-point width. Before claiming the layout is preserved, measure at `686d593` and on the candidate, both on macOS 27: the frames of the AppKit text fields in the hosted Settings rows and the hosted menu's `fittingSize`. Explain any difference.
+
+**Tests:** keep the eight B5 tests and their assertions. Change only a helper that can no longer find a representable's view, and justify each change. Add tests for behavior the wrappers now own that no retained test covers: a programmatic update runs no callback, the selection shown follows the binding, a slider action reaches `seek(to:)` and `playbackRate`, step snapping, the enabled state, and range updates. Use owned state only; DESIGN's hosted-view rules apply, with no windows.
+
+**Edit ownership:** `Sources/Views/` (new wrapper files may be added, followed by `xcodegen generate`), the Settings and menu tests and their helpers under `Tests/`, the DESIGN UI and test-harness paragraphs, README's macOS provenance sentence, and this entry and B5's completion record. Leave NB62's three absence assertions alone except where B5's helpers must change; NB62 follows as a separate commit.
+
+**Commit plan:** one commit for B5 holding the code, tests, docs, `completed_work/B5.md`, and the removal of the B5 entries, after full gates, mutation evidence, and a clean adversarial review. NB62 follows as its own candidate.
+
+**Baseline:** at `686d593` on macOS 27.2.1, the coverage gate fails exactly the eight B5 tests, and every other test passes. That failing baseline is the defect this change fixes, so no separate prior fix applies.
 
 ## Deferred, accepted, and completed dispositions
 
