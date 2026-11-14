@@ -163,17 +163,15 @@ final class SettingsViewTests: MockURLProtocolTestCase {
         let secretStore = InMemorySecretStore()
         let audioPlayer = makeOwnedAudioPlayer(engineStarter: { _ in throw EngineStartFailure.failed })
         let defaults = makeOwnedDefaults()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        // Opening Settings on OpenAI fetches its model and voice suggestions, so only a request to
-        // the speech endpoint would mean Test Voice ignored the stopped graph.
+        // Opening Settings sends no request (its catalogs are local, D31), so any request means Test
+        // Voice ignored the stopped graph. OpenAI speaks over Realtime, which the manager opens through
+        // this factory during the click, so the check after it is synchronous; HTTP fails in the handler.
+        let connections = ScriptedRealtimeConnections()
+        addTeardownBlock { connections.all.forEach { $0.cancel() }; connections.drain() }
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults, realtimeConnections: connections)
         MockURLProtocol.installRequestHandler { request in
-            XCTAssertNotEqual(
-                request.url?.absoluteString,
-                "https://api.openai.com/v1/audio/speech",
-                "A stopped audio graph must not start Test Voice"
-            )
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
-            return (response, Data("{ \"data\": [] }".utf8))
+            XCTFail("A stopped audio graph must not start Test Voice, but it requested \(request.url?.absoluteString ?? "nil")")
+            return (HTTPURLResponse(), Data())
         }
         let settings = HostedSettings(
             networkManager: networkManager,
@@ -185,6 +183,7 @@ final class SettingsViewTests: MockURLProtocolTestCase {
 
         settings.click("Test Voice")
 
+        XCTAssertTrue(connections.all.isEmpty, "A stopped audio graph must not open a Realtime connection")
         XCTAssertEqual(audioPlayer.sampleRate, 24_000)
         XCTAssertEqual(audioPlayer.sampleRateError, "Couldn't start audio playback. Try again.")
         XCTAssertFalse(networkManager.isStreaming)
