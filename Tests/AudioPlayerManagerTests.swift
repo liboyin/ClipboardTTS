@@ -125,6 +125,19 @@ final class AudioPlayerManagerTests: XCTestCase {
         XCTAssertEqual(player.sampleRateError, "PCM sample rate must be a finite value from 8,000 to 48,000 Hz.")
     }
 
+    func testValidRateAfterAnInvalidOneRebuildsTheGraphAndClearsTheFormatFailure() {
+        // WHY: Correcting a rejected Custom rate to a different supported one is the only route from
+        // an unusable configuration back to one that can speak, so the rebuild must clear both the
+        // shown failure and the readiness that refuses new streams.
+        let player = makeOwnedAudioPlayer()
+        XCTAssertEqual(player.setSampleRate(7_999), .invalid)
+        XCTAssertFalse(player.isReadyForNewStream)
+        XCTAssertEqual(player.setSampleRate(16_000), .updated)
+        XCTAssertEqual(player.sampleRate, 16_000)
+        XCTAssertTrue(player.isReadyForNewStream)
+        XCTAssertNil(player.sampleRateError)
+    }
+
     func testSampleRateChangeClearsPlaybackAndReportsEngineRestartFailure() {
         // WHY: A valid format change invalidates already-scheduled PCM even when the engine cannot
         // restart. The UI must then show a safe cleared state instead of claiming old-format audio

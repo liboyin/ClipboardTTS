@@ -145,7 +145,7 @@ extension TTSNetworkManager {
     /// A response may end halfway through its next frame. The player retains only complete frames,
     /// so that final byte must not turn otherwise playable audio into a no-audio failure.
     func containsCompletePCMFrame(_ byteCount: Int) -> Bool {
-        byteCount >= 2
+        byteCount >= AudioPlayerManager.bytesPerPCMFrame
     }
 
     /// Returns whether a Gemini candidate explicitly reported ending for a reason other than `STOP`.

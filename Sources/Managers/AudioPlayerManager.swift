@@ -19,6 +19,9 @@ import os
 final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     static let defaultSampleRate = 24_000.0
     static let supportedSampleRateRange = 8_000.0...48_000.0
+    /// Bytes in one frame of the app's mono Int16 PCM: the unit the player buffers, schedules, and
+    /// seeks by, and the least a response must deliver to count as playable audio.
+    static let bytesPerPCMFrame = MemoryLayout<Int16>.size
     private static let automaticPlaybackPrebufferDuration: TimeInterval = 0.1
     /// How often playback republishes its position while a stream plays.
     private static let progressTickInterval: TimeInterval = 0.1
@@ -160,20 +163,38 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             notificationCenter.removeObserver(configurationChangeObserver)
         }
     }
+    /// Attaches the graph's nodes once, at creation, and connects them for the initial rate. The
+    /// engine is started only when that left a usable format.
     private func setupEngine(sampleRate: Double) {
         engine.attach(playerNode)
         engine.attach(timePitch)
-        guard let standardFormat = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+        guard connectGraph(sampleRate: sampleRate) else { return }
+        startEngineIfStopped()
+    }
+
+    /// Connects `playerNode` → `timePitch` → the main mixer in mono `sampleRate`, the one place the
+    /// graph's format is chosen, and publishes whether that left the graph holding a usable format.
+    ///
+    /// On success the format becomes the one buffered PCM is decoded with, and `sampleRate` and the
+    /// cleared format failure are published. When `AVAudioFormat` cannot represent the rate, nothing
+    /// is connected or stored, and the configuration is published as unusable, so no new stream
+    /// starts on it. The caller has already validated the rate and, when rebuilding, disconnected
+    /// the previous format; starting the engine stays with the caller.
+    private func connectGraph(sampleRate: Double) -> Bool {
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
+            hasValidSampleRateConfiguration = false
             formatError = Self.unconfigurableSampleRateMessage
-            return
+            return false
+        }
+        engine.connect(playerNode, to: timePitch, format: format)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+        bufferQueue.sync {
+            audioFormat = format
         }
         self.sampleRate = sampleRate
-        bufferQueue.sync {
-            audioFormat = standardFormat
-        }
-        engine.connect(playerNode, to: timePitch, format: standardFormat)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: standardFormat)
-        startEngineIfStopped()
+        hasValidSampleRateConfiguration = true
+        formatError = nil
+        return true
     }
 
     /// Changes the PCM sample rate after clearing all audio that was decoded with the previous format.
@@ -196,19 +217,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         engine.disconnectNodeOutput(playerNode)
         engine.disconnectNodeInput(timePitch)
         engine.disconnectNodeOutput(timePitch)
-        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else {
-            hasValidSampleRateConfiguration = false
-            formatError = Self.unconfigurableSampleRateMessage
-            return .engineStartFailed
-        }
-        engine.connect(playerNode, to: timePitch, format: format)
-        engine.connect(timePitch, to: engine.mainMixerNode, format: format)
-        bufferQueue.sync {
-            audioFormat = format
-        }
-        self.sampleRate = sampleRate
-        hasValidSampleRateConfiguration = true
-        formatError = nil
+        guard connectGraph(sampleRate: sampleRate) else { return .engineStartFailed }
         return startEngineIfStopped() ? .updated : .engineStartFailed
     }
 
@@ -258,13 +267,12 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             self.pcmData.accumulated.append(data)
             self.pcmData.unprocessed.append(data)
 
-            let bytesPerNetworkFrame = 2 // 16-bit PCM = 2 bytes per frame
-            self.bufferedPCMFrameCount = self.pcmData.accumulated.count / bytesPerNetworkFrame
+            self.bufferedPCMFrameCount = self.pcmData.accumulated.count / Self.bytesPerPCMFrame
             let bufferedFrameCount = self.bufferedPCMFrameCount
-            let frameCapacity = AVAudioFrameCount(self.pcmData.unprocessed.count / bytesPerNetworkFrame)
+            let frameCapacity = AVAudioFrameCount(self.pcmData.unprocessed.count / Self.bytesPerPCMFrame)
             guard frameCapacity > 0 else { return }
 
-            let bytesToProcess = Int(frameCapacity) * bytesPerNetworkFrame
+            let bytesToProcess = Int(frameCapacity) * Self.bytesPerPCMFrame
             let dataToProcess = self.pcmData.unprocessed.prefix(bytesToProcess)
             self.pcmData.unprocessed.removeFirst(bytesToProcess)
 
@@ -372,7 +380,6 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             // PCM arriving behind the chosen position must not restart what they left paused.
             underrunSuspendedGeneration = nil
             guard let format = audioFormat else { return }
-            let bytesPerNetworkFrame = 2
             let bufferedDuration = Double(bufferedPCMFrameCount) / format.sampleRate
             let frameOffset: Int
             if requestedProgress >= bufferedDuration {
@@ -383,8 +390,8 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
                 frameOffset = min(Int(requestedProgress * format.sampleRate), bufferedPCMFrameCount)
             }
             clampedProgress = Double(frameOffset) / format.sampleRate
-            let byteOffset = frameOffset * bytesPerNetworkFrame
-            let completeByteCount = bufferedPCMFrameCount * bytesPerNetworkFrame
+            let byteOffset = frameOffset * Self.bytesPerPCMFrame
+            let completeByteCount = bufferedPCMFrameCount * Self.bytesPerPCMFrame
 
             playerNode.stop()
 
@@ -395,7 +402,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             }
 
             let remainingData = pcmData.accumulated.subdata(in: byteOffset..<completeByteCount)
-            let frameCapacity = AVAudioFrameCount(remainingData.count / bytesPerNetworkFrame)
+            let frameCapacity = AVAudioFrameCount(remainingData.count / Self.bytesPerPCMFrame)
             guard frameCapacity > 0,
                   let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
 
@@ -503,16 +510,18 @@ extension AudioPlayerManager {
 /// the end of a request that has terminated — are told apart here, because only the underrun is
 /// resumed by the audio that arrives behind it.
 extension AudioPlayerManager {
+    #if DEBUG
     /// Whether the player node is itself running, as distinct from the `isPlaying` state published
-    /// for the menu.
+    /// for the menu; debug-only, for tests.
     ///
     /// The two must agree: telling the menu that a stream resumed without restarting the node
     /// reports playback that is not happening. Nothing in the app reads this — the node's own state
-    /// is never the app's source of truth for what is playing — but the invariant is worth stating
-    /// where it can be checked.
+    /// is never the app's source of truth for what is playing — so it is compiled only where tests
+    /// check that invariant.
     var isNodePlaying: Bool {
         playerNode.isPlaying
     }
+    #endif
 
     /// Records how the request feeding `streamGeneration` ended, behind that stream's own PCM.
     ///
