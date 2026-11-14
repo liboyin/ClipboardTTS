@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Settings renders a newly selected provider's saved model and voice one render before its
 /// `onChange` can resynchronize the manager, so the previous provider's list is still published at
-/// that point. Naming the owner on the list itself is what lets a form refuse it: SwiftUI documents
-/// a picker whose selection has no matching tag as undefined, and offering one provider's choices
-/// under another provider's configuration would be wrong even where it is defined.
+/// that point. Naming the owner on the list itself is what lets a form refuse it: offering one
+/// provider's choices under another provider's configuration would misdescribe that provider's
+/// contract and leave its picker showing no selected item.
 struct ProviderSuggestions: Equatable {
     /// The state before any list is published, and the one an invalidated metadata scope returns to.
     static let unpublished = ProviderSuggestions(provider: nil, values: [])

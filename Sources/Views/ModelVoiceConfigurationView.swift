@@ -17,9 +17,9 @@ struct ModelVoiceConfigurationView: View {
     ///
     /// A list published for another provider is refused outright, because this form renders a newly
     /// selected provider's saved values one render before `onChange` resynchronizes the manager.
-    /// `selection` is always among the choices returned: SwiftUI documents a picker whose selection
-    /// has no matching tag as undefined, so a model or voice the provider does not list is offered
-    /// as it was typed, keeping it selected while the catalog it can be corrected from stays usable.
+    /// `selection` is always among the choices returned, so the picker always shows a selected item:
+    /// a model or voice the provider does not list is offered as it was typed, keeping it selected
+    /// while the catalog it can be corrected from stays usable.
     static func pickerChoices(from suggestions: ProviderSuggestions,
                               for provider: APIKeyProvider,
                               selection: String) -> [String] {
@@ -43,13 +43,8 @@ struct ModelVoiceConfigurationView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
 
                 if !modelChoices.isEmpty {
-                    Picker("", selection: $ttsModel) {
-                        ForEach(modelChoices, id: \.self) { model in
-                            Text(model).tag(model)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 30)
+                    SuggestionPicker(choices: modelChoices, selection: $ttsModel)
+                        .frame(width: 30)
                 }
             }
             // Each row observes its binding rather than each control: the field and the picker edit
@@ -61,13 +56,8 @@ struct ModelVoiceConfigurationView: View {
                     .textFieldStyle(RoundedBorderTextFieldStyle())
 
                 if !voiceChoices.isEmpty {
-                    Picker("", selection: $ttsVoice) {
-                        ForEach(voiceChoices, id: \.self) { voice in
-                            Text(voice).tag(voice)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 30)
+                    SuggestionPicker(choices: voiceChoices, selection: $ttsVoice)
+                        .frame(width: 30)
                 }
             }
             .onChange(of: ttsVoice) { onVoiceChange() }

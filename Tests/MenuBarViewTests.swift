@@ -55,12 +55,14 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // old picker could remain, issuing a provider request on every menu open for a catalog
         // nothing displays. The playback controls must survive both removals.
         //
-        // Scope, so the next reader does not over-trust this: a windowless host backs a picker with
-        // a real NSPopUpButton but draws a plain `Text` itself, publishing no NSTextField and no
-        // accessibility tree — the same reason `SettingsActionButton` and `RequestErrorView` exist.
-        // A decorative voice *label* is therefore not reachable from any hosted assertion here, and
-        // was deliberately not asserted rather than asserted in a way no mutant could break. What is
-        // covered is what could actually restore the feature: an offered control, and the fetch.
+        // Scope, so the next reader does not over-trust this: a windowless host draws a plain `Text`
+        // itself, publishing no NSTextField and no accessibility tree, and from macOS 27 it draws
+        // SwiftUI's own `Picker` and `Slider` that way too — the reason `SettingsActionButton`,
+        // `SuggestionPicker`, `MenuSlider`, and `RequestErrorView` exist. A decorative voice *label*
+        // is therefore not reachable from any hosted assertion here, and was deliberately not
+        // asserted rather than asserted in a way no mutant could break. What is covered is what
+        // could actually restore the feature: an offered control, and the fetch. The control lookup
+        // can see only an AppKit-backed picker, such as `SuggestionPicker`.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Gemini",
             SettingsKeys.geminiVoice: "Distinctive-Review-Voice"

@@ -161,58 +161,11 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12, and B5 and NB62 from the macOS 27 gate run above; NB52, NB53, NB57, NB59, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12, and B5 and NB62 from the macOS 27 gate run above; B5, NB52, NB53, NB57, NB59, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
-#### B5 — On macOS 27 the coverage gate fails because hosted tests cannot reach SwiftUI pickers or sliders
-
-**Blocking. Validated by a gate run and scratch probes, 2026-11-14 (see [macOS 27 gate run](#macos-27-gate-run--2026-11-14)).** AGENTS requires every code, test, or configuration candidate to pass `./check-coverage.sh`, and on a macOS 27 host it cannot. Eight tests fail at `adff48a` with no code change:
-
-- `MenuBarViewTests`: `testMenuNeitherShowsAVoiceControlNorFetchesTheCatalogItWouldNeed` and `testRenderedErrorMessageAppearsAfterNetworkFailureWithoutRemovingControls`.
-- `SettingsMetadataRefreshTests`: `testAPickerSelectionRunsItsFieldCallbackOnce` and `testATypedEditRunsItsFieldCallbackOnceBesideARenderedPicker`.
-- `SettingsVoiceMetadataTests`: `testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog`, `testFieldsOfferChoicesForTheProviderTheyRenderNotTheOneTheManagerHolds`, `testTypedOffCatalogModelAndVoiceStaySelectedBesideTheDocumentedCatalog`, and `testProviderSwitchOffersOnlyTheNewProviderCatalogWithItsOwnSavedValues`.
-
-macOS 27's SwiftUI draws `Picker` and `Slider` itself and no longer backs them with `NSPopUpButton` or `NSSlider`, which is how it already treats `Button`. A window does not change this. As a result, three test lookups now find nothing: `NSView.collectSuggestionControls` (`Tests/HostedSettings.swift:339`), the `select(_:inSuggestionControlAt:)` helper built on `collectPopUpButtons` (`Tests/SettingsMetadataRefreshTests.swift:209`, `:253`), and `descendantView(of: NSSlider.self)` (`Tests/MenuBarViewTests.swift:98`, `:177`, `:192`). Text fields, the secure field, `SettingsActionButton`, and `RequestErrorView` are still reachable.
-
-Until this is fixed, several properties have no working protection on macOS 27. `ModelVoiceConfigurationView.pickerChoices` (`Sources/Views/ModelVoiceConfigurationView.swift:23`) has no direct test: only the rendered-picker tests cover its refusal of another provider's list and its prepending of an unlisted selection. Rendered-picker tests are also the only coverage that a picker selection reaches its binding and runs the row callback exactly once, and that the menu keeps its playback sliders. NB62 records the absence assertions that now pass without checking anything.
-
-**Direction: (a), accepted as D36 on 2026-11-14.** Its execution boundary is under [Ready for implementation](#ready-for-implementation). The options as recorded:
-
-- **(a) Back each suggestion picker and both menu sliders with an `NSViewRepresentable`** over `NSPopUpButton` and `NSSlider`. DESIGN's UI section already does this for buttons with `SettingsActionButton`, for the same reason. The existing hosted tests and their assertions stay as they are, the behavior no longer depends on the macOS version, and the controls gain AppKit's own accessibility, which bears on NB54 and NB60. The cost is production code for two control types and a change in how they draw on macOS 27.
-- **(b) Keep SwiftUI's controls and move the lost assertions to seams that are not rendered.** Unit-test `pickerChoices` and the rule that a row renders a picker only when its choices are non-empty, and deliver a selection by writing the bound storage, as `HostedSettings.selectProvider` does for the sidebar. This is smaller and leaves the UI alone. However, nothing automated would then prove that a picker or slider renders or that a picker is wired to its binding. That loss must be recorded and covered by a manual smoke check.
-
-**Compatibility surface.**
-
-- **Settings:** the model and voice rows keep their field-plus-30-point-picker layout, item order and tags, displayed selection, the unlisted-selection behavior, and exactly-once callbacks per edit.
-- **Menu:** the position and speed sliders keep their ranges (`0...max(0.01, bufferDuration)`, `0.5...2.5` with step 0.1), disabled-without-audio state, the Speed readout, and continuous `seek(to:)` during a drag.
-- **Unchanged:** persistence keys, provider requests, Services, clipboard handling, and the audio session.
-
-Under (a), measure the rows' and menu's geometry at HEAD before claiming it is preserved.
-
-**Non-goals.**
-
-- NB54's and NB60's accessible names, which may share a manual session.
-- NB55's seek cost; a representable must not quietly switch to seeking on drag end.
-- S5.
-- Restoring window hosting in tests.
-
-**Validation.**
-
-- Run the full gates on macOS 27 from cleared derived data.
-- State whether a macOS 26 host was available. If one was not, record that as a limitation.
-- Each restored or relocated invariant needs mutation evidence through `run-mutants.py`: a revert, a plausible regression (for example, `pickerChoices` offering another provider's list, or a picker whose selection bypasses its binding), and an over-restriction (for example, a picker that never renders).
-- Under (b), before removing any rendered assertion, show which retained test kills the same mutant.
-- Smoke-check the Settings pickers and menu sliders by hand in the running app on macOS 27, and record the result.
-
-**Done.**
-
-- `./check-coverage.sh` and the Debug build pass on macOS 27.
-- DESIGN's UI and test-harness paragraphs say which controls are AppKit-backed and why.
-- The stale premise in `Tests/MenuBarViewTests.swift:58`–`:60` ("a windowless host backs a picker with a real NSPopUpButton") is corrected.
-- README's "last checked on" provenance names the macOS version.
-
-**Dependencies:** none. This blocks the gate for every other code, test, or configuration task on a macOS 27 host.
+No Blocking finding is outstanding; [B5](completed_work/B5.md) was the last one.
 
 ### Non-blocking
 
@@ -222,11 +175,11 @@ Under (a), measure the rows' and menu's geometry at HEAD before claiming it is p
 
 #### NB54 — Give menu controls explicit accessible purposes and values
 
-**Non-blocking; source gap Validated, runtime announcements unverified — 2026-11-03 review.** `Sources/Views/MenuBarView.swift:89` and `:99` construct position and speed sliders without labels or explicit units; the adjacent Speed text is a separate view. Settings and Quit at `:43`–`:56` use only symbol images without action-specific accessible names. Useful announcements currently depend on framework inference. **Outcome:** sliders identify playback position and rate with meaningful time/multiplier values, and icon actions identify their purpose, preserving the visual layout and playback/click contracts. **Validation:** first inspect the menu with VoiceOver, then verify distinguishable names, values, enabled states, and keyboard operation after the change; retain existing behavioral coverage. The current windowless menu tests cannot establish the live accessibility result, so record that manual check explicitly rather than treating source modifiers as proof. **Dependencies:** none; any replacement of controls rather than adding semantics needs its own boundary. **Disposition:** backlogged at the user's request; not a claim of an observed VoiceOver failure.
+**Non-blocking; source gap Validated, runtime announcements unverified — 2026-11-03 review.** `Sources/Views/MenuBarView.swift:89` and `:99` constructed position and speed sliders without labels or explicit units (since [B5](completed_work/B5.md), `MenuSlider` at `:90` and `:101`, an `NSSlider` given no accessibility label); the adjacent Speed text is a separate view. Settings and Quit at `:43`–`:56` use only symbol images without action-specific accessible names. Useful announcements currently depend on framework inference. **Outcome:** sliders identify playback position and rate with meaningful time/multiplier values, and icon actions identify their purpose, preserving the visual layout and playback/click contracts. **Validation:** first inspect the menu with VoiceOver, then verify distinguishable names, values, enabled states, and keyboard operation after the change; retain existing behavioral coverage. The current windowless menu tests cannot establish the live accessibility result, so record that manual check explicitly rather than treating source modifiers as proof. **Dependencies:** none; any replacement of controls rather than adding semantics needs its own boundary. **Disposition:** backlogged at the user's request; not a claim of an observed VoiceOver failure.
 
 #### NB55 — Dragging the position slider re-encodes the remaining buffer on the main thread
 
-**Non-blocking; structure Validated by source inspection, cost unmeasured — 2026-11-03 second review.** `Sources/Views/MenuBarView.swift:89` binds the position slider's setter directly to `AudioPlayerManager.seek(to:)`, so every drag event seeks. `seek` (`Sources/Managers/AudioPlayerManager.swift:361`) runs inside `bufferQueue.sync` on the main queue and converts every remaining buffered frame into one new Float32 `AVAudioPCMBuffer` (`:397`–`:402`, `makePCMBuffer` at `:424`). The buffer keeps the whole session's PCM (`pcmData.accumulated` is never trimmed), and only the clipboard OpenAI path is length-capped, so for a long Gemini, Custom, or Services read each drag event costs in proportion to the audio after the thumb: ten minutes at 24 kHz is 14.4 M frames, a 58 MB float allocation. No hitch was observed or measured. **Outcome:** decide from a measurement whether dragging long audio stalls the menu; if it does, bound the cost of a seek (for example, schedule the remainder in bounded chunks, or seek on drag end) while preserving exact-end seek/replay, clamping, and underrun release. **Validation:** first measure seek duration on a long owned buffer at HEAD; a change keeps the existing seek/replay tests and adds one that fails when a seek converts more than the bound. **Dependencies:** none; serialized frame counts, not published durations, keep deciding seek boundaries.
+**Non-blocking; structure Validated by source inspection, cost unmeasured — 2026-11-03 second review.** `Sources/Views/MenuBarView.swift:90` passes `AudioPlayerManager.seek(to:)` as the position `MenuSlider`'s `onEdit`, and the continuous `NSSlider` calls it on every drag event, as the SwiftUI slider it replaced in [B5](completed_work/B5.md) did. `seek` (`Sources/Managers/AudioPlayerManager.swift:361`) runs inside `bufferQueue.sync` on the main queue and converts every remaining buffered frame into one new Float32 `AVAudioPCMBuffer` (`:397`–`:402`, `makePCMBuffer` at `:424`). The buffer keeps the whole session's PCM (`pcmData.accumulated` is never trimmed), and only the clipboard OpenAI path is length-capped, so for a long Gemini, Custom, or Services read each drag event costs in proportion to the audio after the thumb: ten minutes at 24 kHz is 14.4 M frames, a 58 MB float allocation. No hitch was observed or measured. **Outcome:** decide from a measurement whether dragging long audio stalls the menu; if it does, bound the cost of a seek (for example, schedule the remainder in bounded chunks, or seek on drag end) while preserving exact-end seek/replay, clamping, and underrun release. **Validation:** first measure seek duration on a long owned buffer at HEAD; a change keeps the existing seek/replay tests and adds one that fails when a seek converts more than the bound. **Dependencies:** none; serialized frame counts, not published durations, keep deciding seek boundaries.
 
 #### NB56 — Production initializers default to the developer's Keychain
 
@@ -238,7 +191,7 @@ Under (a), measure the rows' and menu's geometry at HEAD before claiming it is p
 
 #### NB60 — Settings' suggestion pickers have no accessible name
 
-**Non-blocking; source gap Validated, runtime announcements unverified — 2026-11-03 second review.** `Sources/Views/ModelVoiceConfigurationView.swift:46` and `:64` build the model and voice pickers as `Picker("")` with `.labelsHidden()` in a 30-point frame, beside text fields labelled only by their placeholders, so VoiceOver can reach two unnamed pop-up buttons. NB54 covers only the menu. **Outcome:** each picker and field says whether it chooses the model or the voice, preserving the layout and the exactly-once edit contract. **Validation:** as for NB54: inspect with VoiceOver first, record the manual result, and keep the existing picker coverage. **Dependencies:** none; may share a boundary and a manual session with NB54. If S5 lands first, apply this to the resulting view.
+**Non-blocking; source gap Validated, runtime announcements unverified — 2026-11-03 second review.** `Sources/Views/ModelVoiceConfigurationView.swift:46` and `:59` build the model and voice pickers as `SuggestionPicker` pop-up buttons (since [B5](completed_work/B5.md); before it, `Picker("")` with `.labelsHidden()`) in a 30-point frame, with no accessibility label, beside text fields labelled only by their placeholders, so VoiceOver can reach two unnamed pop-up buttons. NB54 covers only the menu. **Outcome:** each picker and field says whether it chooses the model or the voice, preserving the layout and the exactly-once edit contract. **Validation:** as for NB54: inspect with VoiceOver first, record the manual result, and keep the existing picker coverage. **Dependencies:** none; may share a boundary and a manual session with NB54. If S5 lands first, apply this to the resulting view.
 
 #### NB61 — Test Voice's stopped-graph test refuses an endpoint OpenAI no longer uses
 
@@ -246,25 +199,25 @@ Under (a), measure the rows' and menu's geometry at HEAD before claiming it is p
 
 #### NB62 — Hosted absence assertions pass without checking anything when the control cannot be seen
 
-**Non-blocking. Validated by the B5 probe and source inspection, 2026-11-14.** Three assertions prove a control is absent by finding no AppKit control. On macOS 27 none can ever be found (B5), so they pass without checking anything:
+**Non-blocking. Validated by the B5 probe and source inspection, 2026-11-14.** Three assertions prove a control is absent by finding no AppKit control. At `adff48a` on macOS 27 none could ever be found (B5), so they passed without checking anything. B5 has restored the two Settings lookups, but nothing in either test shows that the lookup can see a picker at all:
 
 - `XCTAssertNil(host?.descendantView(of: NSPopUpButton.self))` (`Tests/MenuBarViewTests.swift:92`).
 - `fields.suggestionControls() == []` for a Custom row (`Tests/SettingsMetadataRefreshTests.swift:49`).
 - `settings.suggestionControls() == []` for a Custom form holding OpenAI lists (`Tests/SettingsVoiceMetadataTests.swift:66`).
 
-`SettingsVoiceMetadataTests.swift:102` makes the same kind of check but is followed by a positive check at `:116`, which fails, so that test fails rather than passing silently. This pattern is the one the others lack.
+`SettingsVoiceMetadataTests.swift:102` makes the same kind of check but is followed by a positive check at `:116`. That check failed at `adff48a`, so the test failed rather than passing silently. This pattern is the one the others lack.
 
 **Outcome:** each absence assertion is paired, in the same test and harness, with a check that the same lookup does find the control in a configuration that renders it. A lookup that cannot see the control then fails instead of passing. Where no such check is possible, the test states that limit and asserts only what it can protect.
 
-The menu assertion needs a separate decision. A voice picker reintroduced into the menu would be a SwiftUI `Picker`, which no windowless lookup can see on macOS 27 whatever B5 chooses, unless the menu used B5's representable. Decide whether to keep it with an honest scope comment beside the catalog-fetch assertion that still protects the property, or to remove it with the evidence AGENTS requires.
+The menu assertion needs a separate decision. A voice picker reintroduced into the menu as a SwiftUI `Picker` would be invisible to any windowless lookup on macOS 27; only one built from `SuggestionPicker`, the representable B5 introduced (D36), would be seen. Decide whether to keep it with an honest scope comment beside the catalog-fetch assertion that still protects the property, or to remove it with the evidence AGENTS requires.
 
 **Validation:**
 
-- A mutant that renders the forbidden control on B5's seam fails each Settings test.
+- A mutant that renders the forbidden control as a `SuggestionPicker` fails each Settings test.
 - A mutant that makes the lookup see nothing fails the new positive check.
 - A removal names the retained test that kills the same mutant.
 
-**Dependencies:** B5, whose chosen seam determines what the lookups can see.
+**Dependencies:** none since [B5](completed_work/B5.md) closed. Under D36, the Settings lookups see `SuggestionPicker`'s `NSPopUpButton` again, so the two Settings assertions check something again on macOS 27, but they still have no positive check beside them.
 
 ### Nits
 
@@ -302,32 +255,13 @@ No Nit is outstanding.
 
 ## Ready for implementation
 
-Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
-
-### B5 execution boundary (D36)
-
-**Intent:** restore `./check-coverage.sh` on macOS 27. The Settings model and voice suggestion pickers and the menu's position and speed sliders render through app-owned `NSViewRepresentable` wrappers over `NSPopUpButton` and `NSSlider`, so the hosted tests reach controls the app owns on any macOS version. B5's compact entry keeps the evidence, compatibility surface, non-goals, validation, and done criteria; this section adds only how to execute them.
-
-**Revalidated against `686d593`:** the pickers are at `Sources/Views/ModelVoiceConfigurationView.swift:45` and `:63` (`Picker("")`, `.labelsHidden()`, `.frame(width: 30)`, shown only while `pickerChoices` is non-empty, with each row's `.onChange` observing the binding). The sliders are at `Sources/Views/MenuBarView.swift:89`, a position slider whose setter calls `audioPlayer.seek(to:)` over `0...max(0.01, bufferDuration)` and is disabled without audio, and `:99`, a speed slider bound to `audioPlayer.playbackRate` over `0.5...2.5` with step 0.1. The existing helpers already look for `NSPopUpButton` (`itemTitles`, `titleOfSelectedItem`, `menu.performActionForItem(at:)`) and `NSSlider`, so those tests should pass unchanged once the controls are AppKit-backed.
-
-**Implementation direction:**
-
-1. **Picker wrapper**, following `SettingsActionButton`'s conventions. It is a `NSPopUpButton` with `pullsDown` false that takes the row's choices and its `Binding<String>`. It shows the bound value as its selected item. Choosing an item writes that choice to the binding through a coordinator that `updateNSView` keeps current. Updating the view must never write the binding, so the row's `.onChange` still runs once per edit, whichever control made it. Rebuild the menu only when the choices change. Add items so that a title is never silently deduplicated or reinterpreted, and verify that against the `NSPopUpButton` API. Keep the 30-point frame and the rendering rule (no control when the choices are empty).
-2. **Slider wrapper:** a continuous `NSSlider` taking the value, the range, an optional step, and a setter. Read `isEnabled` from the SwiftUI environment so the existing `.disabled` modifiers still apply. Update the range as `bufferDuration` changes. The speed slider must deliver the same stepped values SwiftUI's `Slider(step: 0.1)` did. Decide from the macOS 27 app, recorded manually, whether tick marks appear. While the user is dragging, `updateNSView` must not pull the thumb back to a value published mid-drag. Choose and document the mechanism, and state whether a test can protect it or why it cannot. Keep seeking continuous during a drag; NB55 owns changing that.
-3. **Sizing:** the sliders keep their horizontal fill and the pickers their 30-point width. Before claiming the layout is preserved, measure at `686d593` and on the candidate, both on macOS 27: the frames of the AppKit text fields in the hosted Settings rows and the hosted menu's `fittingSize`. Explain any difference.
-
-**Tests:** keep the eight B5 tests and their assertions. Change only a helper that can no longer find a representable's view, and justify each change. Add tests for behavior the wrappers now own that no retained test covers: a programmatic update runs no callback, the selection shown follows the binding, a slider action reaches `seek(to:)` and `playbackRate`, step snapping, the enabled state, and range updates. Use owned state only; DESIGN's hosted-view rules apply, with no windows.
-
-**Edit ownership:** `Sources/Views/` (new wrapper files may be added, followed by `xcodegen generate`), the Settings and menu tests and their helpers under `Tests/`, the DESIGN UI and test-harness paragraphs, README's macOS provenance sentence, and this entry and B5's completion record. Leave NB62's three absence assertions alone except where B5's helpers must change; NB62 follows as a separate commit.
-
-**Commit plan:** one commit for B5 holding the code, tests, docs, `completed_work/B5.md`, and the removal of the B5 entries, after full gates, mutation evidence, and a clean adversarial review. NB62 follows as its own candidate.
-
-**Baseline:** at `686d593` on macOS 27.2.1, the coverage gate fails exactly the eight B5 tests, and every other test passes. That failing baseline is the defect this change fixes, so no separate prior fix applies.
+No task is currently expanded into a full boundary. Expand every assigned task into a boundary here before implementing it, and give every change its assigned scope.
 
 ## Deferred, accepted, and completed dispositions
 
 Each finding closed or accepted without change has its own record in [completed_work/](completed_work/), holding its full disposition, evidence, and limitations. This list is the index.
 
+- [B5](completed_work/B5.md) — Fixed (D36): on macOS 27 the coverage gate passes again because Settings' suggestion pickers and the menu's sliders render through the app-owned `SuggestionPicker` and `MenuSlider` wrappers over `NSPopUpButton` and `NSSlider`.
 - [NB53](completed_work/NB53.md) — Fixed: the loopback WebSocket server reports itself stopped only once its listener, every connection it accepted, every receive it armed, and every held callback have stopped, and arms nothing once stopping begins.
 - [NB52](completed_work/NB52.md) — Fixed: the WebSocket refusal assertion receives through a gate each callback holds while it records and fulfils, so once it returns no receive can act on the test.
 - [N13](completed_work/N13.md) — Fixed (D34): with no saved Base URL, Custom starts and Settings shows `http://127.0.0.1:8881/v1/audio/speech`, the native Kokoro server, instead of OpenAI's retired speech endpoint.

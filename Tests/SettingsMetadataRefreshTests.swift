@@ -81,6 +81,42 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         fields.release()
     }
 
+    func testRebuiltSuggestionChoicesRunNoFieldCallback() {
+        // WHY: A picker's choices change without any edit when its catalog is republished, and when
+        // a typed value the catalog lacks is prepended to it. Rebuilding the picker for either must
+        // keep showing the bound value and must not write it, or the row would run its callback, and
+        // apply the form, for an edit nobody made. The voice starts on the second choice so that a
+        // rebuild selecting or writing its first item would change the value.
+        let networkManager = TestNetworkFactory.makeManager()
+        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
+        let fields = HostedEditableModelVoiceFields(
+            networkManager: networkManager,
+            provider: .openAI,
+            model: "tts-1",
+            voice: "nova",
+            testCase: self
+        )
+
+        fields.type("typed-model", intoFieldAt: 0, expecting: "tts-1")
+        XCTAssertEqual(
+            fields.suggestionControls().first,
+            HostedSettings.SuggestionControl(choices: ["typed-model", "tts-1", "tts-1-hd"], selection: "typed-model")
+        )
+        XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0), "One typed edit runs one callback.")
+
+        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova", "sage"])
+        fields.settle()
+
+        XCTAssertEqual(
+            fields.suggestionControls().last,
+            HostedSettings.SuggestionControl(choices: ["alloy", "nova", "sage"], selection: "nova")
+        )
+        XCTAssertEqual(fields.fieldTexts(), ["typed-model", "nova"])
+        XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0), "A republished catalog is not an edit.")
+        fields.release()
+    }
+
     func testEachSettingsEditRefreshesOnlyTheSuggestionListsThatDependOnIt() throws {
         // WHY: Both suggestion lists are the selected provider's catalogs, so no key, model, or voice
         // edit can change them, and refreshing on every keystroke would only republish what the
@@ -219,6 +255,11 @@ private final class HostedEditableModelVoiceFields {
             return
         }
         menu.performActionForItem(at: index)
+        settleHostedView(host, file: file, line: line)
+    }
+
+    /// Runs the main-queue turns an update the test made outside the fields needs to render.
+    func settle(file: StaticString = #filePath, line: UInt = #line) {
         settleHostedView(host, file: file, line: line)
     }
 

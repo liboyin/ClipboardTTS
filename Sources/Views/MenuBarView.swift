@@ -86,17 +86,24 @@ struct MenuBarView: View {
                 .buttonStyle(PlainButtonStyle())
                 .disabled(!audioPlayer.hasAudio)
 
-                Slider(value: Binding(
-                    get: { audioPlayer.playbackProgress },
-                    set: { audioPlayer.seek(to: $0) }
-                ), in: 0...max(0.01, audioPlayer.bufferDuration))
+                // Seeks on every change during a drag, as SwiftUI's slider did (NB55 owns that cost).
+                MenuSlider(
+                    value: audioPlayer.playbackProgress,
+                    range: 0...max(0.01, audioPlayer.bufferDuration),
+                    onEdit: { audioPlayer.seek(to: $0) }
+                )
                 .disabled(!audioPlayer.hasAudio)
             }
             .padding(.horizontal)
 
             HStack {
                 Text("Speed:")
-                Slider(value: $audioPlayer.playbackRate, in: 0.5...2.5, step: 0.1)
+                MenuSlider(
+                    value: audioPlayer.playbackRate,
+                    range: 0.5...2.5,
+                    step: 0.1,
+                    onEdit: { audioPlayer.playbackRate = $0 }
+                )
                 Text(String(format: "%.1fx", audioPlayer.playbackRate))
                     .frame(width: 40, alignment: .trailing)
             }

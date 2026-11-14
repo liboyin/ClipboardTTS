@@ -39,8 +39,7 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         // WHY: A published catalog outlives the request that fetched it, and the form renders a
         // newly selected provider's saved values one render before its own `onChange` can
         // resynchronize the manager. Offering that other provider's choices would both misdescribe
-        // this provider's contract and leave the picker's selection without a matching tag, which
-        // SwiftUI documents as undefined. Custom is what holds that state still: it fetches no
+        // this provider's contract and leave the picker showing no selected item. Custom is what holds that state still: it fetches no
         // metadata, so nothing replaces the OpenAI lists this manager already published.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Custom",
@@ -125,8 +124,8 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
     func testTypedOffCatalogModelAndVoiceStaySelectedBesideTheDocumentedCatalog() throws {
         // WHY: A model or voice the documented catalog does not list is still the user's choice, so
         // the form must keep each exactly as typed and speak with it, while offering the catalog it
-        // can be corrected from. Dropping either from its picker would leave that selection without
-        // a matching tag; replacing it with a catalog entry would send a request the user never
+        // can be corrected from. Dropping either from its picker would leave that picker showing no
+        // selected item; replacing it with a catalog entry would send a request the user never
         // configured. Both fields are driven because each renders its own picker. The model is the
         // retired 3.1 preview, which users who chose it keep after it left the catalog.
         let defaults = makeOwnedDefaults([
