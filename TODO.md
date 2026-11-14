@@ -42,6 +42,12 @@ On macOS 26.7.1 with Python 3.9.6, the tooling reviewer ran `./verify-coverage-g
 
 Reviewed clean revision `23a88719e6fa848f212efd6d07197d912b2ce87d`, the commit recording the review above, from runtime/performance, test-ownership, distribution, accessibility, and simplification angles. At the user's request it did not use the adversarial-review skill; the main agent inspected everything directly and skipped findings already recorded above. It read every file under `Sources/`, the tooling scripts' structure, the cited tests, and the documentation, and ran `grep` inventories over `Sources/` and `Tests/`, `lipo -archs` on the local Release product, and line and word counts. Environment: Darwin 25.6.0, Xcode 27.2 (27B52), SwiftLint 0.65.1. No build, XCTest, coverage, mutation, live-provider, profiling, or VoiceOver run was performed, so performance and prompt claims below are source-derived hypotheses. NB55–NB60, N12–N13, and S7–S11 come from it; the user's disposition is to record them, not implement them.
 
+### macOS 27 gate run — 2026-11-14
+
+After the host was updated from macOS 26 to macOS 27.2.1 (26B131), the user asked for the build and gates to be rerun at clean `adff48a`, then for the failures to be investigated and recorded as tasks. Environment: Apple silicon arm64, Xcode 27.2 (27B52) with the unchanged MacOSX27.2 SDK, XcodeGen 2.46.0, SwiftLint 0.65.1. After deleting the project's derived data and running `xcodegen generate`, `xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSApp -configuration Debug CODE_SIGNING_ALLOWED=NO build` succeeded, with strict SwiftLint reporting 0 violations in 122 files and no source warnings; the only warning was README's benign AppIntents metadata warning. `./check-coverage.sh` then exited 65 from `xcodebuild test`, before any coverage verdict: 447 tests ran, with 15 assertion failures in 8 tests (B5). The last recorded pass of the same suite was [NB53](completed_work/NB53.md)'s final candidate at `eaf528b`: 447 tests, 0 failures, on macOS 26.7.1 (25G241) with the same Xcode. The only later commits are documentation and the marketing-version bump, so the failures come from the macOS 27 runtime, not from a code change. The logs also showed Xcode environment errors unrelated to the macOS build: "CoreSimulator is out of date", the `DVTCoreDeviceCore` plug-in failing to load, and the test host's `com.apple.linkd.autoShortcut` XPC connection being refused. These need the user's Xcode component reinstall, not a repository change.
+
+The cause was isolated with a diagnostic XCTest added only to a `git archive` scratch copy of `adff48a` and run alone with `-only-testing` into scratch derived data. It used `makeOwnedDefaults`, `InMemorySecretStore`, `TestNetworkFactory`, and `makeOwnedAudioPlayer` under `MockURLProtocolTestCase`, so it touched no developer state. The probe printed each host's AppKit subview tree and walked `accessibilityChildren()` for three cases. (1) A bare SwiftUI view held a `Picker` with hidden labels, a `.menu`-style `Picker`, a `Slider`, a `Toggle`, and a `Button`. It was tested windowless, in a borderless offscreen `NSWindow` before ordering, and in the same window after `orderFrontRegardless()`. In every case each control produced only a `_FocusRingView` (plus a `KeyViewProxy` once ordered), with no `NSPopUpButton`, `NSSlider`, or `NSButton`, and the host reported role `AXGroup` with no accessibility children. (2) Hosted `SettingsView` for Gemini still built AppKit text fields, the secure field, the sidebar's `OutlineListRepresentable`, and `SettingsActionButton`'s `NSButton`, but each suggestion picker was only a `_FocusRingView`. (3) Hosted `MenuBarView` held only `_FocusRingView`s. The window case was diagnostic only, since DESIGN forbids window hosts in tests. The scratch copy and its derived data were deleted afterwards; this paragraph is the retained recipe and result. No live provider, VoiceOver session, or launch of the real app ran, so how macOS 27 draws these controls in the production windows was not observed.
+
 ## Decisions and constraints
 
 ### Accepted user decisions — 2026-09-06
@@ -149,11 +155,60 @@ NB20's and NB21's inventories were taken on 2026-09-21, produced D18–D20, and 
 
 ## Active backlog
 
-S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12; NB52, NB53, NB57, NB59, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
+S-prefixed IDs mark user-requested streamlining work rather than review findings: S1–S2 originated on 2026-09-24, and S3–S4 were recorded on 2026-09-26 after S2's architecture discussion. Finding IDs preserve the full-project review's numbering; NB26–NB29 and N6 continue that sequence from the 2026-09-18 commit review, and N7 from NB12's gate run, both recorded under Evidence provenance. NB30 came from NB26's mutation run, NB31 from the startup inspection that followed it, NB33–NB41 from S2's review on 2026-09-25 and 2026-09-26, NB42 from NB35's review on 2026-09-26, NB43 from NB40's investigation on 2026-09-28, and NB44–NB45 from the gap review of the D22 sequence on 2026-09-29, NB46–NB47 from the gap review of the NB31/NB18 group on 2026-10-12, and NB48–NB49 and N8–N10 from the gap review of that session's changes on 2026-10-13. NB52–NB54, N11, and simplification proposals S5–S6 come from the 2026-11-03 full-project review above, and NB55–NB60, N12–N13, and S7–S11 from the second review that day, and NB61 from the gap review of NB57, N11, and N12, and B5 and NB62 from the macOS 27 gate run above; NB52, NB53, NB57, NB59, N11, N12, and N13 are closed. Severity and readiness are separate: needing a decision does not make a defect non-blocking.
 
 ### Blocking
 
-No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
+#### B5 — On macOS 27 the coverage gate fails because hosted tests cannot reach SwiftUI pickers or sliders
+
+**Blocking. Validated by a gate run and scratch probes, 2026-11-14 (see [macOS 27 gate run](#macos-27-gate-run--2026-11-14)).** AGENTS requires every code, test, or configuration candidate to pass `./check-coverage.sh`, and on a macOS 27 host it cannot. Eight tests fail at `adff48a` with no code change:
+
+- `MenuBarViewTests`: `testMenuNeitherShowsAVoiceControlNorFetchesTheCatalogItWouldNeed` and `testRenderedErrorMessageAppearsAfterNetworkFailureWithoutRemovingControls`.
+- `SettingsMetadataRefreshTests`: `testAPickerSelectionRunsItsFieldCallbackOnce` and `testATypedEditRunsItsFieldCallbackOnceBesideARenderedPicker`.
+- `SettingsVoiceMetadataTests`: `testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog`, `testFieldsOfferChoicesForTheProviderTheyRenderNotTheOneTheManagerHolds`, `testTypedOffCatalogModelAndVoiceStaySelectedBesideTheDocumentedCatalog`, and `testProviderSwitchOffersOnlyTheNewProviderCatalogWithItsOwnSavedValues`.
+
+macOS 27's SwiftUI draws `Picker` and `Slider` itself and no longer backs them with `NSPopUpButton` or `NSSlider`, which is how it already treats `Button`. A window does not change this. As a result, three test lookups now find nothing: `NSView.collectSuggestionControls` (`Tests/HostedSettings.swift:339`), the `select(_:inSuggestionControlAt:)` helper built on `collectPopUpButtons` (`Tests/SettingsMetadataRefreshTests.swift:209`, `:253`), and `descendantView(of: NSSlider.self)` (`Tests/MenuBarViewTests.swift:98`, `:177`, `:192`). Text fields, the secure field, `SettingsActionButton`, and `RequestErrorView` are still reachable.
+
+Until this is fixed, several properties have no working protection on macOS 27. `ModelVoiceConfigurationView.pickerChoices` (`Sources/Views/ModelVoiceConfigurationView.swift:23`) has no direct test: only the rendered-picker tests cover its refusal of another provider's list and its prepending of an unlisted selection. Rendered-picker tests are also the only coverage that a picker selection reaches its binding and runs the row callback exactly once, and that the menu keeps its playback sliders. NB62 records the absence assertions that now pass without checking anything.
+
+**Decision needed: the direction.**
+
+- **(a) Recommended. Back each suggestion picker and both menu sliders with an `NSViewRepresentable`** over `NSPopUpButton` and `NSSlider`. DESIGN's UI section already does this for buttons with `SettingsActionButton`, for the same reason. The existing hosted tests and their assertions stay as they are, the behavior no longer depends on the macOS version, and the controls gain AppKit's own accessibility, which bears on NB54 and NB60. The cost is production code for two control types and a change in how they draw on macOS 27.
+- **(b) Keep SwiftUI's controls and move the lost assertions to seams that are not rendered.** Unit-test `pickerChoices` and the rule that a row renders a picker only when its choices are non-empty, and deliver a selection by writing the bound storage, as `HostedSettings.selectProvider` does for the sidebar. This is smaller and leaves the UI alone. However, nothing automated would then prove that a picker or slider renders or that a picker is wired to its binding. That loss must be recorded and covered by a manual smoke check.
+
+Record the choice as a decision before expanding the boundary.
+
+**Compatibility surface.**
+
+- **Settings:** the model and voice rows keep their field-plus-30-point-picker layout, item order and tags, displayed selection, the unlisted-selection behavior, and exactly-once callbacks per edit.
+- **Menu:** the position and speed sliders keep their ranges (`0...max(0.01, bufferDuration)`, `0.5...2.5` with step 0.1), disabled-without-audio state, the Speed readout, and continuous `seek(to:)` during a drag.
+- **Unchanged:** persistence keys, provider requests, Services, clipboard handling, and the audio session.
+
+Under (a), measure the rows' and menu's geometry at HEAD before claiming it is preserved.
+
+**Non-goals.**
+
+- NB54's and NB60's accessible names, which may share a manual session.
+- NB55's seek cost; a representable must not quietly switch to seeking on drag end.
+- S5.
+- Restoring window hosting in tests.
+
+**Validation.**
+
+- Run the full gates on macOS 27 from cleared derived data.
+- State whether a macOS 26 host was available. If one was not, record that as a limitation.
+- Each restored or relocated invariant needs mutation evidence through `run-mutants.py`: a revert, a plausible regression (for example, `pickerChoices` offering another provider's list, or a picker whose selection bypasses its binding), and an over-restriction (for example, a picker that never renders).
+- Under (b), before removing any rendered assertion, show which retained test kills the same mutant.
+- Smoke-check the Settings pickers and menu sliders by hand in the running app on macOS 27, and record the result.
+
+**Done.**
+
+- `./check-coverage.sh` and the Debug build pass on macOS 27.
+- DESIGN's UI and test-harness paragraphs say which controls are AppKit-backed and why.
+- The stale premise in `Tests/MenuBarViewTests.swift:58`–`:60` ("a windowless host backs a picker with a real NSPopUpButton") is corrected.
+- README's "last checked on" provenance names the macOS version.
+
+**Dependencies:** none. This blocks the gate for every other code, test, or configuration task on a macOS 27 host.
 
 ### Non-blocking
 
@@ -184,6 +239,28 @@ No Blocking finding is outstanding; [B2](completed_work/B2.md) was the last one.
 #### NB61 — Test Voice's stopped-graph test refuses an endpoint OpenAI no longer uses
 
 **Non-blocking; assertion gap Validated by source inspection, regression protection unverified — 2026-11-03 gap review of NB57, N11, and N12.** `testTestVoiceDoesNotStartRequestWhenDefaultRateEngineCannotRecover` (`Tests/SettingsViewTests.swift:139`) selects OpenAI and fails only a request to `https://api.openai.com/v1/audio/speech`, but OpenAI speech connects to `wss://api.openai.com/v1/realtime` (`Sources/Managers/OpenAIRealtimeSpeech.swift:16`) since D26; that HTTPS address was Custom's fallback until [N13](completed_work/N13.md). Its comment also says opening Settings fetches suggestions, which D31 removed, so the handler's tolerance for other requests no longer has a reason. The URL assertion therefore cannot fail. Whether its remaining assertions (`isStreaming`, `sampleRate`, `sampleRateError`) still fail when Test Voice ignores a stopped graph was not checked. **Outcome:** the test fails on any request, as DESIGN's hosted-Settings guidance now permits, and its comment states the current premise. **Validation:** a mutant that lets Test Voice start a request despite the stopped graph fails the changed test, and the record states whether it also failed the original. **Dependencies:** none; related to NB58's weak-assertion cleanup but separate code.
+
+#### NB62 — Hosted absence assertions pass without checking anything when the control cannot be seen
+
+**Non-blocking. Validated by the B5 probe and source inspection, 2026-11-14.** Three assertions prove a control is absent by finding no AppKit control. On macOS 27 none can ever be found (B5), so they pass without checking anything:
+
+- `XCTAssertNil(host?.descendantView(of: NSPopUpButton.self))` (`Tests/MenuBarViewTests.swift:92`).
+- `fields.suggestionControls() == []` for a Custom row (`Tests/SettingsMetadataRefreshTests.swift:49`).
+- `settings.suggestionControls() == []` for a Custom form holding OpenAI lists (`Tests/SettingsVoiceMetadataTests.swift:66`).
+
+`SettingsVoiceMetadataTests.swift:102` makes the same kind of check but is followed by a positive check at `:116`, which fails, so that test fails rather than passing silently. This pattern is the one the others lack.
+
+**Outcome:** each absence assertion is paired, in the same test and harness, with a check that the same lookup does find the control in a configuration that renders it. A lookup that cannot see the control then fails instead of passing. Where no such check is possible, the test states that limit and asserts only what it can protect.
+
+The menu assertion needs a separate decision. A voice picker reintroduced into the menu would be a SwiftUI `Picker`, which no windowless lookup can see on macOS 27 whatever B5 chooses, unless the menu used B5's representable. Decide whether to keep it with an honest scope comment beside the catalog-fetch assertion that still protects the property, or to remove it with the evidence AGENTS requires.
+
+**Validation:**
+
+- A mutant that renders the forbidden control on B5's seam fails each Settings test.
+- A mutant that makes the lookup see nothing fails the new positive check.
+- A removal names the retained test that kills the same mutant.
+
+**Dependencies:** B5, whose chosen seam determines what the lookups can see.
 
 ### Nits
 
