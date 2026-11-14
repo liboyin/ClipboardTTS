@@ -74,7 +74,9 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
     // read/cleared from the main thread (seek/stop). All access MUST
     // go through bufferQueue to avoid a data race.
     private let bufferQueue = DispatchQueue(label: "com.clipboardtts.audiobuffer")
-    private var pcmData = (accumulated: Data(), unprocessed: Data())
+    /// Every byte the current stream has delivered, kept whole so a seek or replay can reschedule it.
+    /// Only its complete frames are ever scheduled; a final odd byte waits here for the next packet.
+    private var pcmData = Data()
     private var bufferedPCMFrameCount = 0
     private var baseProgressOffset: Double = 0.0
     private var scheduleGeneration: Int = 0
@@ -264,17 +266,19 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             guard self.scheduleGeneration == streamGeneration else { return }
             guard let format = self.audioFormat else { return }
 
-            self.pcmData.accumulated.append(data)
-            self.pcmData.unprocessed.append(data)
-
-            self.bufferedPCMFrameCount = self.pcmData.accumulated.count / Self.bytesPerPCMFrame
+            // Every frame before the previous count was scheduled by an earlier packet, so the frames
+            // this packet completed, including one finished by a byte left over from the last, are
+            // exactly those between the two counts.
+            let previousFrameCount = self.bufferedPCMFrameCount
+            self.pcmData.append(data)
+            self.bufferedPCMFrameCount = self.pcmData.count / Self.bytesPerPCMFrame
             let bufferedFrameCount = self.bufferedPCMFrameCount
-            let frameCapacity = AVAudioFrameCount(self.pcmData.unprocessed.count / Self.bytesPerPCMFrame)
+            let frameCapacity = AVAudioFrameCount(bufferedFrameCount - previousFrameCount)
             guard frameCapacity > 0 else { return }
 
-            let bytesToProcess = Int(frameCapacity) * Self.bytesPerPCMFrame
-            let dataToProcess = self.pcmData.unprocessed.prefix(bytesToProcess)
-            self.pcmData.unprocessed.removeFirst(bytesToProcess)
+            let dataToProcess = self.pcmData.subdata(
+                in: previousFrameCount * Self.bytesPerPCMFrame..<bufferedFrameCount * Self.bytesPerPCMFrame
+            )
 
             guard let buffer = self.makePCMBuffer(from: dataToProcess, format: format, frameCapacity: frameCapacity) else { return }
 
@@ -342,8 +346,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
             automaticPlaybackGeneration = nil
             automaticPlaybackSuppressedGeneration = nil
             underrunSuspendedGeneration = nil
-            pcmData.accumulated.removeAll()
-            pcmData.unprocessed.removeAll()
+            pcmData.removeAll()
             bufferedPCMFrameCount = 0
         }
         playerNode.stop()
@@ -372,7 +375,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
         var clampedProgress = 0.0
         var reachedBufferEnd = false
 
-        // Both scheduleAudio and seek manipulate the player node based on pcmData.accumulated. Keeping
+        // Both scheduleAudio and seek manipulate the player node based on pcmData. Keeping
         // those operations on bufferQueue means a seek runs after all earlier scheduling work, then
         // prevents it from surviving playerNode.stop() and being replayed alongside the seek buffer.
         bufferQueue.sync {
@@ -401,7 +404,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            let remainingData = pcmData.accumulated.subdata(in: byteOffset..<completeByteCount)
+            let remainingData = pcmData.subdata(in: byteOffset..<completeByteCount)
             let frameCapacity = AVAudioFrameCount(remainingData.count / Self.bytesPerPCMFrame)
             guard frameCapacity > 0,
                   let buffer = makePCMBuffer(from: remainingData, format: format, frameCapacity: frameCapacity) else { return }
@@ -417,7 +420,7 @@ final class AudioPlayerManager: ObservableObject, @unchecked Sendable {
 
         guard reachedBufferEnd else { return }
 
-        // playerNode.stop() above clears every scheduled buffer, while pcmData.accumulated is retained
+        // playerNode.stop() above clears every scheduled buffer, while pcmData is retained
         // for play() to seek back to zero and replay without requesting audio again.
         isPlaying = false
         stopProgressTimer()
