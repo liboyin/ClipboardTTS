@@ -11,6 +11,22 @@ Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text a
 - A Mac with Apple silicon running macOS 14 or later, and Xcode. The app is distributed for Apple silicon only and does not run on Intel Macs.
 - `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them. Every app build runs `swiftlint --strict` over `Sources` and `Tests` and fails if SwiftLint is not on `PATH` or in Homebrew's `/opt/homebrew/bin` or `/usr/local/bin`.
 
+## First use
+
+To build your own copy, install the tools in [Requirements](#requirements), then run these commands from this repository:
+
+```sh
+xcodegen generate
+./package.sh
+```
+
+1. Move `build/Build/Products/Release/ClipboardTTS.app` to `/Applications`. If you received a packaged copy, move that app instead and follow the first-run instructions supplied by [package.sh](package.sh).
+2. Launch ClipboardTTS from `/Applications` and open its menu-bar icon; it has no Dock icon.
+3. Click the gear button to open **Settings** and select a provider in the sidebar. For OpenAI or Gemini, enter your API key and choose a model and voice. For Custom, configure your server's full speech URL, model, voice, key if required, and PCM sample rate; [Local Kokoro Server](#local-kokoro-server) gives a local setup.
+4. Click **Test Voice** to check the configuration. Then copy text, open the menu-bar icon, and click **Speak Copied Text**. If the button says **Clear Buffer**, click it first to discard the previous speech, then click **Speak Copied Text**.
+
+See [USER_STORIES](USER_STORIES.md) for playback behavior and provider-specific limits, and [Packaging](#packaging) to enable the selected-text service.
+
 ## Build
 
 Regenerate Xcode project after editing `project.yml` or adding/removing source or test files, so Xcode discovers the current file set:
@@ -25,7 +41,11 @@ xcodebuild -project ClipboardTTSApp.xcodeproj -scheme ClipboardTTSApp -configura
 
 Both targets remain in Swift 5 language mode, but `project.yml` enables complete strict-concurrency checking for each of them, and the setting sits on each target rather than on a command, so anything that builds a target checks it: `./check-coverage.sh` builds the test bundle and, through the test target's declared dependency, the app target as well, while the explicit app build above remains a required gate in its own right. An incremental build reports only the file batches it recompiled, so clear the derived data before concluding that a target is warning-free.
 
-The `ClipboardTTSApp` target builds `ClipboardTTS.app`; its target, scheme, Swift module, and bundle identifier keep the `ClipboardTTSApp` name, so saved preferences and Keychain items carry over. It and its unit-test bundle both target macOS 14, so every gate runs on the app's own minimum; macOS 14 is also the minimum of the XCTest libraries in Xcode 27.2, last checked with that Xcode on macOS 27.2.1. The generated project has one `ClipboardTTSApp` scheme, whose test action runs that bundle, so the coverage script selects it and the current host architecture explicitly to avoid a multiple-destination warning. Xcode 27.2 invokes AppIntents metadata extraction for both targets even though neither links AppIntents; its “Metadata extraction skipped, no AppIntents.framework dependency found” warning is benign tool metadata, not a source warning. Do not suppress compiler or lint diagnostics to hide it.
+The `ClipboardTTSApp` target builds `ClipboardTTS.app`; its target, scheme, Swift module, and bundle identifier keep the `ClipboardTTSApp` name, so saved preferences and Keychain items carry over.
+
+The app and its unit-test bundle both have a macOS 14 deployment target. Tests run on the host macOS version; a gate run on macOS 27.2.1 does not demonstrate runtime compatibility with macOS 14. [N12](completed_work/N12.md) records the `vtool` inspection of Xcode 27.2's XCTest libraries at revision `69e5e29` on Darwin 25.6.0: their minimum is macOS 14.
+
+The generated project has one `ClipboardTTSApp` scheme, whose test action runs that bundle, so the coverage script selects it and the current host architecture explicitly to avoid a multiple-destination warning. Xcode 27.2 invokes AppIntents metadata extraction for both targets even though neither links AppIntents; its “Metadata extraction skipped, no AppIntents.framework dependency found” warning is benign tool metadata, not a source warning. Do not suppress compiler or lint diagnostics to hide it.
 
 ## Test
 
@@ -52,6 +72,12 @@ Those checks have not been run by the agent that introduced the exclusions; they
 
 ## Mutation Testing
 
+### Isolation
+
+The runner adds no isolation of its own, so a mutant that weakens the tests' own [isolation](DESIGN.md#test-harness) — the hosted startup graph, the secret store, the preference domain, or network routing — must not be run through it as it stands; record that category as not applicable for that reason unless the user approves an isolation for it. For network routing, TODO's D24 approves one: every request the selected tests issue targets a loopback literal, and the spec and its selectors are inspected first.
+
+### Run mutations
+
 Mutation evidence for code under XCTest runs through `./run-mutants.py SPEC.json --out DIR`. The spec supplies exact text replacements in order; optional `tests` selects suites or cases, and optional `untracked` names in-scope untracked files. For example:
 
 ```json
@@ -66,29 +92,33 @@ Mutation evidence for code under XCTest runs through `./run-mutants.py SPEC.json
 }
 ```
 
-Replace the example paths and text with the candidate's actual inputs. Omit `tests` to run the whole test bundle and `untracked` when no untracked files belong to the candidate. `--only NAME ...` restricts execution to named mutants, and `--test-deadline SECONDS` replaces the default 30-minute deadline on each test run. `run-mutants.py`'s module docstring states the runner's contract, and its function docstrings and comments give the reasons for each rule below.
+Replace the example paths and text with the candidate's actual inputs. Omit `tests` to run the whole test bundle and `untracked` when no untracked files belong to the candidate. `--only NAME ...` restricts execution to named mutants, and `--test-deadline SECONDS` replaces the default 30-minute deadline on each test run. [run-mutants.py](run-mutants.py)'s module docstring states the runner's contract, and its function docstrings and comments give the reasons for each rule below.
 
 ### Inputs
 
 Names become log filenames: letters, digits, `.`, `_`, and `-`, starting with a letter or digit, unique regardless of case, and not `control`, which names the unmutated run's log. Paths must be relative, stay inside the scratch copy, and identify files in the target state. Named untracked files must be regular, unignored files, not symlinks. Every edit's nonempty old text must match exactly once where that edit applies. Malformed specs, unknown keys, and text containing NUL or invalid Unicode are refused before building, as are a spec that cannot be read and a `DIR` that cannot be created.
 
-`DIR` must be outside the repository, must not contain it, and must be new, empty, or marked as owned by the runner. A second run on the same `DIR` is refused before anything in it is deleted, and so are symlinked output children; the previous `results.json` and logs are removed before the spec is read (`claim_output`).
+`DIR` must be outside the repository, must not contain it, and must be new, empty, or marked as owned by the runner. A second run on the same `DIR` is refused before anything in it is deleted, and so are symlinked output children; the previous `results.json` and logs are removed before the spec is read ([claim_output](run-mutants.py)).
 
 ### What a run tests
 
-The scratch copy holds every path in the index as the working tree holds it, whatever `HEAD`, an export attribute, or an assume-unchanged flag says, plus the named untracked files; an indexed path the working tree holds as a directory, such as a submodule, is refused (`build_copy`). The unmutated control must pass, and every selector must run at least one test that is not skipped. Generation must preserve all edit targets before tests launch; this also catches tracked generated files such as `Sources/Info.plist`, whose generator input should be mutated instead (`run_tests`). After each mutant the runner restores original bytes, regenerates the project, and verifies the restored edit targets. A regeneration that fails there, or a write of a mutant's edits that fails (a read-only file or a full disk, for example) once whatever it wrote is restored, stops the run with exit 2 and no verdict for that mutant.
+The scratch copy uses indexed paths as the working tree holds them, whatever `HEAD`, an export attribute, or an assume-unchanged flag says, plus the named untracked files. Paths beneath a working-tree symlink are omitted rather than followed; an indexed path the working tree holds as a directory, such as a submodule, is refused ([build_copy](run-mutants.py)).
+
+The unmutated control must pass, and every selector must run at least one test that is not skipped. Generation must preserve all edit targets before tests launch; this also catches tracked generated files such as `Sources/Info.plist`, whose generator input should be mutated instead ([run_tests](run-mutants.py)).
+
+After each mutant the runner restores original bytes, regenerates the project, and verifies the restored edit targets. If regeneration fails, the run stops with exit 2 and no verdict for that mutant. If writing a mutant's edits fails (a read-only file or a full disk, for example), the runner restores whatever it wrote before stopping with the same exit code and no verdict for that mutant.
 
 ### Interrupts and deadlines
 
-Once the control begins, SIGINT and SIGTERM, including a terminal's Ctrl-C, stop the running test tool and let restoration finish before the runner exits; before then, either ends the runner before any mutant is applied. Any other signal, such as SIGHUP, ends the runner at once and can leave the copy mutated until the next run rebuilds it (`run_shielded` and `Interrupts` explain the process-group handling).
+Once the control begins, SIGINT and SIGTERM, including a terminal's Ctrl-C, stop the running test tool and let restoration finish before the runner exits; before then, either ends the runner before any mutant is applied. Any other signal, such as SIGHUP, ends the runner at once and can leave the copy mutated until the next run rebuilds it ([run_shielded](run-mutants.py) and [Interrupts](run-mutants.py) explain the process-group handling).
 
-A test run, build included, still going at its deadline is presumed hung and stopped (`run_tests`; `TEST_DEADLINE` records how the 30-minute default was sized). That run is `NO-VERDICT` whatever its log holds, with a detail naming the deadline, so its mutant is unjudged, a stopped control refuses the run, and otherwise the next mutant runs. Its log shows the test that was running; to tell a slow run from a hang, rerun that mutant with `--only` and a longer deadline. XcodeGen and `uname` get 60 s each: one still going then is killed with every process in its session, and the run stops with exit 2, as it does when one fails. If the error adds that not every process in its session could be confirmed stopped, check for leftovers.
+A test run, build included, still going at its deadline is presumed hung and stopped ([run_tests](run-mutants.py); [TEST_DEADLINE](run-mutants.py) records how the 30-minute default was sized). That run is `NO-VERDICT` whatever its log holds, with a detail naming the deadline, so its mutant is unjudged, a stopped control refuses the run, and otherwise the next mutant runs. Its log shows the test that was running; to tell a slow run from a hang, rerun that mutant with `--only` and a longer deadline. XcodeGen and `uname` get 60 s each: one still going then is killed with every process in its session, and the run stops with exit 2, as it does when one fails. If the error adds that not every process in its session could be confirmed stopped, check for leftovers.
 
 `xcodebuild`'s own test timeouts stay off, because they bound a test but not a build, a launch, or `xcodebuild` itself; a scheme or test plan that enables them makes a test past its allowance read as `KILLED` by that test, which Xcode's `Failing tests:` summary names.
 
 ### Verdicts, exit codes, and results
 
-Verdicts come from the log's last standalone terminal marker (`classify`):
+Verdicts come from the log's last standalone terminal marker ([classify](run-mutants.py)):
 
 - `KILLED` names every test a failed run reports failing, in an `error: -[…]` line or in the `Failing tests:` summary Xcode prints directly above the final marker, which alone names a test that crashed, exited, or exceeded an enabled execution allowance (D23).
 - `SURVIVED` requires success with at least one test executed and not skipped.
@@ -97,19 +127,23 @@ Verdicts come from the log's last standalone terminal marker (`classify`):
 - `FAILED-UNNAMED` means a finished failure that names no test, such as a crash in a suite's class-level `setUp` or `tearDown`, and leaves its mutant unjudged.
 - `NO-VERDICT` means no terminal marker, or a run its deadline stopped.
 
-Logs are read as UTF-8 whatever the locale, and a byte that cannot be decoded in one, or in a failed tool's error output, is read as U+FFFD rather than ending the run (`read_log`, `describe`); a verdict line escapes what the locale's encoding cannot carry rather than failing, and `results.json` keeps the exact name (the comment above the runner's entry point).
+Test logs are read as UTF-8 with undecodable bytes replaced by U+FFFD ([read_log](run-mutants.py)). Failed-tool stderr receives the same replacement only when [describe](run-mutants.py) receives bytes. The `uname` and two `git rev-parse` calls use `text=True`, so subprocess decoding happens first, strictly in the locale's encoding; replacement is not guaranteed for those calls (the remaining investigation is [NB64](TODO.md#nb64--three-runner-tool-calls-may-not-read-their-output-as-readme-describes)).
 
-Exit 0 means all mutants received a verdict, not that all were killed. Exit 1 means a mutant was unjudged, `NO-VERDICT` or `FAILED-UNNAMED`, or ran no tests, or that the runner raised an exception it does not expect, a bug it surfaces with Python's traceback rather than refusing, after which `results.json` exists only if the control had begun and then records an incomplete run with that error. Exit 2 means the runner refused or interrupted the run, and a failed tool's own error output follows the refusal.
+The [runner entry point](run-mutants.py) (`__main__`) configures stdout to escape characters the locale's encoding cannot carry, so printing a verdict line does not fail for that reason. `results.json` keeps the exact test name.
 
-Once the control begins, `results.json` is written however the runner ends, except by a signal it does not handle, such as SIGHUP, which can leave none. It records what the module docstring lists, plus any error, the selectors, and the selected mutants; its digests are SHA-256, of the spec's bytes and of the copied target state before generation, so the file alone identifies its evidence. Inspect it and the per-mutant logs in `DIR`; the scratch copy remains for inspection.
+| Exit | Meaning |
+|---|---|
+| 0 | All mutants received a verdict; this does not mean all were killed. |
+| 1 | A mutant was unjudged (`NO-VERDICT` or `FAILED-UNNAMED`), ran no tests, or the runner raised an unexpected exception. |
+| 2 | The runner refused the run or handled an interruption. A failed tool's own error output follows the refusal. |
+
+An unexpected exception is surfaced with Python's traceback. In that case, `results.json` exists only if the control had begun and records an incomplete run with the error.
+
+Once the control begins, `results.json` is written however the runner ends, except by a signal it does not handle, such as SIGHUP, which can leave none. It records what the [run-mutants.py module docstring](run-mutants.py) lists, plus any error, the selectors, and the selected mutants; its digests are SHA-256, of the spec's bytes and of the copied target state before generation, so the file alone identifies its evidence. Inspect it and the per-mutant logs in `DIR`; the scratch copy remains for inspection.
 
 ### Verifying the runner
 
-`./verify-mutation-runner.py` verifies the runner without Xcode; run it whenever the runner changes. Its module docstring describes the cases. `--list` prints each case's stable name; with no argument it runs every case, and naming cases, as in `./verify-mutation-runner.py classify/a_passing_run_survives verdicts_and_restore`, runs only those. An unknown name refuses the run with exit 2, as does running cases under Python's optimization (`-O` or `PYTHONOPTIMIZE`); a run with a failing case exits 1. Cleanup stops every stand-in process a case started and fails the case for one not confirmed gone within 5 seconds, or names it on stderr if the run was interrupted (`owned_processes`). If cleanup cannot finish, it retains the case's pid ledger, reports its location and the original error, and marks its processes as unconfirmed: inspect that ledger and stop any remaining owned processes before removing it. A Ctrl-C during cleanup waits for it to finish. Tooling scripts are mutated against their own verifiers rather than this XCTest runner.
-
-### Isolation
-
-The runner adds no isolation of its own, so a mutant that weakens the tests' own [isolation](DESIGN.md#test-harness) — the hosted startup graph, the secret store, the preference domain, or network routing — must not be run through it as it stands; record that category as not applicable for that reason unless the user approves an isolation for it. For network routing, TODO's D24 approves one: every request the selected tests issue targets a loopback literal, and the spec and its selectors are inspected first.
+`./verify-mutation-runner.py` verifies the runner without Xcode; run it whenever the runner changes. The [verify-mutation-runner.py module docstring](verify-mutation-runner.py) describes the cases. `--list` prints each case's stable name; with no argument it runs every case, and naming cases, as in `./verify-mutation-runner.py classify/a_passing_run_survives verdicts_and_restore`, runs only those. An unknown name refuses the run with exit 2, as does running cases under Python's optimization (`-O` or `PYTHONOPTIMIZE`); a run with a failing case exits 1. Cleanup stops every stand-in process a case started and fails the case for one not confirmed gone within 5 seconds, or names it on stderr if the run was interrupted ([owned_processes](verify-mutation-runner.py)). If cleanup cannot finish, it retains the case's pid ledger, reports its location and the original error, and marks its processes as unconfirmed: inspect that ledger and stop any remaining owned processes before removing it. A Ctrl-C during cleanup waits for it to finish. Tooling scripts are mutated against their own verifiers rather than this XCTest runner.
 
 ## Local Kokoro Server
 
@@ -143,7 +177,10 @@ uv sync --frozen --extra cpu --python 3.12   # macOS PyTorch builds include MPS 
 .venv/bin/python docker/scripts/download_model.py --output api/src/models/v1_0
 ```
 
-```
+Return to your ClipboardTTS checkout before starting the server (adjust the path if you cloned it elsewhere):
+
+```sh
+cd ~/Code/ClipboardTTS
 kokoro/start-native.sh         # Apple GPU; Ctrl-C stops it
 kokoro/start-native.sh --cpu   # CPU only
 ```
