@@ -92,7 +92,7 @@ The cause was isolated with a diagnostic XCTest added only to a `git archive` sc
 | ID | Decision | Applies to |
 |---|---|---|
 | D18 | NB20 lands as two independent extractions with a commit and gates each: the pure provider catalogs and the OpenAI-compatible discovery contract first, then the manager's resolved request configuration. | NB20 |
-| D19 | The static catalogs keep being published through the guarded metadata token path. The provider identity each published list carries is what lets a Settings form refuse the previous provider's list on the render before `onChange` resynchronizes the manager, so moving that protection into the form is not part of NB20. | NB20 |
+| D19 | Superseded by D38. The static catalogs keep being published through the guarded metadata token path. The provider identity each published list carries is what lets a Settings form refuse the previous provider's list on the render before `onChange` resynchronizes the manager, so moving that protection into the form is not part of NB20. | NB20 |
 | D20 | NB21 is accepted without change. Both layers it names carry behavior with no cheaper owner at this baseline, and replacing the hosted control presses with command-level tests would need its own boundary. | NB21 |
 
 ### Accepted user decisions — 2026-09-24
@@ -149,6 +149,12 @@ The cause was isolated with a diagnostic XCTest added only to a `git archive` sc
 
 These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
 
+### Accepted user decisions — 2026-11-15
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D38 | Supersedes D19: Settings reads each provider's model and voice suggestions straight from `ProviderMetadataCatalog` for the provider the form renders, and the token-based path that publishes the catalogs through `TTSNetworkManager` is removed. Request-generation and speech callback-authority guards stay. The user accepted this when choosing S5 for grouped execution. The main agent's reasoning, given before that choice: D19 kept the token path because each published list named its provider, which let a form refuse the previous provider's list on the render before `onChange`; a form that names its own catalog by its own provider can never hold another provider's list, so that protection no longer needs the manager. | S5 |
+
 ### Constraints that remain in force
 
 - Preserve USER_STORIES: the fixed menu icon, Settings-only voice selection, two-click Clear Buffer/Speak behavior, and the clipboard-only OpenAI input-length refusal.
@@ -198,7 +204,7 @@ No Nit is outstanding.
 
 #### S5 — Replace asynchronous catalog publication with provider-local lookup
 
-**Non-blocking simplification proposal; structure Validated, benefit a design judgment — 2026-11-03 review.** After D31, `Sources/Managers/TTSNetworkManager+Metadata.swift:190` and `:213` only read `ProviderMetadataCatalog`, yet retain request tokens, generations, abandonment, queued publication, re-entrancy handling, a completion observer, and synthetic-completion test hooks. `TTSNetworkManager.swift:83` and `:198` carry and invalidate that state; `SettingsView.swift:320` refreshes it, and `ModelVoiceConfigurationView.swift:36` observes the network manager just to obtain fixed choices. **Proposed outcome:** derive suggestions directly from the form's typed provider, leaving the network manager responsible for speech requests and removing the catalog-only asynchronous lifecycle and its test scaffolding. **Compatibility/validation:** inventory the removed behavior first; preserve provider-correct choices even on the render before `onChange`, inclusion of an unknown saved selection in picker tags, Custom's absence of suggestions, catalog ordering, and exactly-once setting edits. Retain meaningful hosted picker/provider-switch coverage and prove retained tests reject the protected regressions before deleting old coverage; follow AGENTS for mutation evidence and gates. **Dependencies:** requires an explicit decision superseding D19, which deliberately retained this token path; D31 alone did not authorize removing it. Do not remove request-generation or speech callback-authority guards. **Disposition:** proposal recorded, not approved for implementation.
+**Non-blocking simplification proposal; structure Validated, benefit a design judgment — 2026-11-03 review.** After D31, `Sources/Managers/TTSNetworkManager+Metadata.swift:190` and `:213` only read `ProviderMetadataCatalog`, yet retain request tokens, generations, abandonment, queued publication, re-entrancy handling, a completion observer, and synthetic-completion test hooks. `TTSNetworkManager.swift:83` and `:198` carry and invalidate that state; `SettingsView.swift:320` refreshes it, and `ModelVoiceConfigurationView.swift:36` observes the network manager just to obtain fixed choices. **Proposed outcome:** derive suggestions directly from the form's typed provider, leaving the network manager responsible for speech requests and removing the catalog-only asynchronous lifecycle and its test scaffolding. **Compatibility/validation:** inventory the removed behavior first; preserve provider-correct choices even on the render before `onChange`, inclusion of an unknown saved selection in picker tags, Custom's absence of suggestions, catalog ordering, and exactly-once setting edits. Retain meaningful hosted picker/provider-switch coverage and prove retained tests reject the protected regressions before deleting old coverage; follow AGENTS for mutation evidence and gates. **Dependencies:** D38 (2026-11-15) supersedes D19, which deliberately retained this token path; D31 alone did not authorize removing it. Do not remove request-generation or speech callback-authority guards. [S6](completed_work/S6.md) has landed. **Disposition:** approved for implementation on 2026-11-15 under D38.
 
 #### S10 — Review how much code verifies the tooling
 
