@@ -127,7 +127,7 @@ Verdicts come from the log's last standalone terminal marker ([classify](run-mut
 - `FAILED-UNNAMED` means a finished failure that names no test, such as a crash in a suite's class-level `setUp` or `tearDown`, and leaves its mutant unjudged.
 - `NO-VERDICT` means no terminal marker, or a run its deadline stopped.
 
-Test logs are read as UTF-8 with undecodable bytes replaced by U+FFFD ([read_log](run-mutants.py)). Failed-tool stderr receives the same replacement only when [describe](run-mutants.py) receives bytes. The `uname` and two `git rev-parse` calls use `text=True`, so subprocess decoding happens first, strictly in the locale's encoding; replacement is not guaranteed for those calls (the remaining investigation is [NB64](TODO.md#nb64--three-runner-tool-calls-may-not-read-their-output-as-readme-describes)).
+Test logs are read as UTF-8 with undecodable bytes replaced by U+FFFD ([read_log](run-mutants.py)). Tool output the runner reads as text, such as Git's paths and the host architecture, is captured as bytes and decoded as UTF-8 whatever the locale, so a repository path outside ASCII is found under any locale, and a failed tool's stderr gets the same replacement ([describe](run-mutants.py); [NB64](completed_work/NB64.md)).
 
 The [runner entry point](run-mutants.py) (`__main__`) configures stdout to escape characters the locale's encoding cannot carry, so printing a verdict line does not fail for that reason. `results.json` keeps the exact test name.
 

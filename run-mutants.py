@@ -474,7 +474,7 @@ def run_tests(copy, derived_data, tests, log_path, xcodebuild, xcodegen, interru
     if changed:
         raise RunnerError(f"project generation changed {', '.join(changed)} before {pathlib.Path(log_path).stem} "
                           "was tested; mutate its generator input instead")
-    arch = run_shielded(["uname", "-m"], tool_deadline, text=True).stdout.strip()
+    arch = run_shielded(["uname", "-m"], tool_deadline).stdout.decode().strip()
     command = [xcodebuild, "-project", "ClipboardTTSApp.xcodeproj", "-scheme", "ClipboardTTSApp",
                "-destination", f"platform=macOS,arch={arch}", "-derivedDataPath", str(derived_data), "test"]
     command += [f"-only-testing:{t}" for t in tests]
@@ -594,7 +594,9 @@ def main(argv=None):
     # leaving this block by any path, a refusal, a return, or an exception, releases it.
     with contextlib.ExitStack() as ownership:
         try:
-            repo = pathlib.Path(git(here, "rev-parse", "--show-toplevel", text=True).stdout.strip()).resolve()
+            # Read as bytes, like every other git output here: decoded in the locale's encoding, a path outside ASCII
+            # names another directory, and a failure's stderr would no longer reach describe as bytes.
+            repo = pathlib.Path(git(here, "rev-parse", "--show-toplevel").stdout.decode().strip()).resolve()
             if lies_within(out, repo):
                 raise RunnerError("--out must lie outside the repository")
             # The reverse matters too: rebuilding the copy deletes what lies inside --out.
@@ -618,7 +620,7 @@ def main(argv=None):
             build_copy(repo, copy, spec.get("untracked", []))
             # The target state is identified before generation adds files or any mutant is written.
             report = {"complete": False, "exit": 1, "error": "the runner raised an unexpected exception",
-                      "head": git(repo, "rev-parse", "HEAD", text=True).stdout.strip(),
+                      "head": git(repo, "rev-parse", "HEAD").stdout.decode().strip(),
                       "spec_sha256": hashlib.sha256(spec_bytes).hexdigest(), "target_sha256": tree_digest(copy),
                       "tests": tests, "selected": [m["name"] for m in mutants],
                       "deadlines": {"test_run": args.test_deadline, "short_tool": args.tool_deadline},

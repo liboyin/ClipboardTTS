@@ -1534,6 +1534,21 @@ def a_test_name_outside_the_locale_s_encoding_is_matched_and_reported_exactly(ro
 
 
 @case
+def a_repository_path_outside_ascii_is_found_under_any_locale(root):
+    # macOS spells paths in UTF-8 whatever the locale. Read in ISO 8859-1, git's answer for the repository root would name
+    # another directory, which does not exist, and the runner would refuse a run it can perform.
+    repo, tools = make_repo(root / "dépôt")
+    latin1 = {"LANG": "en_US.ISO8859-1", "LC_ALL": "en_US.ISO8859-1", "PYTHONUTF8": "0",
+              "PYTHONIOENCODING": "iso8859-1:strict"}
+    result, out, _ = run_runner(root, repo, tools, [mutant("kill", "KILL")], env=latin1, encoding="iso8859-1")
+    assert result.returncode == 0 and "Traceback" not in result.stderr, (result.returncode, result.stdout, result.stderr)
+    assert result.stdout == "control: SURVIVED\nkill: KILLED ClipboardTTSAppTests.ASuite testGuard\n", result.stdout
+    report = json.loads((out / "results.json").read_text())
+    head = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True).stdout
+    assert report["complete"] and report["head"] == head.decode().strip(), report
+
+
+@case
 def a_test_name_spelled_with_a_byte_that_is_not_utf8_runs_no_selected_test(root):
     # The log spells BSuite's test as B\xffSuite: dropping the byte would make it the selected suite's test.
     tests = ("ClipboardTTSAppTests/ASuite", "ClipboardTTSAppTests/BSuite")
