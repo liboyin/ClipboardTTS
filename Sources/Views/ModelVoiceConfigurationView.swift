@@ -1,12 +1,15 @@
 import SwiftUI
 
 /// The model and voice fields shared by every provider's Settings form, each paired with the
-/// suggestion list its own provider published.
+/// catalog its own provider documents.
 struct ModelVoiceConfigurationView: View {
     @Binding var ttsModel: String
     @Binding var ttsVoice: String
-    @ObservedObject var networkManager: TTSNetworkManager
-    /// The provider whose form this is; only suggestions published for it may be offered.
+    /// The provider whose form this is, which alone names the catalogs its pickers offer.
+    ///
+    /// The choices are looked up from this value on every render rather than held anywhere, so the
+    /// render a provider switch makes before `onChange` resynchronizes the manager already offers
+    /// the new provider's catalogs (D38).
     let provider: APIKeyProvider
     /// Runs once per change to `ttsModel`, whichever control made it.
     var onModelChange: () -> Void
@@ -15,25 +18,21 @@ struct ModelVoiceConfigurationView: View {
 
     /// The choices a suggestion picker may offer for `selection`, or none when it must not render.
     ///
-    /// A list published for another provider is refused outright, because this form renders a newly
-    /// selected provider's saved values one render before `onChange` resynchronizes the manager.
-    /// `selection` is always among the choices returned, so the picker always shows a selected item:
-    /// a model or voice the provider does not list is offered as it was typed, keeping it selected
-    /// while the catalog it can be corrected from stays usable.
-    static func pickerChoices(from suggestions: ProviderSuggestions,
-                              for provider: APIKeyProvider,
-                              selection: String) -> [String] {
-        let choices = suggestions.values(for: provider)
-        guard !choices.isEmpty, !choices.contains(selection) else { return choices }
-        return [selection] + choices
+    /// A provider that documents no catalog (`nil`), such as Custom, renders no picker. `selection`
+    /// is otherwise always among the choices returned, so the picker always shows a selected item:
+    /// a model or voice the provider does not list is offered first, as it was typed, keeping it
+    /// selected while the catalog it can be corrected from stays usable.
+    static func pickerChoices(from catalog: [String]?, selection: String) -> [String] {
+        guard let catalog, !catalog.isEmpty, !catalog.contains(selection) else { return catalog ?? [] }
+        return [selection] + catalog
     }
 
     private var modelChoices: [String] {
-        Self.pickerChoices(from: networkManager.modelSuggestions, for: provider, selection: ttsModel)
+        Self.pickerChoices(from: ProviderMetadataCatalog.models(for: provider), selection: ttsModel)
     }
 
     private var voiceChoices: [String] {
-        Self.pickerChoices(from: networkManager.voiceSuggestions, for: provider, selection: ttsVoice)
+        Self.pickerChoices(from: ProviderMetadataCatalog.voices(for: provider), selection: ttsVoice)
     }
 
     var body: some View {

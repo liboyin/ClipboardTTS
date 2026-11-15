@@ -5,11 +5,10 @@ import Foundation
 /// Marked `@unchecked Sendable` because the `URLSessionDataDelegate` conformance requires
 /// `Sendable` and URLSession invokes delegate methods on its own queue. Four confinement rules
 /// keep that sound, and concurrent delegate entry is covered by `TTSNetworkManagerConcurrencyTests`:
-/// - Mutable request, settings, and metadata state (`activeRequest`, `requestGeneration`,
-///   `requestSettings`, the metadata request tokens, and the request-state publication flag) is
-///   read and written only under `stateQueue`.
-/// - The `@Published` properties, `isPublishingMetadata`, `migrationFailureMessage`, and the queued
-///   request-state publications are written only on the main queue (every write path dispatches or
+/// - Mutable request and settings state (`activeRequest`, `requestGeneration`, `requestSettings`,
+///   and the request-state publication flag) is read and written only under `stateQueue`.
+/// - The `@Published` properties, `migrationFailureMessage`, and the queued request-state
+///   publications are written only on the main queue (every write path dispatches or
 ///   already runs there); SwiftUI observes them on main. Construction is the one exception: the initializer assigns
 ///   `migrationFailureMessage`, and `lastError` when startup could not secure or read a saved key,
 ///   on whichever thread builds the manager and before it is shared.
@@ -22,15 +21,10 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     @Published var isStreaming = false
     /// A short, sanitized explanation of the most recent speech-request failure.
     @Published private(set) var lastError: String?
-    /// The model and voice choices currently offered, each naming the provider that published it.
-    @Published var modelSuggestions = ProviderSuggestions.unpublished
-    @Published var voiceSuggestions = ProviderSuggestions.unpublished
-
     /// The configuration future requests read, replaced whole rather than field by field, so no
-    /// request can be built from a half-applied edit. Readable inside the type for the metadata
-    /// extension's freshness check, which runs in its own `stateQueue` transaction; every other
-    /// reader goes through an accessor below that takes the lock.
-    private(set) var requestSettings: RequestSettings
+    /// request can be built from a half-applied edit. Every reader goes through an accessor below
+    /// that takes the lock.
+    private var requestSettings: RequestSettings
 
     /// The manager's one session, built in `init` from the routing its caller stated. Read-only
     /// outside the type, so no caller can replace it with a session that routing never reached.
@@ -52,15 +46,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// after a retry's task is created and before that retry owns the pipeline, which is the window
     /// in which the attempt it continues has ended and it has not yet begun.
     let requestObservers: (revocationTransaction: @Sendable () -> Void, retryInstallation: @Sendable () -> Void)
-    /// Told how each metadata request's completion was handled, once that handling is final: after
-    /// the token guard has decided and, for a published list, after the `@Published` assignment has
-    /// returned. Each token a fetch mints is reported once while the manager lives, plus once for
-    /// each synthetic completion a test delivers for it; a fetch the source guard refuses mints no
-    /// token and reports nothing. A publication's handling is reported on the main queue, and an
-    /// abandonment's on the caller's thread, because a provider with no catalog is refused before
-    /// anything is queued. It runs outside `stateQueue`. Production does nothing here; it exists so a test can wait for a stale
-    /// completion to have been refused instead of waiting out elapsed time.
-    let metadataCompletionObserver: @Sendable (MetadataCompletion) -> Void
     /// Serializes active-request state; client callbacks are captured here but always invoked after leaving this queue.
     let stateQueue = DispatchQueue(label: "com.clipboardtts.ttsnetworkmanager")
     /// Delivers request-owned PCM in the same order that `stateQueue` accepts delegate callbacks.
@@ -80,11 +65,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     /// The legacy-key migration warning this manager last published, retained so a later recovery
     /// can withdraw or replace exactly that message rather than whatever `lastError` holds by then.
     private var migrationFailureMessage: String?
-    var metadataGeneration: UInt64 = 0
-    var nextMetadataRequestIdentifier: UInt64 = 0
-    var modelMetadataToken: MetadataRequestToken?
-    var voiceMetadataToken: MetadataRequestToken?
-    var isPublishingMetadata = false
 
     /// Returns the active task for debug-only delegate-ordering tests.
     #if DEBUG
@@ -138,8 +118,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     }
 
     /// Creates a manager, optionally observing the lifecycle of its underlying URL session, the
-    /// request-state transaction a conditional revocation opens, a retry's installation, and how
-    /// each metadata completion was handled.
+    /// request-state transaction a conditional revocation opens, and a retry's installation.
     ///
     /// The session always carries the production policy; `routing` can only layer request routing
     /// onto it. It has no default, so every construction states its routing: production startup
@@ -156,8 +135,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          audioDeliveryQueue: DispatchQueue = DispatchQueue(label: "com.clipboardtts.ttsaudiodelivery"),
          callbackAuthority: CallbackAuthorityLocking = RecursiveCallbackAuthority(),
          revocationTransactionObserver: @escaping @Sendable () -> Void = {},
-         retryInstallationObserver: @escaping @Sendable () -> Void = {},
-         metadataCompletionObserver: @escaping @Sendable (MetadataCompletion) -> Void = { _ in }) {
+         retryInstallationObserver: @escaping @Sendable () -> Void = {}) {
         RequestSettings.migrateRetiredOpenAISpeechSettings(in: defaults)
         let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? ProviderDefaults.provider.settingsValue
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
@@ -171,7 +149,6 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
         self.realtimeConnectionFactory = realtimeConnectionFactory
         self.requestObservers = (revocationTransaction: revocationTransactionObserver,
                                  retryInstallation: retryInstallationObserver)
-        self.metadataCompletionObserver = metadataCompletionObserver
         self.sessionInvalidated = sessionInvalidated
         self.audioDeliveryQueue = audioDeliveryQueue
         self.callbackAuthority = callbackAuthority
@@ -188,31 +165,20 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
             .map(APIKeyMigrationService.failureMessage(for:))
     }
 
-    /// Updates the settings used by future TTS requests and invalidates metadata from a previous provider or endpoint.
+    /// Replaces the settings used by future TTS requests, whole.
     ///
-    /// The caller's string is normalized before it enters request or metadata state, so endpoint
-    /// text cannot select a protocol and every stored identity has a matching provider surface.
+    /// The caller's string is normalized before it enters request state, so endpoint text cannot
+    /// select a protocol and every stored identity has a matching provider surface.
     func updateSettings(baseURL: String,
                         apiKey: String,
                         model: String,
                         voice: String,
                         selectedProvider: String) {
         let provider = APIKeyProvider(selectedProvider: selectedProvider)
-        let invalidatedGeneration: UInt64? = stateQueue.sync {
-            let metadataScopeChanged = requestSettings.baseURL != baseURL || requestSettings.provider != provider
+        stateQueue.sync {
             requestSettings = RequestSettings(
                 baseURL: baseURL, apiKey: apiKey, model: model, voice: voice, provider: provider
             )
-
-            guard metadataScopeChanged else { return nil }
-
-            metadataGeneration &+= 1
-            modelMetadataToken = nil
-            voiceMetadataToken = nil
-            return metadataGeneration
-        }
-        if let invalidatedGeneration {
-            clearMetadataLists(for: invalidatedGeneration)
         }
     }
 

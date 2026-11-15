@@ -272,10 +272,9 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testRecoveringTheSelectedKeyReachesRequestsWithoutRefreshingAnyList() {
-        // WHY: A recovered key must reach the next request, as a typed one does. No suggestion list
-        // depends on a key, so recovering one refreshes nothing; a refresh here would republish
-        // catalogs the window already shows.
+    func testRecoveringTheSelectedKeyReachesRequests() {
+        // WHY: A recovered key must reach the next request, as a typed one does, or the form would
+        // show the key recovered while speech still went out without it.
         let defaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-saved-openai-key", for: .openAI)
@@ -288,19 +287,16 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
             defaults: defaults,
             testCase: self
         )
-        let begun = metadataRequestsBegun(by: networkManager)
-
         secretStore.failingProviders = []
         settings.click(retryTitle)
 
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list follows a key.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "test-saved-openai-key")
         settings.release()
     }
 
     func testRecoveringAnotherProvidersKeyLeavesTheSelectedConfigurationAlone() {
         // WHY: Recovering a different provider's key must not replace the key the selected
-        // provider's requests carry, and refreshes no list.
+        // provider's requests carry.
         let defaults = makeOwnedDefaults()
         let secretStore = ScriptedSecretStore()
         secretStore.seed("test-saved-openai-key", for: .openAI)
@@ -314,13 +310,10 @@ final class SavedKeyReadRecoveryTests: MockURLProtocolTestCase {
             defaults: defaults,
             testCase: self
         )
-        let begun = metadataRequestsBegun(by: networkManager)
-
         secretStore.failingProviders = []
         settings.click(retryTitle)
 
         XCTAssertFalse(settings.rendersButton(titled: retryTitle))
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0)
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "test-saved-openai-key")
         settings.release()
     }

@@ -27,14 +27,13 @@ enum ProviderDefaults {
     static let customEndpoint = "http://127.0.0.1:8881/v1/audio/speech"
 }
 
-/// The model and voice choices each provider documents, independent of when they may be offered.
+/// The model and voice choices each provider documents, which Settings offers as suggestions.
 ///
 /// A catalog states what a provider publishes about itself, which is a property of that provider
-/// rather than of the app's request state. Whether an answer may still be shown belongs to
-/// `TTSNetworkManager+Metadata`, which carries every publication on a token naming the provider that
-/// earned it. Keeping the two apart is what lets the documented sets be stated and checked without a
-/// manager, a session, or a main-queue turn: a drifted catalog is then a failing equality rather
-/// than a provider contract read out of an asynchronous publication.
+/// rather than of the app's request state, so it is pure and needs no manager, session, or
+/// main-queue turn: a drifted catalog is a failing equality. Each Settings form looks up the
+/// catalog of the provider it renders (`ModelVoiceConfigurationView`), so no list is ever held for
+/// one provider while another's form is on screen (D38).
 enum ProviderMetadataCatalog {
     /// The OpenAI Realtime models the app supports and offers as suggestions, the default first.
     ///
@@ -88,9 +87,9 @@ enum ProviderMetadataCatalog {
     /// The voices `provider` documents, or `nil` for a provider that documents none.
     ///
     /// `nil` is not an empty catalog. A Custom endpoint has no discovery contract and no documented
-    /// set, so there is nothing to offer and nothing to publish, whereas an empty list would state
-    /// that the provider offers no voices at all. Every supported model of a provider offers the same
-    /// voices, so the catalog does not depend on the configured model.
+    /// set, so there is nothing to offer, whereas an empty list would state that the provider offers
+    /// no voices at all. Every supported model of a provider offers the same voices, so the catalog
+    /// does not depend on the configured model.
     static func voices(for provider: APIKeyProvider) -> [String]? {
         switch provider {
         case .openAI:

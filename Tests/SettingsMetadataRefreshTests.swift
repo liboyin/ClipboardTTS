@@ -3,7 +3,8 @@ import SwiftUI
 import AppKit
 @testable import ClipboardTTSApp
 
-/// Covers how often one Settings edit applies the form and which suggestion lists it refreshes.
+/// Covers how often one Settings edit applies the form, whichever control made it, and that a
+/// picker rebuilt without an edit applies nothing.
 ///
 /// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
 /// runs on the main actor.
@@ -12,58 +13,46 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
     func testATypedEditRunsItsFieldCallbackOnceBesideARenderedPicker() {
         // WHY: The field and the suggestion picker beside it edit the same binding. Observing each
         // control rather than the binding ran every edit's callback twice, which applied the form
-        // and refreshed the suggestion lists twice per keystroke. Both pickers must render here, because
-        // the duplicate only exists while there is a second control to observe.
-        let networkManager = TestNetworkFactory.makeManager()
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
+        // twice per keystroke. Both pickers must render here, because the duplicate only exists
+        // while there is a second control to observe.
         let fields = HostedEditableModelVoiceFields(
-            networkManager: networkManager,
             provider: .openAI,
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             testCase: self
         )
+
         XCTAssertEqual(fields.suggestionControls().count, 2, "Both rows must render their picker.")
-
-        fields.type("tts-1-hd", intoFieldAt: 0, expecting: "tts-1")
+        fields.type("gpt-realtime-2.1", intoFieldAt: 0, expecting: "gpt-realtime-2.1-mini")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0))
-
-        fields.type("nova", intoFieldAt: 1, expecting: "alloy")
+        fields.type("ash", intoFieldAt: 1, expecting: "alloy")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 1))
         fields.release()
     }
 
     func testATypedEditRunsItsFieldCallbackWhenNoPickerRenders() {
-        // WHY: A Custom endpoint publishes no suggestions, so its rows render no picker at all. The
+        // WHY: A Custom endpoint documents no catalog, so its rows render no picker at all. The
         // text field alone must still report each edit, or a Custom model or voice would never
         // reach the requests the form configures.
-        let networkManager = TestNetworkFactory.makeManager()
         let fields = HostedEditableModelVoiceFields(
-            networkManager: networkManager,
             provider: .custom,
             model: "custom-model",
             voice: "custom-voice",
             testCase: self
         )
-        XCTAssertEqual(fields.suggestionControls(), [], "A Custom row must render no picker.")
 
+        XCTAssertEqual(fields.suggestionControls(), [], "A Custom row must render no picker.")
         fields.type("other-model", intoFieldAt: 0, expecting: "custom-model")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0))
-
         fields.type("other-voice", intoFieldAt: 1, expecting: "custom-voice")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 1))
         fields.release()
 
         // The absence above holds only if this lookup can see a picker at all: rows that do offer
         // suggestions, in the same host, must render one it finds for each row.
-        let suggestingManager = TestNetworkFactory.makeManager()
-        suggestingManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        suggestingManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
         let suggestingFields = HostedEditableModelVoiceFields(
-            networkManager: suggestingManager,
             provider: .openAI,
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             testCase: self
         )
@@ -75,69 +64,61 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
         // WHY: Choosing a suggestion is the other way to edit the same binding, so it must report
         // the edit exactly once as well: not zero, which would leave the choice unapplied, and not
         // twice, which is the duplicate a typed edit also had.
-        let networkManager = TestNetworkFactory.makeManager()
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
         let fields = HostedEditableModelVoiceFields(
-            networkManager: networkManager,
             provider: .openAI,
-            model: "tts-1",
+            model: "gpt-realtime-2.1-mini",
             voice: "alloy",
             testCase: self
         )
 
-        fields.select("tts-1-hd", inSuggestionControlAt: 0)
-        XCTAssertEqual(fields.fieldTexts(), ["tts-1-hd", "alloy"], "The selection must reach the binding.")
+        fields.select("gpt-realtime-2.1", inSuggestionControlAt: 0)
+        XCTAssertEqual(fields.fieldTexts(), ["gpt-realtime-2.1", "alloy"], "The selection must reach the binding.")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0))
 
-        fields.select("nova", inSuggestionControlAt: 1)
-        XCTAssertEqual(fields.fieldTexts(), ["tts-1-hd", "nova"], "The selection must reach the binding.")
+        fields.select("ash", inSuggestionControlAt: 1)
+        XCTAssertEqual(fields.fieldTexts(), ["gpt-realtime-2.1", "ash"], "The selection must reach the binding.")
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 1))
         fields.release()
     }
 
     func testRebuiltSuggestionChoicesRunNoFieldCallback() {
-        // WHY: A picker's choices change without any edit when its catalog is republished, and when
-        // a typed value the catalog lacks is prepended to it. Rebuilding the picker for either must
-        // keep showing the bound value and must not write it, or the row would run its callback, and
-        // apply the form, for an edit nobody made. The voice starts on the second choice so that a
-        // rebuild selecting or writing its first item would change the value.
-        let networkManager = TestNetworkFactory.makeManager()
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
+        // WHY: A picker's choices change without any edit when a typed value the catalog lacks is
+        // prepended to it, and when the row is rendered for another provider's catalog. Rebuilding
+        // the picker for either must keep showing the bound value and must not write it, or the row
+        // would run its callback, and apply the form, for an edit nobody made. The voice starts on
+        // the second choice so that a rebuild selecting or writing its first item would change it.
         let fields = HostedEditableModelVoiceFields(
-            networkManager: networkManager,
             provider: .openAI,
-            model: "tts-1",
-            voice: "nova",
+            model: "gpt-realtime-2.1-mini",
+            voice: "ash",
             testCase: self
         )
 
-        fields.type("typed-model", intoFieldAt: 0, expecting: "tts-1")
+        fields.type("typed-model", intoFieldAt: 0, expecting: "gpt-realtime-2.1-mini")
         XCTAssertEqual(
             fields.suggestionControls().first,
-            HostedSettings.SuggestionControl(choices: ["typed-model", "tts-1", "tts-1-hd"], selection: "typed-model")
+            HostedSettings.SuggestionControl(
+                choices: ["typed-model", "gpt-realtime-2.1-mini", "gpt-realtime-2.1"],
+                selection: "typed-model"
+            )
         )
         XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0), "One typed edit runs one callback.")
 
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova", "sage"])
-        fields.settle()
+        fields.render(provider: .gemini)
 
         XCTAssertEqual(
             fields.suggestionControls().last,
-            HostedSettings.SuggestionControl(choices: ["alloy", "nova", "sage"], selection: "nova")
+            HostedSettings.SuggestionControl(choices: ["ash"] + documentedGeminiTTSVoices, selection: "ash")
         )
-        XCTAssertEqual(fields.fieldTexts(), ["typed-model", "nova"])
-        XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0), "A republished catalog is not an edit.")
+        XCTAssertEqual(fields.fieldTexts(), ["typed-model", "ash"])
+        XCTAssertEqual(fields.callbackCounts, .init(model: 1, voice: 0), "A rebuilt catalog is not an edit.")
         fields.release()
     }
 
-    func testEachSettingsEditRefreshesOnlyTheSuggestionListsThatDependOnIt() throws {
-        // WHY: Both suggestion lists are the selected provider's catalogs, so no key, model, or voice
-        // edit can change them, and refreshing on every keystroke would only republish what the
-        // window shows. Each edit is still checked against what the manager will send, because
-        // refreshing nothing is not the same as applying nothing. OpenAI's lists need no request, so
-        // no handler is installed and one sent would fail this scope's accounting.
+    func testEachKeyModelAndVoiceEditReachesFutureRequests() throws {
+        // WHY: A clipboard or Services request reads the manager's settings, not the form, so each
+        // edit must reach them as it is made. OpenAI's catalogs need no request, so no handler is
+        // installed and one sent would fail this scope's accounting.
         let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
         let secretStore = InMemorySecretStore()
         try secretStore.saveSecret("test-openai-key", for: .openAI)
@@ -150,31 +131,17 @@ final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
             defaults: defaults,
             testCase: self
         )
-        var begun = metadataRequestsBegun(by: networkManager)
 
         settings.type("marin", into: .providerVoice, expecting: "alloy")
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the voice.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().voice, "marin")
-        begun = metadataRequestsBegun(by: networkManager)
 
         settings.type("gpt-realtime-2.1", into: .providerModel, expecting: "gpt-realtime-2.1-mini")
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the model.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().model, "gpt-realtime-2.1")
-        begun = metadataRequestsBegun(by: networkManager)
 
         settings.typeAPIKey("replacement-openai-key")
-        XCTAssertEqual(metadataRequestsBegun(by: networkManager) - begun, 0, "No suggestion list depends on the key.")
         XCTAssertEqual(networkManager.requestSettingsSnapshot().apiKey, "replacement-openai-key")
         settings.release()
     }
-}
-
-/// Returns how many model and voice metadata requests the manager has begun so far.
-///
-/// Every begun request takes the next identifier synchronously, before any publication or network
-/// work, so the difference across one settled edit counts exactly the refreshes that edit started.
-func metadataRequestsBegun(by manager: TTSNetworkManager) -> UInt64 {
-    manager.stateQueue.sync { manager.nextMetadataRequestIdentifier }
 }
 
 /// Hosts the shared model and voice fields over live bindings and counts the callbacks each edit
@@ -191,12 +158,20 @@ private final class HostedEditableModelVoiceFields {
         var counts = CallbackCounts(model: 0, voice: 0)
     }
 
+    /// The provider the fields render, which a test can change without editing either binding.
+    private final class RenderedProvider: ObservableObject {
+        @Published var provider: APIKeyProvider
+
+        init(_ provider: APIKeyProvider) {
+            self.provider = provider
+        }
+    }
+
     /// The fields in a `Form`, as Settings renders them, over state the host owns.
     private struct EditableFields: View {
         @State var model: String
         @State var voice: String
-        let networkManager: TTSNetworkManager
-        let provider: APIKeyProvider
+        @ObservedObject var renderedProvider: RenderedProvider
         let counter: CallbackCounter
 
         var body: some View {
@@ -204,8 +179,7 @@ private final class HostedEditableModelVoiceFields {
                 ModelVoiceConfigurationView(
                     ttsModel: $model,
                     ttsVoice: $voice,
-                    networkManager: networkManager,
-                    provider: provider,
+                    provider: renderedProvider.provider,
                     onModelChange: { counter.counts.model += 1 },
                     onVoiceChange: { counter.counts.voice += 1 }
                 )
@@ -214,22 +188,23 @@ private final class HostedEditableModelVoiceFields {
     }
 
     private let counter = CallbackCounter()
+    private let renderedProvider: RenderedProvider
     private var host: NSHostingView<EditableFields>?
 
     var callbackCounts: CallbackCounts { counter.counts }
 
-    init(networkManager: TTSNetworkManager,
-         provider: APIKeyProvider,
+    init(provider: APIKeyProvider,
          model: String,
          voice: String,
          testCase: XCTestCase,
          file: StaticString = #filePath,
          line: UInt = #line) {
+        let renderedProvider = RenderedProvider(provider)
+        self.renderedProvider = renderedProvider
         let host = NSHostingView(rootView: EditableFields(
             model: model,
             voice: voice,
-            networkManager: networkManager,
-            provider: provider,
+            renderedProvider: renderedProvider,
             counter: counter
         ))
         host.frame = NSRect(x: 0, y: 0, width: 560, height: 200)
@@ -273,8 +248,10 @@ private final class HostedEditableModelVoiceFields {
         settleHostedView(host, file: file, line: line)
     }
 
-    /// Runs the main-queue turns an update the test made outside the fields needs to render.
-    func settle(file: StaticString = #filePath, line: UInt = #line) {
+    /// Renders the same bindings for `provider`'s catalogs, which rebuilds both pickers without
+    /// editing either value, and runs the main-queue turns that render needs.
+    func render(provider: APIKeyProvider, file: StaticString = #filePath, line: UInt = #line) {
+        renderedProvider.provider = provider
         settleHostedView(host, file: file, line: line)
     }
 

@@ -1,13 +1,25 @@
 import XCTest
 @testable import ClipboardTTSApp
 
+/// Google's documented Gemini TTS voices, transcribed independently of the production catalog.
+///
+/// Read from the "Voice options" table of the official speech-generation guide
+/// (https://ai.google.dev/gemini-api/docs/speech-generation) on 2026-08-16. Tests compare the
+/// app's catalog and the Settings pickers against this transcription, so an assertion measures
+/// agreement with the provider contract rather than agreement of the app with itself.
+let documentedGeminiTTSVoices = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+    "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib",
+    "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima",
+    "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+]
+
 /// What each provider documents about its own models and voices.
 ///
 /// This suite owns the contract — which sets are offered, and the difference between a provider that
-/// documents an empty catalog and one that documents none. How a catalog reaches the UI is a separate
-/// property, owned by `TTSNetworkManagerMetadataProviderTests`: that suite drives the guarded
-/// publication path and is what fails if the manager stops tagging a
-/// list with the provider that earned it, or refusing to publish for a provider with no catalog.
+/// documents an empty catalog and one that documents none. Which catalog a Settings form offers is a
+/// separate property, owned by `SettingsVoiceMetadataTests`: those hosted tests fail if a form
+/// offers another provider's catalog, or offers any catalog for a Custom endpoint.
 final class ProviderMetadataCatalogTests: XCTestCase {
     /// The ten built-in voices the Realtime API names when it rejects a voice, verified 2026-11-02.
     /// Transcribed here rather than read from the production constant, so an assertion measures
@@ -31,9 +43,8 @@ final class ProviderMetadataCatalogTests: XCTestCase {
 
     func testACustomEndpointDocumentsNoVoiceCatalogRatherThanAnEmptyOne() {
         // WHY: A Custom deployment has no discovery contract, so the app knows nothing about its
-        // voices. Answering with an empty list would state that it offers none, which would be
-        // published as that provider's catalog; answering with nothing is what leaves the
-        // suggestions unpublished and the user's configured voice alone.
+        // voices. Answering with an empty list would state that it offers none; answering with nothing
+        // is what leaves its form without a picker and the user's configured voice alone.
         XCTAssertNil(ProviderMetadataCatalog.voices(for: .custom))
     }
 

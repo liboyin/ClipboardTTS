@@ -8,10 +8,9 @@ import SwiftUI
 ///
 /// The picker is hosted windowlessly, as DESIGN's hosted-view rules require, and each update is
 /// delivered by replacing the host's root view, which runs `updateNSView` the way a SwiftUI
-/// re-render does. The class owns a mock network scope only because the row-layout test builds a
-/// network manager for the fields it hosts.
+/// re-render does. No test here builds a network manager, so the suite needs no mock network scope.
 @MainActor
-final class SuggestionPickerTests: MockURLProtocolTestCase {
+final class SuggestionPickerTests: XCTestCase {
     func testPickerOffersEveryChoiceInOrderWithTheBoundValueSelected() {
         // WHY: The coordinator maps a chosen item back to the choice at the same index, so the items
         // must be exactly the choices, in order. `NSPopUpButton.addItems(withTitles:)` silently drops
@@ -108,14 +107,10 @@ final class SuggestionPickerTests: MockURLProtocolTestCase {
         // WHY: A pop-up button left to size itself takes the width of its longest title, and in the
         // row's 30-point slot it then spreads across the text field it sits beside. The row has
         // always shown the picker as its arrows alone in that slot.
-        let networkManager = TestNetworkFactory.makeManager()
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
         var host: NSHostingView? = NSHostingView(rootView: Form {
             ModelVoiceConfigurationView(
-                ttsModel: .constant("tts-1"),
+                ttsModel: .constant("gpt-realtime-2.1-mini"),
                 ttsVoice: .constant("alloy"),
-                networkManager: networkManager,
                 provider: .openAI,
                 onModelChange: {},
                 onVoiceChange: {}

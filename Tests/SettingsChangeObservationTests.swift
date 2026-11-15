@@ -35,31 +35,6 @@ final class SettingsChangeObservationTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testOpeningSettingsPublishesEachListOnce() {
-        // WHY: Opening the window synchronizes once; replaying the provider observer as well would
-        // publish each catalog twice, and a second publication racing the first is exactly what the
-        // metadata token guard exists to refuse.
-        let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "OpenAI"])
-        let secretStore = InMemorySecretStore()
-        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        let begun = metadataRequestsBegun(by: networkManager)
-
-        let settings = HostedSettings(
-            networkManager: networkManager,
-            audioPlayer: makeOwnedAudioPlayer(),
-            secretStore: secretStore,
-            defaults: defaults,
-            testCase: self
-        )
-
-        XCTAssertEqual(
-            metadataRequestsBegun(by: networkManager) - begun,
-            2,
-            "Opening Settings must publish the model and voice catalogs once each."
-        )
-        settings.release()
-    }
-
     func testOpeningCustomSettingsNeverReportsTheSavedRateAsInvalid() {
         // WHY: The saved rate is valid and opening the window does not edit it. Replaying the
         // sample-rate observer before the draft is filled in would judge an empty draft, publishing

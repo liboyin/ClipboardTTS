@@ -196,8 +196,8 @@ final class HostedSettings {
     /// Releases the hosted view graph and drains the main queue.
     ///
     /// The hosted view owns settings observers, so releasing it before `MockURLProtocol` invalidates
-    /// the test's session is what stops a deferred observer from starting a metadata request after
-    /// its scope closed. Calling this more than once is safe.
+    /// the test's session is what stops a deferred observer from configuring or starting a request
+    /// after its scope closed. Calling this more than once is safe.
     func release(file: StaticString = #filePath, line: UInt = #line) {
         guard host != nil else { return }
         host = nil
@@ -215,7 +215,8 @@ final class HostedSettings {
         return fields
     }
 
-    private func settle(file: StaticString, line: UInt) {
+    /// Runs the main-queue turns an update the test made outside the form needs to render.
+    func settle(file: StaticString = #filePath, line: UInt = #line) {
         settleHostedView(host, file: file, line: line)
     }
 
@@ -224,21 +225,19 @@ final class HostedSettings {
     }
 }
 
-/// Hosts the shared model and voice fields alone, in a configuration Settings itself only passes
-/// through inside one SwiftUI update.
+/// Hosts the shared model and voice fields alone, for one provider and fixed values.
 ///
 /// A provider switch renders the new provider's fields once before `onChange` resynchronizes the
-/// manager, and SwiftUI commits no AppKit state for that render: by the time a hosted form can be
-/// inspected, the manager has already been resynchronized and its stale lists cleared. Rendering
-/// these fields directly is therefore the only way a test can hold that configuration still.
+/// manager, and SwiftUI commits no AppKit state for that render, so a hosted form cannot be read in
+/// it. The fields take nothing from the manager, only the provider they are given, so rendering
+/// them directly for a provider is what states the choices that render offers.
 @MainActor
 final class HostedModelVoiceFields {
     private var host: NSHostingView<ModelVoiceConfigurationView>?
 
     /// Mounts the fields for `provider` with fixed values, because this host exists to render one
     /// configuration rather than to drive edits; `HostedSettings` owns editing and synchronization.
-    init(networkManager: TTSNetworkManager,
-         provider: APIKeyProvider,
+    init(provider: APIKeyProvider,
          model: String,
          voice: String,
          testCase: XCTestCase,
@@ -247,7 +246,6 @@ final class HostedModelVoiceFields {
         let view = ModelVoiceConfigurationView(
             ttsModel: .constant(model),
             ttsVoice: .constant(voice),
-            networkManager: networkManager,
             provider: provider,
             onModelChange: {},
             onVoiceChange: {}

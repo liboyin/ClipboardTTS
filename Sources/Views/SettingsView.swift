@@ -156,9 +156,8 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $openaiModel, ttsVoice: $openaiVoice,
-                                        networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
+                                        onModelChange: syncSettings, onVoiceChange: syncSettings)
 
             testVoiceButton
         }
@@ -172,9 +171,8 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $geminiModel, ttsVoice: $geminiVoice,
-                                        networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
+                                        onModelChange: syncSettings, onVoiceChange: syncSettings)
 
             testVoiceButton
         }
@@ -192,9 +190,8 @@ struct SettingsView: View {
             }
 
             ModelVoiceConfigurationView(ttsModel: $customModel, ttsVoice: $customVoice,
-                                        networkManager: networkManager,
                                         provider: selectedProvider,
-                                        onModelChange: applyModelOrVoiceChange, onVoiceChange: applyModelOrVoiceChange)
+                                        onModelChange: syncSettings, onVoiceChange: syncSettings)
 
             Section(header: Text("Audio Format").font(.headline)) {
                 TextField("PCM Sample Rate (Hz)", text: $customSampleRateText)
@@ -242,9 +239,8 @@ struct SettingsView: View {
 
     /// Retries the legacy-key migration at the user's request and republishes what it changed.
     ///
-    /// The manager's future-request credentials are refreshed without re-fetching provider
-    /// metadata or rebuilding the audio graph, because securing a stored key changes neither the
-    /// selected endpoint nor the audio format.
+    /// The manager's future-request credentials are refreshed without rebuilding the audio graph,
+    /// because securing a stored key does not change the audio format.
     func retrySecuringSavedKeys() {
         secretState.retryLegacyKeyMigration()
         applyCredentialsToFutureRequests()
@@ -254,7 +250,7 @@ struct SettingsView: View {
     /// Reads the saved keys the store refused again, at the user's request, and hands on any it recovers.
     ///
     /// A recovered key withdraws the menu bar's startup guidance about it and reaches future
-    /// requests. No suggestion list or audio format follows a key, so nothing is refreshed.
+    /// requests. No audio format follows a key, so the graph is left alone.
     func retryReadingSavedKeys() {
         secretState.retryUnreadableSecrets().forEach(networkManager.withdrawKeyReadFailure(for:))
         applyCredentialsToFutureRequests()
@@ -281,24 +277,15 @@ struct SettingsView: View {
         speechSession.start(text: "Hello! This is a test of your text to speech configuration.")
     }
 
-    /// Applies the form to future requests, then republishes the suggestion lists when asked.
+    /// Applies the form to future requests and selects the provider's audio format.
     ///
-    /// Both lists are the selected provider's catalogs, so only opening the window and choosing a
-    /// provider refresh them; a key, model, or voice edit applies the form alone. A Custom endpoint
-    /// documents no catalog.
-    func syncSettings(refreshingLists: Bool = true) {
+    /// Runs when the window opens and on every provider, endpoint, model, or voice edit. It refreshes
+    /// no suggestion list, because each form looks its provider's catalog up as it renders.
+    func syncSettings() {
         normalizeSelectedProvider()
         applyCredentialsToFutureRequests()
         _ = syncAudioFormat()
-        guard refreshingLists, selectedProvider != .custom else { return }
-        let baseURL = currentBaseURL
-        let provider = selectedProvider.settingsValue
-        networkManager.fetchAvailableModels(baseURL: baseURL, selectedProvider: provider)
-        networkManager.fetchAvailableVoices(baseURL: baseURL, selectedProvider: provider)
     }
-
-    /// Applies a model or voice edit, which changes neither suggestion list.
-    func applyModelOrVoiceChange() { syncSettings(refreshingLists: false) }
 
     /// Hands the form's current provider configuration to requests that start after this call.
     private func applyCredentialsToFutureRequests() {
@@ -368,7 +355,7 @@ struct SettingsView: View {
             set: {
                 secretState.saveSecret($0, for: provider)
                 refreshMigrationWarning()
-                syncSettings(refreshingLists: false)
+                syncSettings()
             }
         )
     }

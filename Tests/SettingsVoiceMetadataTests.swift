@@ -9,9 +9,9 @@ import XCTest
 final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
     func testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog() {
         // WHY: Settings is where a user types a voice, and since the menu stopped offering one it is
-        // the only surface a documented voice can reach. Publishing a subset of the provider
-        // contract would put a documented voice out of reach entirely, so this drives the rendered
-        // Settings form and reads back the voice suggestions it actually shows.
+        // the only surface a documented voice can reach. Offering a subset of the provider contract
+        // would put a documented voice out of reach entirely, so this drives the rendered Settings
+        // form and reads back the voice suggestions it actually shows.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Gemini"
         ])
@@ -26,7 +26,6 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             testCase: self
         )
 
-        XCTAssertEqual(networkManager.voiceSuggestions.values, documentedGeminiTTSVoices)
         XCTAssertEqual(
             settings.suggestionLists().filter { $0 == documentedGeminiTTSVoices }.count,
             1,
@@ -35,26 +34,20 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testFormOffersNoSuggestionListPublishedForAnotherProvider() {
-        // WHY: A published catalog outlives the request that fetched it, and the form renders a
-        // newly selected provider's saved values one render before its own `onChange` can
-        // resynchronize the manager. Offering that other provider's choices would both misdescribe
-        // this provider's contract and leave the picker showing no selected item. Custom is what
-        // holds that state still: it fetches no metadata, so nothing replaces the OpenAI lists this
-        // manager already published.
+    func testACustomFormOffersNoCatalogEvenForAGoogleLookingHost() {
+        // WHY: Suggestions follow the provider the form renders, exactly as speech follows the
+        // selected identity. A Custom host containing Google's hostname is still Custom, which
+        // documents nothing, so offering Gemini's (or any) catalog would suggest choices its endpoint
+        // never declared. Rendering no picker must also leave the configured values alone.
         let defaults = makeOwnedDefaults([
             SettingsKeys.ttsProvider: "Custom",
-            SettingsKeys.apiBaseURL: "https://custom.api/v1/audio/speech",
+            SettingsKeys.apiBaseURL: "https://generativelanguage.googleapis.com.custom.example/v1/audio/speech",
             SettingsKeys.customModel: "custom-model",
             SettingsKeys.customVoice: "custom-voice"
         ])
-
         let secretStore = InMemorySecretStore()
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
-
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,
@@ -63,13 +56,11 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             testCase: self
         )
 
-        XCTAssertEqual(settings.suggestionControls(), [], "A Custom form must offer no OpenAI choice.")
-        // Without these the assertion above could pass because the lists were replaced or cleared,
-        // which is a different guarantee from refusing to render another provider's list.
-        XCTAssertEqual(networkManager.modelSuggestions.values, ["tts-1", "tts-1-hd"])
-        XCTAssertEqual(networkManager.voiceSuggestions.values, ["alloy", "nova"])
+        XCTAssertEqual(settings.suggestionControls(), [], "A Custom form must offer no catalog.")
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.customModel), "custom-model")
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.customVoice), "custom-voice")
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().model, "custom-model")
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().voice, "custom-voice")
 
         // The first assertion holds only if this lookup can see a picker at all: the same hosted
         // form, once its provider offers suggestions, must render one it finds for each row.
@@ -78,53 +69,88 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testFieldsOfferChoicesForTheProviderTheyRenderNotTheOneTheManagerHolds() {
+    func testFieldsOfferTheCatalogsOfTheProviderTheyRender() {
         // WHY: A provider switch renders the new provider's fields once before `onChange`
-        // resynchronizes the manager. That render is the defect's whole window, and SwiftUI commits
-        // no AppKit state for it — by the time a hosted form can be read, the manager has already
-        // been resynchronized and its stale lists cleared. Rendering the fields directly is what
-        // holds that configuration still, so the rule stays enforceable: the choices must follow
-        // the provider being rendered, never whichever provider the manager is synchronized to.
-        let networkManager = TestNetworkFactory.makeManager()
-        networkManager.updateSettings(
-            baseURL: "https://api.openai.com/v1/audio/speech",
-            apiKey: "test-key",
-            model: "tts-1",
-            voice: "alloy",
-            selectedProvider: "OpenAI"
-        )
-        networkManager.modelSuggestions = ProviderSuggestions(provider: .openAI, values: ["tts-1", "tts-1-hd"])
-        networkManager.voiceSuggestions = ProviderSuggestions(provider: .openAI, values: ["alloy", "nova"])
-
-        let switchedFields = HostedModelVoiceFields(
-            networkManager: networkManager,
+        // resynchronizes the manager, and SwiftUI commits no AppKit state for that render, so a
+        // hosted form cannot be read in it. The fields therefore take their choices from the
+        // provider they are given and nothing else; rendering them directly for each provider is
+        // what states that the render offers that provider's catalogs, whatever the manager holds.
+        let geminiFields = HostedModelVoiceFields(
             provider: .gemini,
-            model: "gemini-3.1-flash-tts-preview",
-            voice: "Aoede",
+            model: "gemini-3.8-flash-tts",
+            voice: "Puck",
             testCase: self
         )
+        XCTAssertEqual(
+            geminiFields.suggestionControls(),
+            [
+                HostedSettings.SuggestionControl(
+                    choices: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"],
+                    selection: "gemini-3.8-flash-tts"
+                ),
+                HostedSettings.SuggestionControl(choices: documentedGeminiTTSVoices, selection: "Puck")
+            ]
+        )
+        geminiFields.release()
 
-        XCTAssertEqual(switchedFields.suggestionControls(), [], "A Gemini render must offer no OpenAI choice.")
-        switchedFields.release()
-
-        // The same manager state must still offer its own provider's choices, so the assertion
-        // above cannot pass merely because these fields render no picker at all.
         let openAIFields = HostedModelVoiceFields(
-            networkManager: networkManager,
             provider: .openAI,
-            model: "tts-1",
-            voice: "alloy",
+            model: "gpt-realtime-2.1",
+            voice: "ash",
             testCase: self
         )
-
         XCTAssertEqual(
             openAIFields.suggestionControls(),
             [
-                HostedSettings.SuggestionControl(choices: ["tts-1", "tts-1-hd"], selection: "tts-1"),
-                HostedSettings.SuggestionControl(choices: ["alloy", "nova"], selection: "alloy")
+                HostedSettings.SuggestionControl(
+                    choices: ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"],
+                    selection: "gpt-realtime-2.1"
+                ),
+                HostedSettings.SuggestionControl(
+                    choices: ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"],
+                    selection: "ash"
+                )
             ]
         )
         openAIFields.release()
+    }
+
+    func testAFormReRenderedWhileTheManagerHoldsAnotherProviderOffersItsOwnCatalogs() {
+        // WHY: A provider switch renders the new provider's form once while the manager still holds
+        // the provider it left. A form that took its provider from the manager would offer the old
+        // provider's catalogs in exactly that render. SwiftUI commits no AppKit state for it, so this
+        // holds the same disagreement still: the form is on Gemini, the manager is pointed at OpenAI
+        // directly, and a published manager change re-renders the form without resynchronizing it.
+        let defaults = makeOwnedDefaults([SettingsKeys.ttsProvider: "Gemini"])
+        let secretStore = InMemorySecretStore()
+        let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
+        let settings = HostedSettings(
+            networkManager: networkManager,
+            audioPlayer: makeOwnedAudioPlayer(),
+            secretStore: secretStore,
+            defaults: defaults,
+            testCase: self
+        )
+        networkManager.updateSettings(baseURL: OpenAIRealtimeSpeech.endpoint, apiKey: "", model: "gpt-realtime-2.1-mini",
+                                      voice: "alloy", selectedProvider: "OpenAI")
+
+        networkManager.isStreaming = true
+        settings.settle()
+        let controls = settings.suggestionControls()
+        networkManager.isStreaming = false
+
+        XCTAssertEqual(networkManager.requestSettingsSnapshot().provider, .openAI, "The re-render must not resynchronize.")
+        XCTAssertEqual(
+            controls,
+            [
+                HostedSettings.SuggestionControl(
+                    choices: ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"],
+                    selection: "gemini-3.8-flash-lite-tts"
+                ),
+                HostedSettings.SuggestionControl(choices: documentedGeminiTTSVoices, selection: "Aoede")
+            ]
+        )
+        settings.release()
     }
 
     func testTypedOffCatalogModelAndVoiceStaySelectedBesideTheDocumentedCatalog() throws {
@@ -186,18 +212,30 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
         settings.release()
     }
 
-    func testProviderSwitchOffersOnlyTheNewProviderCatalogWithItsOwnSavedValues() {
-        // WHY: This is the switch that rendered Gemini's saved model and voice against OpenAI's
+    func testProviderSwitchOffersOnlyTheNewProviderCatalogWithItsOwnSavedValues() throws {
+        // WHY: This is the switch that once rendered Gemini's saved model and voice against OpenAI's
         // still-published lists. Afterwards the form must offer only Gemini's choices, must still
         // show the values saved for Gemini rather than one carried over from the provider it left,
-        // and each picker must display its own selection.
+        // and each picker must display its own selection. A catalog is not a selection: opening the
+        // form and switching must neither rewrite the saved voice nor change what a request sends,
+        // and the saved voice is the catalog's last entry so a reset toward its first is visible.
         let defaults = makeOwnedDefaults([
             SettingsKeys.geminiVoice: "Sulafat"
         ])
 
         let secretStore = InMemorySecretStore()
+        try secretStore.saveSecret("test-gemini-api-key", for: .gemini)
         let audioPlayer = makeOwnedAudioPlayer()
         let networkManager = TestNetworkFactory.makeManager(secretStore: secretStore, defaults: defaults)
+        let requestEmitted = expectation(description: "Test Voice sends the voice saved for Gemini")
+        MockURLProtocol.installRequestHandler { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let bodyData = try XCTUnwrap(requestBodyData(from: request))
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+            XCTAssertEqual(geminiVoiceName(in: body), "Sulafat")
+            requestEmitted.fulfill()
+            return (response, Data())
+        }
         let settings = HostedSettings(
             networkManager: networkManager,
             audioPlayer: audioPlayer,
@@ -221,6 +259,9 @@ final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
             ]
         )
         XCTAssertEqual(defaults.string(forKey: SettingsKeys.geminiVoice), "Sulafat")
+
+        settings.click("Test Voice")
+        wait(for: [requestEmitted], timeout: 2.0)
         settings.release()
     }
 }

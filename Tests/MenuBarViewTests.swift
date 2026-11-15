@@ -48,12 +48,13 @@ func makeMenu(audioPlayer: AudioPlayerManager,
 /// test here runs on the main actor.
 @MainActor
 final class MenuBarViewTests: MockURLProtocolTestCase {
-    func testMenuNeitherShowsAVoiceControlNorFetchesTheCatalogItWouldNeed() {
+    func testMenuShowsNoVoiceControlAndSendsNoRequestOnAppearance() {
         // WHY: Voice belongs to Settings alone, so the menu must not become a second place the same
         // setting is read or written. Two mechanisms could reintroduce it and neither is visible
-        // from the other: a picker could offer the voice again, and the metadata lookup that fed the
-        // old picker could remain, issuing a provider request on every menu open for a catalog
-        // nothing displays. The playback controls must survive both removals.
+        // from the other: a picker could offer the voice again, and a lookup feeding one could issue
+        // a provider request on every menu open for a catalog nothing displays. No handler is
+        // installed, so this scope's unhandled-request accounting fails if appearing sends one. The
+        // playback controls must survive both removals.
         //
         // Scope, so the next reader does not over-trust this: a windowless host draws a plain `Text`
         // itself, publishing no NSTextField and no accessibility tree, and from macOS 27 it draws
@@ -61,7 +62,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // `SuggestionPicker`, `MenuSlider`, and `RequestErrorView` exist. A decorative voice *label*
         // is therefore not reachable from any hosted assertion here, and was deliberately not
         // asserted rather than asserted in a way no mutant could break. What is covered is what
-        // could actually restore the feature: an offered control, and the fetch. The control lookup
+        // could actually restore the feature: an offered control, and a request. The control lookup
         // can see only an AppKit-backed picker: `SuggestionPicker`, the app's picker since D36, which
         // the test proves it finds, but not a SwiftUI `Picker`.
         let defaults = makeOwnedDefaults([
@@ -83,8 +84,8 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         host?.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
         host?.layoutSubtreeIfNeeded()
 
-        // Metadata used to publish on the turn after appearance, so a fetch that survived would
-        // land here rather than in the first layout.
+        // Suggestions were once published on the turn after appearance, so a picker restored that
+        // way would land here rather than in the first layout.
         let settled = expectation(description: "Menu completes the turn an appearance lookup would publish on")
         DispatchQueue.main.async {
             host?.layoutSubtreeIfNeeded()
@@ -102,11 +103,6 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         pickerHost?.layoutSubtreeIfNeeded()
         XCTAssertNotNil(pickerHost?.descendantView(of: NSPopUpButton.self), "The lookup must see a SuggestionPicker.")
         pickerHost = nil
-        XCTAssertEqual(
-            networkManager.voiceSuggestions,
-            ProviderSuggestions.unpublished,
-            "Appearing must not fetch a voice catalog the menu no longer shows."
-        )
         XCTAssertNotNil(host?.descendantView(of: NSSlider.self), "Playback controls must survive the removal.")
 
         host = nil
