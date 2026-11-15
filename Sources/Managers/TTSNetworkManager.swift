@@ -159,7 +159,7 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
          retryInstallationObserver: @escaping @Sendable () -> Void = {},
          metadataCompletionObserver: @escaping @Sendable (MetadataCompletion) -> Void = { _ in }) {
         RequestSettings.migrateRetiredOpenAISpeechSettings(in: defaults)
-        let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+        let persistedProvider = defaults.string(forKey: SettingsKeys.ttsProvider) ?? ProviderDefaults.provider.settingsValue
         let provider = APIKeyProvider(selectedProvider: persistedProvider)
         let secretStartupState = APIKeyStartupState.load(
             selectedProvider: provider.settingsValue, secretStore: secretStore, defaults: defaults

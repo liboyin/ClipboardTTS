@@ -21,6 +21,7 @@ final class HostedSettings {
         case providerVoice
         case customBaseURL
         case customModel
+        case customVoice
         case customSampleRate
 
         /// The field's index among its form's plain text fields, in rendering order. OpenAI and
@@ -36,6 +37,8 @@ final class HostedSettings {
                 return 0
             case .customModel:
                 return 1
+            case .customVoice:
+                return 2
             case .customSampleRate:
                 return 3
             }

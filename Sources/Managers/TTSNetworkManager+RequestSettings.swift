@@ -1,11 +1,6 @@
 import Foundation
 
 extension TTSNetworkManager.RequestSettings {
-    /// The native Kokoro server's speech URL from README, which a Custom provider falls back to
-    /// before one is typed (D34). Plain HTTP is allowed because the host is a loopback literal.
-    private static let nativeKokoroSpeechEndpoint = "http://127.0.0.1:8881/v1/audio/speech"
-    /// The OpenAI voice a retired speech-only voice is replaced with, which is also the default.
-    static let defaultOpenAIVoice = "alloy"
     /// The speech-only OpenAI voices the Realtime API rejects.
     private static let retiredOpenAIVoices: Set = ["fable", "nova", "onyx"]
     /// Gemini's fixed API root. Its speech path is built per request from the configured model,
@@ -35,24 +30,24 @@ extension TTSNetworkManager.RequestSettings {
             return Self(
                 baseURL: OpenAIRealtimeSpeech.endpoint,
                 apiKey: apiKey,
-                model: defaults.string(forKey: SettingsKeys.openAIModel) ?? "gpt-realtime-2.1-mini",
-                voice: defaults.string(forKey: SettingsKeys.openAIVoice) ?? defaultOpenAIVoice,
+                model: defaults.string(forKey: SettingsKeys.openAIModel) ?? ProviderDefaults.openAIModel,
+                voice: defaults.string(forKey: SettingsKeys.openAIVoice) ?? ProviderDefaults.openAIVoice,
                 provider: provider
             )
         case .gemini:
             return Self(
                 baseURL: geminiAPIRoot,
                 apiKey: apiKey,
-                model: defaults.string(forKey: SettingsKeys.geminiModel) ?? "gemini-3.8-flash-lite-tts",
-                voice: defaults.string(forKey: SettingsKeys.geminiVoice) ?? "Aoede",
+                model: defaults.string(forKey: SettingsKeys.geminiModel) ?? ProviderDefaults.geminiModel,
+                voice: defaults.string(forKey: SettingsKeys.geminiVoice) ?? ProviderDefaults.geminiVoice,
                 provider: provider
             )
         case .custom:
             return Self(
-                baseURL: defaults.string(forKey: SettingsKeys.apiBaseURL) ?? nativeKokoroSpeechEndpoint,
+                baseURL: defaults.string(forKey: SettingsKeys.apiBaseURL) ?? ProviderDefaults.customEndpoint,
                 apiKey: apiKey,
-                model: defaults.string(forKey: SettingsKeys.customModel) ?? "",
-                voice: defaults.string(forKey: SettingsKeys.customVoice) ?? "",
+                model: defaults.string(forKey: SettingsKeys.customModel) ?? ProviderDefaults.customModel,
+                voice: defaults.string(forKey: SettingsKeys.customVoice) ?? ProviderDefaults.customVoice,
                 provider: provider
             )
         }
@@ -68,10 +63,10 @@ extension TTSNetworkManager.RequestSettings {
     /// manager construction, before anything reads either setting.
     static func migrateRetiredOpenAISpeechSettings(in defaults: UserDefaults) {
         if let model = defaults.string(forKey: SettingsKeys.openAIModel), model.contains("tts") {
-            defaults.set(ProviderMetadataCatalog.openAIModels[0], forKey: SettingsKeys.openAIModel)
+            defaults.set(ProviderDefaults.openAIModel, forKey: SettingsKeys.openAIModel)
         }
         if let voice = defaults.string(forKey: SettingsKeys.openAIVoice), retiredOpenAIVoices.contains(voice) {
-            defaults.set(defaultOpenAIVoice, forKey: SettingsKeys.openAIVoice)
+            defaults.set(ProviderDefaults.openAIVoice, forKey: SettingsKeys.openAIVoice)
         }
     }
 }

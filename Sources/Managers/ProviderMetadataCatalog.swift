@@ -1,5 +1,32 @@
 import Foundation
 
+/// The settings a fresh install starts with, before the user has stored any.
+///
+/// This is the one owner of those values: launch resolution, the Settings form's fallbacks, and the
+/// retired-speech migration all read them here, so the form and the first request cannot disagree
+/// about a value nobody has typed. Each provider's catalog lists its default model first by building
+/// on these names rather than the other way round, so reordering a catalog cannot move a default.
+enum ProviderDefaults {
+    /// The provider a launch and the Settings sidebar select when none is stored.
+    static let provider = APIKeyProvider.openAI
+    /// OpenAI's default Realtime model, named by OpenAI as the replacement for `tts-1`.
+    static let openAIModel = "gpt-realtime-2.1-mini"
+    /// OpenAI's default voice, which also replaces a retired speech-only voice.
+    static let openAIVoice = "alloy"
+    /// Gemini's default TTS model, Google's replacement for `gemini-3.1-flash-tts-preview`.
+    static let geminiModel = "gemini-3.8-flash-lite-tts"
+    /// Gemini's default voice.
+    static let geminiVoice = "Aoede"
+    /// Custom's model before one is typed: empty, because a Custom deployment's names cannot be
+    /// guessed, so the request path refuses it by name instead.
+    static let customModel = ""
+    /// Custom's voice before one is typed, empty for the same reason as its model.
+    static let customVoice = ""
+    /// The native Kokoro server's speech URL from README, which a Custom provider falls back to
+    /// before one is typed (D34). Plain HTTP is allowed because the host is a loopback literal.
+    static let customEndpoint = "http://127.0.0.1:8881/v1/audio/speech"
+}
+
 /// The model and voice choices each provider documents, independent of when they may be offered.
 ///
 /// A catalog states what a provider publishes about itself, which is a property of that provider
@@ -11,11 +38,9 @@ import Foundation
 enum ProviderMetadataCatalog {
     /// The OpenAI Realtime models the app supports and offers as suggestions, the default first.
     ///
-    /// Both speak through the Realtime WebSocket API, verified live 2026-11-02. Mini is OpenAI's named
-    /// replacement for the retiring `tts-1` speech models. The default is repeated as each settings
-    /// fallback and as the target of `RequestSettings.migrateRetiredOpenAISpeechSettings`, so change
-    /// those with this order.
-    static let openAIModels = ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"]
+    /// Both speak through the Realtime WebSocket API, verified live 2026-11-02. Mini, the default
+    /// `ProviderDefaults` names, is OpenAI's named replacement for the retiring `tts-1` speech models.
+    private static let openAIModels = [ProviderDefaults.openAIModel, "gpt-realtime-2.1"]
     /// The built-in Realtime voices, in the order the Realtime API lists them.
     ///
     /// Transcribed from the supported values the API names when it rejects a voice, verified
@@ -39,9 +64,9 @@ enum ProviderMetadataCatalog {
     /// The Gemini TTS models the app supports and offers as suggestions, the default first.
     ///
     /// Both stream from `:streamGenerateContent`, verified live 2026-11-01. Flash-Lite is Google's
-    /// replacement for `gemini-3.1-flash-tts-preview`; Flash covers languages Flash-Lite does not.
-    /// The default is repeated as each settings fallback, so change those with this order.
-    private static let geminiModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts"]
+    /// replacement for `gemini-3.1-flash-tts-preview` and the default `ProviderDefaults` names;
+    /// Flash covers languages Flash-Lite does not.
+    private static let geminiModels = [ProviderDefaults.geminiModel, "gemini-3.8-flash-tts"]
 
     /// The models `provider` documents, or `nil` for a provider that documents none.
     ///

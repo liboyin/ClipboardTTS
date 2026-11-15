@@ -65,7 +65,7 @@ struct AppStartupDependencies {
         }
 
         let persistedProvider = APIKeyProvider(
-            selectedProvider: defaults.string(forKey: SettingsKeys.ttsProvider) ?? "OpenAI"
+            selectedProvider: defaults.string(forKey: SettingsKeys.ttsProvider) ?? ProviderDefaults.provider.settingsValue
         )
         let persistedCustomSampleRate: Double
         if let storedSampleRate = defaults.object(forKey: SettingsKeys.customSampleRate) {

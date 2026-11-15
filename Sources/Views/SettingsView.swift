@@ -1,21 +1,6 @@
 import SwiftUI
 
 struct SettingsView: View {
-    /// The values the form shows when the injected store holds no preference for a key yet.
-    ///
-    /// They live here rather than on each `@AppStorage` declaration because `init` binds every one
-    /// of them to the caller's store, which leaves the declarations without an initializer.
-    private enum Fallback {
-        static let ttsProvider = "OpenAI"
-        static let apiBaseURL = "http://127.0.0.1:8881/v1/audio/speech"
-        static let openAIModel = "gpt-realtime-2.1-mini"
-        static let openAIVoice = "alloy"
-        static let geminiModel = "gemini-3.8-flash-lite-tts"
-        static let geminiVoice = "Aoede"
-        static let customModel = ""
-        static let customVoice = ""
-    }
-
     @ObservedObject private var networkManager: TTSNetworkManager
     @ObservedObject private var audioPlayer: AudioPlayerManager
     /// The shared owner of what is speaking, which Test Voice starts a session through.
@@ -55,14 +40,14 @@ struct SettingsView: View {
         self.speechSession = speechSession
         self.aboutAction = aboutAction
         _secretState = StateObject(wrappedValue: SettingsSecretState(secretStore: secretStore, defaults: defaults))
-        _ttsProvider = AppStorage(wrappedValue: Fallback.ttsProvider, SettingsKeys.ttsProvider, store: defaults)
-        _apiBaseURL = AppStorage(wrappedValue: Fallback.apiBaseURL, SettingsKeys.apiBaseURL, store: defaults)
-        _openaiModel = AppStorage(wrappedValue: Fallback.openAIModel, SettingsKeys.openAIModel, store: defaults)
-        _openaiVoice = AppStorage(wrappedValue: Fallback.openAIVoice, SettingsKeys.openAIVoice, store: defaults)
-        _geminiModel = AppStorage(wrappedValue: Fallback.geminiModel, SettingsKeys.geminiModel, store: defaults)
-        _geminiVoice = AppStorage(wrappedValue: Fallback.geminiVoice, SettingsKeys.geminiVoice, store: defaults)
-        _customModel = AppStorage(wrappedValue: Fallback.customModel, SettingsKeys.customModel, store: defaults)
-        _customVoice = AppStorage(wrappedValue: Fallback.customVoice, SettingsKeys.customVoice, store: defaults)
+        _ttsProvider = AppStorage(wrappedValue: ProviderDefaults.provider.settingsValue, SettingsKeys.ttsProvider, store: defaults)
+        _apiBaseURL = AppStorage(wrappedValue: ProviderDefaults.customEndpoint, SettingsKeys.apiBaseURL, store: defaults)
+        _openaiModel = AppStorage(wrappedValue: ProviderDefaults.openAIModel, SettingsKeys.openAIModel, store: defaults)
+        _openaiVoice = AppStorage(wrappedValue: ProviderDefaults.openAIVoice, SettingsKeys.openAIVoice, store: defaults)
+        _geminiModel = AppStorage(wrappedValue: ProviderDefaults.geminiModel, SettingsKeys.geminiModel, store: defaults)
+        _geminiVoice = AppStorage(wrappedValue: ProviderDefaults.geminiVoice, SettingsKeys.geminiVoice, store: defaults)
+        _customModel = AppStorage(wrappedValue: ProviderDefaults.customModel, SettingsKeys.customModel, store: defaults)
+        _customVoice = AppStorage(wrappedValue: ProviderDefaults.customVoice, SettingsKeys.customVoice, store: defaults)
         _customSampleRate = AppStorage(
             wrappedValue: AudioPlayerManager.defaultSampleRate,
             SettingsKeys.customSampleRate,
