@@ -40,12 +40,13 @@ struct AppStartupDependencies {
     static func make(
         isHostedTest: Bool = HostedTestProcess.isActive,
         productionSessionRouting: TTSNetworkManager.SessionRouting? = AppStartupDependencies.productionSessionRouting,
-        // This is the composition root, and these two lines are the only place in the app that
-        // names a defaults domain rather than being handed one. Everything downstream requires an
-        // explicit store, which is what keeps the installed app's own preferences out of reach of
-        // a test and out of reach of any later `Sources` code that would otherwise write there.
+        // This is the composition root, and these lines are the only place in the app that names
+        // a defaults domain or the Keychain rather than being handed one. Everything downstream
+        // requires an explicit store, which is what keeps the installed app's own preferences and
+        // keys out of reach of a test and of any later `Sources` code that would otherwise use them.
         // swiftlint:disable:next process_default_settings_store
         productionDefaults: () -> UserDefaults = { .standard },
+        // swiftlint:disable:next keychain_secret_store
         productionSecretStore: () -> SecretStoring = { KeychainSecretStore() },
         // swiftlint:disable:next process_default_settings_store
         testDefaults: () -> UserDefaults = { UserDefaults(suiteName: "com.clipboardtts.hosted-tests.\(UUID().uuidString)")! },

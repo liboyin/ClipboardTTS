@@ -122,11 +122,12 @@ final class TTSNetworkManager: NSObject, ObservableObject, URLSessionDataDelegat
     ///
     /// The session always carries the production policy; `routing` can only layer request routing
     /// onto it. It has no default, so every construction states its routing: production startup
-    /// passes `nil`, and nothing else does.
+    /// passes `nil`, and nothing else does. `secretStore` has no default either, so a caller that
+    /// omits it fails to build instead of reaching the developer's Keychain.
     init(routing: SessionRouting?,
          sessionCreated: ((URLSession) -> Void)? = nil,
          sessionInvalidated: ((URLSession) -> Void)? = nil,
-         secretStore: SecretStoring = KeychainSecretStore(),
+         secretStore: SecretStoring,
          defaults: UserDefaults,
          requestBodyEncoder: @escaping (Data) throws -> Data = { $0 },
          realtimeConnectionFactory: @escaping @Sendable (URLSession, URLRequest) -> RealtimeSpeechConnection = {

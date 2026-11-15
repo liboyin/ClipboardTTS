@@ -22,7 +22,9 @@ struct SettingsView: View {
 
     /// Builds the form. `defaults` has no default value on purpose: the migration this form can
     /// retry reads and clears legacy keys, so it must be the same domain the app migrated at
-    /// startup rather than whichever one `.standard` names in the caller's process.
+    /// startup rather than whichever one `.standard` names in the caller's process. `secretStore`
+    /// has no default for the same reason: the form reads, saves, and deletes keys in it, so it
+    /// must be the store startup chose, and a hosted form can never fall back to the Keychain.
     ///
     /// Every preference the form displays is bound to that same store below, so one argument now
     /// selects the whole domain the window reads, writes, and migrates. Binding each `@AppStorage`
@@ -32,7 +34,7 @@ struct SettingsView: View {
     init(networkManager: TTSNetworkManager,
          audioPlayer: AudioPlayerManager,
          speechSession: SpeechSessionCoordinator,
-         secretStore: SecretStoring = KeychainSecretStore(),
+         secretStore: SecretStoring,
          defaults: UserDefaults,
          aboutAction: AboutAction = AboutAction()) {
         self.networkManager = networkManager

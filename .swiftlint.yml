@@ -92,6 +92,25 @@ custom_rules:
     message: "A test-local @AppStorage can bind the process defaults store even when declared without a key, and a UserDefaults subclass reaches the default search list through super.init() or a nil suite name; use makeOwnedDefaults instead, or disable this rule on the one line with a reason."
     severity: error
 
+  # The secret store's counterpart to the first rule (NB56, D39). No initializer defaults its
+  # `secretStore` any more, so the compiler refuses an omitted store; this rule keeps a default, or
+  # any other construction, from coming back, which no test could see because a test that omits
+  # the argument passes whichever store it gets. It refuses the type name `KeychainSecretStore`
+  # anywhere in `Sources/` and `Tests/` except directly after `class` in its own declaration, so
+  # `AppStartupDependencies.make` carries the one disable, and a type alias is refused along with
+  # `KeychainSecretStore()`, `.init`, and a contextual `.init` assigned to it. Like the rules above
+  # it guards a habit, not a proof: a runtime class lookup by string still gets through.
+  keychain_secret_store:
+    name: "Keychain Secret Store"
+    included: ".*/(Sources|Tests)/.*\\.swift"
+    regex: "(?<!\\bclass\\s{1,20})\\bKeychainSecretStore\\b"
+    excluded_match_kinds:
+      - comment
+      - doccomment
+      - string
+    message: "KeychainSecretStore is the developer's real Keychain; only the composition root, AppStartupDependencies.make, names it. Pass a store explicitly (InMemorySecretStore in tests), or disable this rule on the one line with a reason."
+    severity: error
+
   # A test must not hold a manager without routing: production startup is the only construction that
   # passes none. So in `Tests/` a manager is built only by `TestNetworkFactory` (its file is excluded),
   # whether spelled `TTSNetworkManager(`, `.init`, or the contextual `.init(routing:`; and every
