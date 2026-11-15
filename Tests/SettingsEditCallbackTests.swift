@@ -9,7 +9,7 @@ import AppKit
 /// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
 /// runs on the main actor.
 @MainActor
-final class SettingsMetadataRefreshTests: MockURLProtocolTestCase {
+final class SettingsEditCallbackTests: MockURLProtocolTestCase {
     func testATypedEditRunsItsFieldCallbackOnceBesideARenderedPicker() {
         // WHY: The field and the suggestion picker beside it edit the same binding. Observing each
         // control rather than the binding ran every edit's callback twice, which applied the form

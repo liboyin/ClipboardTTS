@@ -18,7 +18,7 @@ let documentedGeminiTTSVoices = [
 ///
 /// This suite owns the contract — which sets are offered, and the difference between a provider that
 /// documents an empty catalog and one that documents none. Which catalog a Settings form offers is a
-/// separate property, owned by `SettingsVoiceMetadataTests`: those hosted tests fail if a form
+/// separate property, owned by `SettingsSuggestionTests`: those hosted tests fail if a form
 /// offers another provider's catalog, or offers any catalog for a Custom endpoint.
 final class ProviderMetadataCatalogTests: XCTestCase {
     /// The ten built-in voices the Realtime API names when it rejects a voice, verified 2026-11-02.

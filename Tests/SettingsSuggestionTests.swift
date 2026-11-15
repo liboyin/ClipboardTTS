@@ -6,7 +6,7 @@ import XCTest
 /// Hosted Settings drives `NSHostingView` and the AppKit controls it builds, so every test here
 /// runs on the main actor.
 @MainActor
-final class SettingsVoiceMetadataTests: MockURLProtocolTestCase {
+final class SettingsSuggestionTests: MockURLProtocolTestCase {
     func testSettingsSuggestsTheCompleteDocumentedGeminiVoiceCatalog() {
         // WHY: Settings is where a user types a voice, and since the menu stopped offering one it is
         // the only surface a documented voice can reach. Offering a subset of the provider contract
