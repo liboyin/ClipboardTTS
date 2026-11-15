@@ -1,5 +1,4 @@
 import Foundation
-import ApplicationServices
 import AppKit
 
 /// Reads string values from a pasteboard without exposing mutable pasteboard operations.
@@ -16,7 +15,10 @@ struct GeneralPasteboardReader: PasteboardReading {
 }
 
 /// Extracts copied text through an injected read-only pasteboard dependency.
-final class TextExtractionManager: ObservableObject {
+///
+/// A plain value rather than an observable object: it publishes nothing and holds only its reader,
+/// so any copy reads the same pasteboard and SwiftUI has no lifetime to manage for it.
+struct TextExtractionManager {
     private let pasteboard: PasteboardReading
 
     init(pasteboard: PasteboardReading = GeneralPasteboardReader()) {

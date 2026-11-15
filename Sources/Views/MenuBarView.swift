@@ -3,7 +3,7 @@ import AppKit
 
 struct MenuBarView: View {
     @ObservedObject var audioPlayer: AudioPlayerManager
-    @ObservedObject var textExtraction: TextExtractionManager
+    let textExtraction: TextExtractionManager
     @ObservedObject var networkManager: TTSNetworkManager
     /// The app-lifetime owner of the deferred clipboard read; see `speakCopiedText()`.
     let deferredClipboardAction: DeferredClipboardAction

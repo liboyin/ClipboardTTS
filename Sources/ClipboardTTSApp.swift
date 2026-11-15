@@ -97,8 +97,10 @@ struct AppStartupDependencies {
 @main
 struct ClipboardTTSApp: App {
     @StateObject private var audioPlayer: AudioPlayerManager
-    @StateObject private var textExtraction: TextExtractionManager
     @StateObject private var networkManager: TTSNetworkManager
+    /// Stateless, so unlike the objects around it it needs no first-wins lifetime: every instance
+    /// startup builds reads the same production pasteboard.
+    private let textExtraction: TextExtractionManager
 
     // Owns what is speaking for the app's lifetime. A @StateObject for the same reason as the
     // managers below: first-wins lifecycle keeps this pointing at the very manager pair the scene
@@ -107,7 +109,7 @@ struct ClipboardTTSApp: App {
 
     // Owns the Services-notification subscription for the app's lifetime, so the Services flow
     // works before the menu bar dropdown (and thus MenuBarView) is ever built. Held as a
-    // @StateObject (like the managers) so all four share first-wins lifecycle semantics and can
+    // @StateObject (like the managers) so it shares their first-wins lifecycle semantics and can
     // never end up pointing at different manager instances.
     @StateObject private var servicesCoordinator: ServicesCoordinator
 
@@ -129,7 +131,7 @@ struct ClipboardTTSApp: App {
         self.secretStore = dependencies.secretStore
         self.defaults = dependencies.defaults
         _audioPlayer = StateObject(wrappedValue: dependencies.audioPlayer)
-        _textExtraction = StateObject(wrappedValue: dependencies.textExtraction)
+        self.textExtraction = dependencies.textExtraction
         _networkManager = StateObject(wrappedValue: dependencies.networkManager)
         _speechSession = StateObject(wrappedValue: dependencies.speechSession)
         _servicesCoordinator = StateObject(wrappedValue: dependencies.servicesCoordinator)
