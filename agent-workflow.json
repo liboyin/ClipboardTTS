@@ -1,0 +1,13 @@
+{
+  "check_docs": {
+    "changed_lines_only": ["README.md", "DESIGN.md", "project-reviews.md", "tasks/open/", "tasks/closed/"],
+    "tasks": {
+      "id": "(?:T|B|NB|N|S)\\d+",
+      "title_separators": [":", " —"],
+      "exempt": ["tasks/closed/governance-sync-2026-10-12.md", "tasks/closed/InMemoryDefaults-inert-mutators.md"]
+    }
+  },
+  "dispatch": {
+    "safety": "Never access the developer's real preferences, Keychain or pasteboard, never contact a live provider, and never read .env."
+  }
+}

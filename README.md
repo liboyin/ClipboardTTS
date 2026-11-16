@@ -9,6 +9,7 @@ Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text a
 ## Requirements
 
 - A Mac with Apple silicon running macOS 14 or later, and Xcode. The app is distributed for Apple silicon only and does not run on Intel Macs.
+- A checkout of the [shared tools](#shared-tools) beside this repository. They run on the Python that macOS provides.
 - `xcodegen` and `swiftlint` are user-managed; the app does not install or modify them. Every app build runs `swiftlint --strict` over `Sources` and `Tests` and fails if SwiftLint is not on `PATH` or in Homebrew's `/opt/homebrew/bin` or `/usr/local/bin`.
 
 ## First use
@@ -69,6 +70,34 @@ Each symbol the coverage gate excludes carries an end-to-end check to run by han
 - **Keychain** (`KeychainSecretStore`): Save an API key in Settings, quit, relaunch and confirm the key is still there, then clear that field, quit, relaunch and confirm it is gone — clearing a key is what reaches `deleteSecret`, which is excluded alongside the read and the write.
 
 Those checks have not been run by the agent that introduced the exclusions; they are recorded as outstanding in [TODO](tasks/TODO.md#shared-constraints).
+
+## Documentation Check
+
+[AGENTS.md](AGENTS.md#validation-and-review) requires this check for every change that touches a Markdown file.
+
+- Run `../agent-workflow-common/tools/check_docs.py` from the repository root. It takes less than a second.
+- It checks that each relative link and each heading anchor resolves.
+- It checks the task files against the index in `tasks/TODO.md`.
+- It checks the rules of [STYLE.md](STYLE.md) that need no judgment, such as the sentence limits.
+- In the files that `agent-workflow.json` lists under `changed_lines_only`, it checks the style of changed lines only.
+- It prints each problem as `path:line: rule: message`.
+- A pass means that the local references resolve. It does not mean that the documents agree with each other.
+- Before you rename or move a file or a heading, run the tool with `--references TARGET`. It lists each line that links to the target.
+
+## Shared Tools
+
+Three tools run from a checkout of the shared tools repository, `agent-workflow-common`, beside this repository. This repository holds no copy of them.
+
+| Tool | Purpose |
+|---|---|
+| `../agent-workflow-common/tools/check_docs.py` | The [documentation check](#documentation-check) |
+| `../agent-workflow-common/tools/snapshot.py` | The integrity snapshot of a review |
+| `../agent-workflow-common/tools/dispatch.py` | The dispatch of the reviewer |
+
+- `agent-workflow.json` holds this project's settings for the tools.
+- The tools use only the standard library, and they run on Python 3.9 or later. Each tool's `--help` text describes its arguments.
+- The shared repository tests the tools. Change a tool there, not here.
+- This project always uses the version that the checkout holds. No version is pinned.
 
 ## Mutation Testing
 

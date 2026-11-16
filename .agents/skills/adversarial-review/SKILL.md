@@ -31,22 +31,9 @@ If you want to reuse earlier gate results or evidence, read [evidence reuse](ref
 How to start the reviewer depends on the main agent:
 
 - **Codex:** use `spawn_agent` with `fork_turns: "none"`, `model: "gpt-6.1-sol"` and `reasoning_effort: "medium"`, unless the user selects otherwise. Continue the recorded reviewer with `followup_task`.
-- **Claude Code:** use the Codex CLI, as these steps describe.
+- **Claude Code:** run the shared tool `../agent-workflow-common/tools/dispatch.py` from the repository root. It writes the prompt, starts or resumes the Codex CLI, and prints the session ID and the report. Its `--help` text lists the arguments.
 
-For Claude Code:
-
-1. Verify `command -v codex` and `codex login status`. Missing setup or authentication is a blocker, not a reason to install a plugin.
-2. Start the reviewer with the first command below, and record the session ID that it returns.
-3. Continue the reviewer with the second command. Use the recorded ID, not `--last`.
-4. Close stdin as shown, so that a background invocation does not wait for more prompt input.
-5. If the command runs outside a repository, add `--skip-git-repo-check`.
-
-```sh
-codex exec --dangerously-bypass-approvals-and-sandbox --model gpt-6.1-sol -c model_reasoning_effort="medium" --json <review prompt> < /dev/null
-codex exec resume --dangerously-bypass-approvals-and-sandbox --model gpt-6.1-sol -c model_reasoning_effort="medium" <SESSION_ID> <review prompt> < /dev/null
-```
-
-The bypass dispatch preserves the user's decision of 2026-09-24. The platform's enforced policy still applies, as [AGENTS.md](../../../AGENTS.md#scope-and-decisions) states.
+The tool runs the CLI with its approvals and its sandbox bypassed. This preserves the user's decision of 2026-09-24. The platform's enforced policy still applies, as [AGENTS.md](../../../AGENTS.md#scope-and-decisions) states.
 
 If the requested model or dispatch path is unavailable:
 
@@ -62,35 +49,23 @@ Wait for the reviewer's exit status and report before you decide on any finding.
 
 1. Stop editing the candidate.
 2. Obtain a passing result for every gate on the exact candidate, from new runs. Resolve each failure before dispatch.
-3. Take the integrity snapshot after the last gate run and immediately before dispatch. The [snapshot contract](#snapshot-contract) says what it records.
+3. Take the integrity snapshot after the last gate run and immediately before dispatch. Run the shared tool `../agent-workflow-common/tools/snapshot.py` from the repository root, and pass each in-scope untracked file as an argument.
 4. Note the processes that you own, if any are relevant.
 5. Update the [working record](#evidence-retention).
 
 These rules apply to the snapshot:
 
 - If you edit the candidate or run a gate on it after the snapshot, take a new snapshot.
-- A failed or incomplete snapshot blocks acceptance of the review.
+- Write each snapshot outside the repository. A failed snapshot run blocks acceptance of the review.
 - Never inspect or hash ignored untracked content.
 - After a successful comparison, you MAY discard the snapshot, unless an investigation or evidence reuse needs it.
-
-#### Snapshot contract
-
-This repository has no snapshot tool. The main agent takes the inventory by hand, and stores it outside the repository.
-
-- Record `HEAD` and `git status`.
-- Record the complete index, with object IDs, stages and modes. Include deletions and type changes.
-- Record the content hash and the executable mode of each dirty tracked file and each in-scope untracked file.
-- Record the target text and the mode of each symlink. Do not dereference it.
-- Record the out-of-scope untracked paths, and the relevant processes that you own.
-- Use Git's NUL-delimited listings for status, index and paths. Disable optional index-refresh writes with `GIT_OPTIONAL_LOCKS=0`.
-- Inspect paths without following symlinks.
-- Before you scan the working tree, reject submodules and tracked paths beneath working-tree symlinks. Do not traverse them.
 
 ### 2. Dispatch (main agent)
 
 Ask the [recorded reviewer](#reviewer-session) to read this skill and perform step 3. Supply only these items:
 
 - The repository path and the exact candidate: a dirty tree, a commit or a range. For a follow-up, add the earlier candidate and the delta.
+- The base revision. Read it from the candidate with `git rev-parse HEAD`.
 - The in-scope paths, each included untracked file, and the unrelated dirty paths to ignore.
 - The purpose, in a few sentences.
 - The path to the accepted boundary. Under the [task rules](../../../tasks/README.md#two-kinds-of-work), this can be an open task or an ad-hoc completion record in the candidate.

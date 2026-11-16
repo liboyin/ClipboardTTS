@@ -181,6 +181,13 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 - For a governance edit, check that it preserves the accepted safeguards and authorization boundaries. The edit also needs the user's review under [Governance Files](#governance-files).
 - Documentation that a build tool or a runtime tool consumes as executable input or configuration is not exempt.
 
+**Documentation check.** Every change that touches a Markdown file MUST pass the [documentation check](README.md#documentation-check) before the commit.
+
+**Shared tools.** The documentation check, the review snapshot and the reviewer dispatch are tools of the shared tools repository. [README Shared Tools](README.md#shared-tools) says where its checkout lives.
+
+- Do not copy a shared tool into this repository. Change it in its own repository, which tests it.
+- If the checkout is missing, report the blocker. Do not skip the check that needs the tool.
+
 **Honest verification.**
 
 - Verify success with checks that distinguish failure.

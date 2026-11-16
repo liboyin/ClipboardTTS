@@ -10,6 +10,7 @@ The rules follow ASD-STE100 and ISO 24495-1 loosely. Full compliance with either
 - Code, commands, quoted output and tables of data are exempt.
 - The completion records in [tasks/closed/](tasks/closed/) stay as written. Do not rewrite them to meet these rules.
 - [README.md](README.md), [DESIGN.md](DESIGN.md), [project-reviews.md](project-reviews.md) and the open task files are not rewritten as a whole. Apply the rules to the text that a change touches.
+- The [documentation check](README.md#documentation-check) checks the rules that need no judgment.
 
 ## Structure
 

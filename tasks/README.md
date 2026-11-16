@@ -114,7 +114,7 @@ These rules apply to the record:
 
 ### After a restructure of the tasks
 
-Check the local links, the IDs and the TODO index. Check that the dependencies between the tasks are still consistent.
+Check that the dependencies between the tasks are still consistent. The [documentation check](../README.md#documentation-check) checks the links, the IDs and the TODO index.
 
 ## Open task file
 
