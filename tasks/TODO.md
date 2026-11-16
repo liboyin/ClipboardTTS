@@ -25,17 +25,13 @@ No Blocking finding is open, and no Nit is open. No open task is bounded for imp
 
 **Integration.**
 
-- Review an integrated change against the accepted decisions and the current DESIGN and README.
 - Supplement an integration change with checks across entry points: playback, cancellation, switching of provider and format, failure and recovery, and settings isolation.
-- Inspect the warnings and the complete gated population.
 - Static analysis gives additional evidence. So does Thread Sanitizer, where it is relevant and supported. Clean output is not proof of race freedom.
 
 **Manual checks.**
 
 - The user runs the [manual smoke checks](../README.md#manual-smoke-checks) of the symbols that the coverage gate excludes (D17). No agent has performed them.
 - Physical switching of audio devices remains unverified.
-- A check against a live provider needs the user's authorization, under the [safety rules](../AGENTS.md#safety).
-- Record evidence at its actual revision.
 
 ## Open tasks
 

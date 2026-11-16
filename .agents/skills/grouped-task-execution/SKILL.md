@@ -29,7 +29,6 @@ Grouping does not expand authorization, and it does not settle an unresolved mat
 - Supply the repository path, the path of the boundary, the edit ownership, the relevant documentation and the unrelated work to preserve.
 - State who is responsible for the validation and for the evidence.
 - Do not repeat the contracts that the boundary states.
-- Assign one primary producer of mutation evidence for each cohesive candidate.
 - Implement foundations before the behavior that depends on them. Run focused checks between stages.
 
 ## 3. Integrate and freeze
@@ -44,19 +43,16 @@ These rules also apply:
 
 - Freeze, validate and review each independent candidate in the order from step 1.
 - An intermediate state needs full gates and its own review only if it is committed independently.
-- Dispatch the review only when the required gates and evidence are ready.
 
 ## 4. Review and resolve
 
 - Apply the [review procedure](../adversarial-review/SKILL.md#procedure) to every accepted boundary, acceptance criterion, retained behavior and integration path.
 - [Review Scope](../adversarial-review/SKILL.md#review-scope) says what the review covers, and when tasks that were already reviewed need a further review.
-- The main agent remains accountable for the result.
 
 ## 5. Close
 
 1. Verify the done criteria of each task.
-2. Check that no Blocking finding remains and that every finding has its disposition.
-3. Close the tasks under the [task rules](../../../tasks/README.md#close-a-task) before the commit.
+2. Close the tasks under the [task rules](../../../tasks/README.md#close-a-task) before the commit.
 
 ## 6. Gap review
 
@@ -72,7 +68,6 @@ After the group's commits, the main agent reviews the committed range itself. Th
 ## 7. Report and reflect
 
 - Report the changes, checks, verdicts, gap-review outcome, deferrals and limitations. Link the completion records.
-- Follow the [retention and cleanup rules](../adversarial-review/SKILL.md#evidence-retention) of the review skill.
 - End the handoff with the governance friction that you observed and concrete improvements. Separate friction from your own execution mistakes.
 - If no friction arose, say so briefly.
 - Treat this feedback as a proposal. [Governance Files](../../../AGENTS.md#governance-files) says where a lesson goes and who approves a governance edit.

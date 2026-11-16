@@ -8,41 +8,28 @@ This file lives at the repository root. XcodeGen would copy a Markdown file unde
 
 - XCTest cases live under `Tests/`, and they MUST use `@testable import ClipboardTTSApp`.
 - A test name MUST describe the protected behavior.
-- Comments explain non-obvious reasons or trade-offs.
 - Tooling scripts have their own verifiers, not XCTest cases. [README Mutation Testing](README.md#verifying-the-runner) describes the verifier of the mutation runner.
 
 ## Owned state
 
-- Use test-owned state throughout hosted startup, the managers and SwiftUI persistence. DESIGN describes the support for [hosted startup](DESIGN.md#hosted-startup) and for [settings storage](DESIGN.md#settings-storage).
+- DESIGN describes the test-owned support for [hosted startup](DESIGN.md#hosted-startup) and for [settings storage](DESIGN.md#settings-storage).
 - Snapshot and restore only the state that the test owns.
 - Do not seed real preferences to prove that the code does not access them.
 - Do not leave a seeded disk-backed suite behind.
-- A scratch copy alone does not isolate macOS state.
 
 ## Network
 
-- Automated tests MUST NOT reach an external service.
 - DESIGN describes the test-owned [network routing and its lifecycle](DESIGN.md#network-routing-and-lifecycle).
 
 ## Asynchronous work
 
-- A shared asynchronous resource or a process-global double needs five things: ownership by one test, synchronized access, cancellation, quiescence, and local accounting for late work.
-- These guarantees hold after timeouts and failures too. A fulfilled expectation alone does not prove that callbacks or background work have stopped.
+- A shared asynchronous resource or a process-global double MUST have five things: ownership by one test, synchronized access, cancellation, quiescence, and local accounting for late work.
+- These guarantees MUST hold after timeouts and failures too. A fulfilled expectation alone does not prove that callbacks or background work have stopped.
 - DESIGN describes the [terminal-state assertions](DESIGN.md#terminal-state-assertions) and the rules for [ordering and cross-thread state](DESIGN.md#ordering-and-cross-thread-state).
-
-## Time
-
-- Prefer controlled inputs, schedulers and explicit completion signals.
-- Do not wait for elapsed time where a completion signal exists.
 
 ## Views and audio
 
 - DESIGN describes how tests host [views](DESIGN.md#hosted-views), and how they own [audio players and menu tests](DESIGN.md#audio-players-and-menu-tests).
-
-## Mutants
-
-- Mutants of code under XCTest run through the [`run-mutants.py` procedure](README.md#mutation-testing).
-- A mutant that weakens the tests' own isolation MUST NOT run through the runner as it stands. [README Isolation](README.md#isolation) states the rule.
 
 ## Coverage
 

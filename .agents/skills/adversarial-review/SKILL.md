@@ -15,8 +15,7 @@ description: Independently review non-trivial code, test, or configuration chang
 - If the scope or the design changes substantially, review the complete candidate again.
 - An integrated review of a group reassesses the earlier conclusions.
 - Tasks that were already reviewed need a further group review only for integration risks that no review covered. Record that decision.
-- After a fix or a rollback of the candidate, repeat the full gates and obtain a fresh assessment and verdict from the recorded reviewer.
-- A retained reviewer session and retained evidence do not waive these requirements.
+- A retained reviewer session and retained evidence do not waive the full gates and the fresh verdict that [AGENTS.md](../../../AGENTS.md#validation-and-review) requires after a fix or a rollback.
 
 If you want to reuse earlier gate results or evidence, read [evidence reuse](references/evidence-reuse.md) first.
 
@@ -55,7 +54,7 @@ If the requested model or dispatch path is unavailable:
 2. Do not use another model or dispatch path without that direction.
 3. Do not claim a review verdict.
 
-Track each invocation to its end. Wait for the reviewer's exit status and report before you decide on any finding.
+Wait for the reviewer's exit status and report before you decide on any finding.
 
 ## Procedure
 
@@ -117,15 +116,11 @@ These rules protect the reviewer's independence:
 - Preserve executable bits, and recreate repository-relative symlinks inside the scratch copy.
 - Never dereference a link into the original repository or into an external path.
 - If the candidate cannot be copied safely, return `Review blocked`.
-- Delete the scratch copies that you own at exit, after you retain the essential evidence.
 
 **Execution isolation.**
 
 - A scratch copy does not isolate settings, services or paths. The [safety rules](../../../AGENTS.md#safety) and the [isolation rules](../../../AGENTS.md#tests) apply to every scratch run.
 - Read the [scratch-testing recipe](references/scratch-testing.md) before the first test or mutant.
-- Preserve the isolation of hosted test startup and the test-owned resources.
-- Verify that the built application and test bundle belong to the scratch copy.
-- A failure of provenance or of the environment is invalid evidence. It is not a mutation kill.
 
 ### 3. Investigate and report (reviewer)
 
@@ -162,21 +157,19 @@ Verify safely and within bounds:
 - Check the supplied evidence independently, as [Evidence Retention](#evidence-retention) describes.
 - If required evidence is missing, produce it in a scratch run or return `Review blocked`.
 - If the protection of a property is doubtful, request more mutants.
-- A kill needs a relevant behavioral failure. A failure of collection, syntax, import or environment is not a kill.
-- Record the invariant, the mutant, the command, the runner settings and the outcome.
+- A kill needs a relevant behavioral failure. A failure of collection, syntax, import, build, lint, environment or provenance is not a kill, and neither is a run with no test.
 
 Then finish:
 
 1. Preserve the evidence.
 2. Clean up only the scratch artifacts and processes that you own.
-3. Return the [report](#report). You MAY propose a remedy. Never edit the repository.
+3. Return the [report](#report). You MAY propose a remedy.
 
 ### 4. Validate and decide (main agent)
 
 1. Take a new snapshot and compare it with the snapshot from step 1. An unexplained change blocks acceptance of the review.
 2. Investigate the findings yourself. Do not change the reviewer's classification.
 3. Record each finding as **Validated**, **Could not validate** or **Not independently validated**. Add the evidence, when you investigated, and the disposition.
-4. Report every Non-blocking finding and every unfixed Nit to the user.
 
 The class of a finding decides what you do with it:
 
@@ -187,19 +180,17 @@ The class of a finding decides what you do with it:
 - **Non-blocking:**
   - Surface each finding directly to the user. The user decides whether to fix it, defer it or accept it without change.
   - Independent validation is optional until the user selects a remedy.
-  - Validate the claim and the remedy before you implement a selected fix.
 - **Nit:**
   - Validate and fix it if that is practical.
   - Otherwise, surface the Nit to the user for a disposition.
-  - Validate the claim and the remedy before you implement any fix.
 
 These rules apply to every disposition:
 
+- Validate the claim and the remedy before you implement any fix.
 - Honor the user's existing dispositions. A deferral is not acceptance without change.
-- Never discard or reclassify a finding silently. Only the reviewer updates its verdict.
+- Only the reviewer updates its verdict.
 - `Review blocked` is not a passing verdict.
 - If you change the candidate, apply [Review Scope](#review-scope) to the change.
-- Completion needs no unresolved Blocking finding and a disposition for every finding.
 
 ## Report
 
@@ -252,16 +243,12 @@ The main agent appends the result of the snapshot comparison, and the validation
   - The behavioral failure.
 - The reviewer MAY accept matching, reliable evidence without a rerun, and records what was checked.
 - Rerun the affected cases if their validity cannot be established, a relevant input changed, or a concern needs reproduction.
-- A changed mutant or a changed selection of tests needs a rerun of the affected cases.
 - A correction to a probe that exists only in scratch does not invalidate the gates or unrelated evidence. This holds only while the candidate, the tests, the dependencies, the isolation and the provenance still match.
 - If the existing evidence cannot distinguish a suspected failure, add a different probe.
 - If tests are consolidated, the retained tests must reject a representative regression of each distinct property.
 
 **Closure.** The [task rules](../../../tasks/README.md#maintaining-tasks) own the completion record.
 
-- A completion record supersedes the working summary. Replace temporary links with durable artifacts before you delete essential evidence.
 - Preserve the exact mutants, the identities of the candidate and the tests, the commands and runner settings, the provenance and the relevant failure excerpts.
 - Full passing logs and repeated tracebacks are optional. Keep raw output only if it explains a finding.
-- After the transfer, remove the scratch copies, the owned processes, the edit scripts and the unnecessary logs.
-- The user's retention instructions take precedence.
 - Never retain secrets, ignored content, host data or copies of external resources.

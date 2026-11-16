@@ -4,10 +4,7 @@ Use this template for the working record of a [review](../SKILL.md#procedure). [
 
 - Update the record for each follow-up candidate.
 - Record decisions and results, not a transcript.
-- Refer to supporting artifacts. Do not copy their contents.
 - Omit a section that does not apply.
-- Keep a failure excerpt only if it establishes the behavioral outcome or explains a finding.
-- At closure, the main agent preserves the essential contents in the completion record, under the [task rules](../../../../tasks/README.md#close-a-task).
 
 ## Fields
 
@@ -30,7 +27,7 @@ Fill this section if mutation evidence was required or performed.
   - The mutant and the relevant test.
   - The exact command with the runner settings, and the behavioral failure.
 - For uncommitted inputs, the tested candidate is the revision plus a patch.
-- Explain why the mutant probes the risk. Cover the categories that [AGENTS.md](../../../../AGENTS.md#tests) requires, and explain each category that does not apply.
+- Explain why the mutant probes the risk, and why a category of [AGENTS.md](../../../../AGENTS.md#tests) does not apply.
 - For removed or weakened coverage, name the retained test that still rejects the broken behavior.
 - Report invalid runs separately from behavioral failures.
 - If the candidate, a test or a probe changed, state which evidence the change invalidates and why the other cases still apply.

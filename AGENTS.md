@@ -54,9 +54,7 @@ These rules settle conflicts between documents:
 **Delegation.**
 
 - A bounded subtask SHOULD use a subagent when independent work or investigation justifies the handoff cost.
-- Closely coupled tasks that touch the same code MAY share one implementation agent.
 - The main agent remains accountable for the integration and the verification.
-- For a group of related tasks, follow the [grouped task execution skill](.agents/skills/grouped-task-execution/SKILL.md), unless the user chooses another approach.
 
 **Committed records.** Other sessions and other agents share only the Git repository.
 
@@ -127,10 +125,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 
 - Automated tests MUST NOT access external services, `NSPasteboard.general`, the developer's Keychain or the developer's real preferences. This holds even for a temporary access.
 - Tests use test-owned state throughout hosted startup, the managers and SwiftUI persistence.
-- A scratch copy alone does not isolate macOS state.
 - Run tests only in an environment that satisfies these ownership rules.
-- A shared asynchronous resource or a process-global double MUST have five things: ownership by one test, synchronized access, cancellation, quiescence, and local accounting for late work.
-- These guarantees MUST hold after timeouts and failures too. Fulfilment alone is not quiescence.
 
 **Mutation evidence.**
 
@@ -173,7 +168,6 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 **Review.**
 
 - Every independently committed non-trivial change MUST pass the [review procedure](.agents/skills/adversarial-review/SKILL.md#procedure) before the commit.
-- Tightly coupled tasks delivered as one cohesive change MAY share an integrated review. [Review Scope](.agents/skills/adversarial-review/SKILL.md#review-scope) says when a further group review is required.
 - The reviewer owns the classification and the verdict. The main agent owns the investigation, the fixes and the required dispositions by the user.
 - After a fix or a rollback, repeat the full gates and obtain a fresh review.
 - Finish only when no Blocking finding remains and every surfaced finding has its required disposition.
@@ -193,7 +187,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 - Explain each non-zero exit.
 - Verify absence directly.
 - Verify a rollback against the recorded state from before the change.
-- Never report an unperformed check as passed. Record an unperformed manual check as a limitation.
+- Never report an unperformed check as passed.
 
 # Safety
 

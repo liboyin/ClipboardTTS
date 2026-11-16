@@ -279,7 +279,7 @@ Menu tests that must own when the deferred clipboard read runs inject a `Deferre
 
 ## Accepted Decisions
 
-This section records the user's accepted decisions with their rationale and the tasks that they affect. Only the decisions recorded here authorize a product change. The task rules say how a decision is [recorded and superseded](tasks/README.md#record-decisions). Decisions made before 2026-11-16 were recorded in the former single plan file, which their wording calls TODO.
+This section records the user's accepted decisions with their rationale and the tasks that they affect. The task rules say how a decision is [recorded and superseded](tasks/README.md#record-decisions). Decisions made before 2026-11-16 were recorded in the former single plan file, which their wording calls TODO.
 
 ### Accepted user decisions — 2026-09-06
 

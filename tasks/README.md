@@ -35,7 +35,6 @@ These rules apply to an ad-hoc change:
 - Change that line only when the task is added, re-prioritized or closed.
 - State the severity or priority, the evidence status, the relevant paths, the expected outcome, the validation criteria and the dependencies.
 - Keep a hypothesis distinguishable from a validated defect.
-- Tie the evidence to its revision and its provenance. A historical review result does not certify the current gates.
 - Preserve the reviewer's classification, and record the user's dispositions.
 - Keep the task compact until it is accepted for implementation.
 
@@ -54,7 +53,7 @@ Before implementation, expand the task's file in place into a full boundary. Use
 
 - Record each accepted decision in [DESIGN.md](../DESIGN.md#accepted-decisions), with its rationale and the tasks that it affects.
 - Keep unresolved choices explicit.
-- If a decision changes, record that it is superseded. Update the affected task files and dependencies before the implementation commit.
+- If a decision changes, update the affected task files and dependencies before the implementation commit.
 - An investigation can expose new decisions. It does not authorize a guess at a compatibility limit, and it does not authorize the removal of coverage.
 
 ### Choose the order
