@@ -4,7 +4,8 @@ import SwiftUI
 @testable import ClipboardTTSApp
 
 /// Covers what `MenuSlider` itself owns: the value and range it shows, its enabled state, the values
-/// its action delivers, and that a value published mid-drag waits for the drag to end.
+/// its action delivers, that a value published mid-drag waits for the drag to end, and the name and
+/// the spoken value it states to assistive technology.
 ///
 /// Sliders are hosted windowlessly, as DESIGN's hosted-view rules require. A user's movement is
 /// delivered by setting the slider's value and sending its action, which is what AppKit's tracking
@@ -102,6 +103,49 @@ final class MenuSliderTests: XCTestCase {
         XCTAssertEqual(slider.edits, [])
     }
 
+    func testSliderStatesItsNameAndDescribesTheValueItShows() {
+        // WHY: A bare `NSSlider` announces only a number. The slider must carry the name it was
+        // given, and describe its value through the formatter it was given, or VoiceOver cannot
+        // say what the control is or what its position means.
+        let slider = HostedSlider(value: 0.25, range: 0.0...2.0, testCase: self)
+
+        XCTAssertEqual(slider.control?.accessibilityLabel(), "Test position")
+        XCTAssertEqual(slider.control?.accessibilityValueDescription(), "value 0.25")
+
+        slider.render(value: 1.5, range: 0.0...2.0, label: "Renamed", spokenValue: { "now \($0)" })
+
+        XCTAssertEqual(slider.control?.accessibilityLabel(), "Renamed", "A new render's name must replace the old one.")
+        XCTAssertEqual(slider.control?.accessibilityValueDescription(), "now 1.5")
+    }
+
+    func testSliderDescribesWhereTheThumbIsWithoutANewRender() {
+        // WHY: Each step of a drag moves the thumb before any render follows it, and a value
+        // published mid-drag is held back. A description fixed at render time would then state a
+        // position the thumb has left.
+        let slider = HostedSlider(value: 0.25, range: 0.0...2.0, testCase: self)
+        guard let control = slider.control else { return XCTFail("The slider must render.") }
+
+        control.beginTracking()
+        control.doubleValue = 1.0
+        slider.render(value: 1.6, range: 0.0...2.0)
+
+        XCTAssertEqual(control.accessibilityValueDescription(), "value 1.0", "The description must follow the thumb.")
+        control.endTracking()
+        XCTAssertEqual(control.accessibilityValueDescription(), "value 1.6")
+    }
+
+    func testASteppedSliderDescribesTheStepItWouldDeliver() {
+        // WHY: Between steps, the stepped slider delivers the nearest step. Describing the raw
+        // position instead would state a rate the player is never given.
+        let slider = HostedStepSlider(value: 1.0, testCase: self)
+        guard let control = slider.control else { return XCTFail("The slider must render.") }
+        XCTAssertEqual(control.accessibilityValueDescription(), "step 1.0")
+
+        control.doubleValue = 1.43
+
+        XCTAssertEqual(control.accessibilityValueDescription(), "step \(Float(0.5) + Float(9) * Float(0.1))")
+    }
+
     func testADragWithNoPublishedValueLeavesTheThumbWhereItWasReleased() {
         // WHY: Ending a drag must not move the thumb by itself; only a value published during the
         // drag may replace where the user left it.
@@ -164,6 +208,31 @@ final class MenuBarSliderTests: MockURLProtocolTestCase {
         XCTAssertEqual(position.maxValue, 3.5)
     }
 
+    func testMenuSlidersStateWhatTheyControlAndTheirValuesInWords() {
+        // WHY: The menu shows no label for the position slider, and the Speed text beside the
+        // other is a separate view. Each slider must say which it is, the position as a time
+        // within the buffered audio, and the speed as a multiplier.
+        let audioPlayer = makeOwnedAudioPlayer()
+        let menu = HostedMenu(audioPlayer: audioPlayer, testCase: self)
+        guard let position = menu.positionSlider, let speed = menu.speedSlider else {
+            return XCTFail("The menu must render both sliders.")
+        }
+        XCTAssertEqual(position.accessibilityLabel(), "Playback position")
+        XCTAssertEqual(speed.accessibilityLabel(), "Playback speed")
+        XCTAssertEqual(position.accessibilityValueDescription(), "0 seconds of 0 seconds")
+        XCTAssertEqual(speed.accessibilityValueDescription(), "1.0 times")
+
+        // Set the published state directly, as the menu's other view tests do, so no live audio runs.
+        audioPlayer.hasAudio = true
+        audioPlayer.bufferDuration = 200
+        audioPlayer.playbackProgress = 65.4
+        audioPlayer.playbackRate = 1.5
+        menu.settle()
+
+        XCTAssertEqual(position.accessibilityValueDescription(), "1 minute 5 seconds of 3 minutes 20 seconds")
+        XCTAssertEqual(speed.accessibilityValueDescription(), "1.5 times")
+    }
+
     func testSpeedSliderSetsThePlaybackRateToTheNearestStep() {
         // WHY: The speed slider is the only control for the player's rate, which the Speed readout
         // beside it shows. Its action must set that rate to the step SwiftUI's slider would have.
@@ -201,9 +270,20 @@ private final class HostedSlider {
         render(value: value, range: range, isDisabled: isDisabled)
     }
 
-    func render(value: Double, range: ClosedRange<Double>, isDisabled: Bool = false) {
+    func render(value: Double,
+                range: ClosedRange<Double>,
+                isDisabled: Bool = false,
+                label: String = "Test position",
+                spokenValue: @escaping (Double) -> String = { "value \($0)" }) {
         host?.rootView = AnyView(
-            MenuSlider(value: value, range: range, onEdit: { self.edits.append($0) }).disabled(isDisabled)
+            MenuSlider(
+                value: value,
+                range: range,
+                accessibilityLabel: label,
+                spokenValue: spokenValue,
+                onEdit: { self.edits.append($0) }
+            )
+            .disabled(isDisabled)
         )
         settleHostedView(host, file: #filePath, line: #line)
     }
@@ -228,7 +308,14 @@ private final class HostedStepSlider {
 
     init(value: Float, testCase: XCTestCase) {
         let host = NSHostingView(
-            rootView: MenuSlider<Float>(value: value, range: 0.5...2.5, step: 0.1, onEdit: { self.edits.append($0) })
+            rootView: MenuSlider<Float>(
+                value: value,
+                range: 0.5...2.5,
+                step: 0.1,
+                accessibilityLabel: "Test speed",
+                spokenValue: { "step \($0)" },
+                onEdit: { self.edits.append($0) }
+            )
         )
         host.frame = NSRect(x: 0, y: 0, width: 240, height: 40)
         self.host = host

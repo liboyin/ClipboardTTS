@@ -16,7 +16,6 @@ Until 2026-11-16, one plan file held all of this content. Its other parts moved 
 
 No Blocking finding is open, and no Nit is open. No open task is bounded for implementation. The open tasks do not depend on each other.
 
-- NB54 (menu accessibility) and NB60 (Settings picker accessibility) may share one boundary and one manual VoiceOver session.
 - NB51 (silent realtime responses) waits for the user's decision on its evidence. More live trials need the user's authorization.
 - S10 (verifier size) is a proposal. It waits for the user's decision on how much tooling robustness to keep.
 
@@ -35,6 +34,4 @@ No Blocking finding is open, and no Nit is open. No open task is bounded for imp
 ## Open tasks
 
 - [NB51](open/NB51.md) — Non-blocking, needs the user's decision. `gpt-realtime-2.1-mini` intermittently goes silent mid-response while reporting success.
-- [NB54](open/NB54.md) — Non-blocking. Give menu controls explicit accessible purposes and values.
-- [NB60](open/NB60.md) — Non-blocking. Settings' suggestion pickers have no accessible name.
 - [S10](open/S10.md) — Non-blocking proposal, needs the user's decision. Review how much code verifies the tooling.

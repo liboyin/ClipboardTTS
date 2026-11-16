@@ -10,11 +10,19 @@ import SwiftUI
 /// Moving the slider passes its value to `onEdit` on every change during a drag, as SwiftUI's
 /// slider wrote its binding; nothing else calls `onEdit`, so updating the view never echoes `value`
 /// back. The slider honours `.disabled` through the environment and follows `range` as it changes.
+///
+/// Every slider states what it controls and what its value means to assistive technology: a bare
+/// `NSSlider` announces only a number, and the text beside it in the menu is a separate view.
 struct MenuSlider<Value: BinaryFloatingPoint>: NSViewRepresentable where Value.Stride: BinaryFloatingPoint {
     let value: Value
     let range: ClosedRange<Value>
     /// The distance between selectable values, or `nil` for any value in `range`.
     var step: Value.Stride?
+    /// What the slider controls, as assistive technology names it. It has no default, so no slider
+    /// can be left unnamed.
+    let accessibilityLabel: String
+    /// States a value the slider can hold in words, such as a time or a multiplier.
+    let spokenValue: (Value) -> String
     let onEdit: (Value) -> Void
 
     func makeCoordinator() -> MenuSliderCoordinator {
@@ -37,9 +45,15 @@ struct MenuSlider<Value: BinaryFloatingPoint>: NSViewRepresentable where Value.S
         let range = range
         let step = step
         let onEdit = onEdit
-        context.coordinator.deliver = { position in
-            onEdit(step.map { Self.steppedValue(at: position, in: range, step: $0) } ?? Value(position))
+        let spokenValue = spokenValue
+        // The value a thumb position stands for, which is what an edit delivers and what is spoken.
+        let valueAt: (Double) -> Value = { position in
+            guard let step else { return Value(position) }
+            return Self.steppedValue(at: position, in: range, step: step)
         }
+        context.coordinator.deliver = { onEdit(valueAt($0)) }
+        slider.setAccessibilityLabel(accessibilityLabel)
+        slider.spokenValue = { spokenValue(valueAt($0)) }
         slider.isEnabled = context.environment.isEnabled
         slider.minValue = Double(range.lowerBound)
         slider.maxValue = Double(range.upperBound)
@@ -86,7 +100,8 @@ final class MenuSliderCoordinator: NSObject {
     }
 }
 
-/// An `NSSlider` that does not move its thumb to a value published while the user is dragging it.
+/// An `NSSlider` that does not move its thumb to a value published while the user is dragging it,
+/// and that describes its value in words.
 ///
 /// A drag's actions publish new values, and the position slider's value also advances on the
 /// playback timer, so an update arriving mid-drag would pull the thumb away from the pointer.
@@ -96,6 +111,14 @@ final class MenuSliderCoordinator: NSObject {
 final class DragDeferringSlider: NSSlider {
     private(set) var isTracking = false
     private var deferredValue: Double?
+    /// States a thumb position in words; `MenuSlider` supplies it on every update.
+    var spokenValue: ((Double) -> String)?
+
+    /// Describes the position the thumb is at now, so the description cannot lag behind a value
+    /// that changed without a new render, such as one step of a drag.
+    override func accessibilityValueDescription() -> String? {
+        spokenValue?(doubleValue) ?? super.accessibilityValueDescription()
+    }
 
     override func mouseDown(with event: NSEvent) {
         beginTracking()

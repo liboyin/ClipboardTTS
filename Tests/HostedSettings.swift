@@ -266,6 +266,11 @@ final class HostedModelVoiceFields {
         return controls
     }
 
+    /// Returns the name each suggestion control states to assistive technology, in rendering order.
+    func suggestionLabels() -> [String?] {
+        host?.descendants(of: NSPopUpButton.self).map { $0.accessibilityLabel() } ?? []
+    }
+
     /// Releases the hosted view graph and drains the main queue. Calling it twice is safe.
     func release(file: StaticString = #filePath, line: UInt = #line) {
         guard host != nil else { return }

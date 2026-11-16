@@ -40,9 +40,10 @@ struct ModelVoiceConfigurationView: View {
             HStack {
                 TextField("Model", text: $ttsModel)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .accessibilityLabel("Model")
 
                 if !modelChoices.isEmpty {
-                    SuggestionPicker(choices: modelChoices, selection: $ttsModel)
+                    SuggestionPicker(choices: modelChoices, accessibilityLabel: "Model suggestions", selection: $ttsModel)
                         .frame(width: 30)
                 }
             }
@@ -53,9 +54,10 @@ struct ModelVoiceConfigurationView: View {
             HStack {
                 TextField("Voice", text: $ttsVoice)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .accessibilityLabel("Voice")
 
                 if !voiceChoices.isEmpty {
-                    SuggestionPicker(choices: voiceChoices, selection: $ttsVoice)
+                    SuggestionPicker(choices: voiceChoices, accessibilityLabel: "Voice suggestions", selection: $ttsVoice)
                         .frame(width: 30)
                 }
             }

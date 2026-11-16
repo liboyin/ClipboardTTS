@@ -97,6 +97,7 @@ final class MenuBarViewTests: MockURLProtocolTestCase {
         // That absence means something only because the same lookup finds the app's picker.
         var pickerHost: NSHostingView? = NSHostingView(rootView: SuggestionPicker(
             choices: ["Distinctive-Review-Voice"],
+            accessibilityLabel: "Voice suggestions",
             selection: .constant("Distinctive-Review-Voice")
         ))
         pickerHost?.frame = NSRect(x: 0, y: 0, width: 30, height: 24)

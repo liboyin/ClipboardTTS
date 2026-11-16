@@ -47,6 +47,7 @@ struct MenuBarView: View {
                     Image(systemName: "gearshape")
                 }
                 .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Settings")
 
                 Button(action: {
                     NSApplication.shared.terminate(nil)
@@ -54,6 +55,7 @@ struct MenuBarView: View {
                     Image(systemName: "power")
                 }
                 .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Quit Clipboard TTS")
             }
             .padding(.horizontal)
             .padding(.top)
@@ -84,12 +86,15 @@ struct MenuBarView: View {
                         .font(.title2)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel(audioPlayer.isPlaying ? "Pause" : "Play")
                 .disabled(!audioPlayer.hasAudio)
 
                 // Seeks on every change during a drag, as SwiftUI's slider did (NB55 owns that cost).
                 MenuSlider(
                     value: audioPlayer.playbackProgress,
                     range: 0...max(0.01, audioPlayer.bufferDuration),
+                    accessibilityLabel: "Playback position",
+                    spokenValue: { MenuSpokenValues.position($0, of: audioPlayer.bufferDuration) },
                     onEdit: { audioPlayer.seek(to: $0) }
                 )
                 .disabled(!audioPlayer.hasAudio)
@@ -102,6 +107,8 @@ struct MenuBarView: View {
                     value: audioPlayer.playbackRate,
                     range: 0.5...2.5,
                     step: 0.1,
+                    accessibilityLabel: "Playback speed",
+                    spokenValue: MenuSpokenValues.speed,
                     onEdit: { audioPlayer.playbackRate = $0 }
                 )
                 Text(String(format: "%.1fx", audioPlayer.playbackRate))

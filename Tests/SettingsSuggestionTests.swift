@@ -115,6 +115,15 @@ final class SettingsSuggestionTests: MockURLProtocolTestCase {
         openAIFields.release()
     }
 
+    func testEachSuggestionPickerSaysWhetherItOffersModelsOrVoices() {
+        // WHY: The two pickers look alike, a 30-point button showing only its arrows, and the text
+        // field beside each is a separate control. Without its own name VoiceOver reaches two
+        // unnamed pop-up buttons and cannot tell the model's from the voice's.
+        let fields = HostedModelVoiceFields(provider: .gemini, model: "gemini-3.8-flash-tts", voice: "Puck", testCase: self)
+
+        XCTAssertEqual(fields.suggestionLabels(), ["Model suggestions", "Voice suggestions"])
+    }
+
     func testAFormReRenderedWhileTheManagerHoldsAnotherProviderOffersItsOwnCatalogs() {
         // WHY: A provider switch renders the new provider's form once while the manager still holds
         // the provider it left. A form that took its provider from the manager would offer the old

@@ -103,6 +103,17 @@ final class SuggestionPickerTests: XCTestCase {
         XCTAssertEqual(selection.writes, [])
     }
 
+    func testPickerStatesTheNameItIsGiven() {
+        // WHY: The row draws the button 30 points wide, showing only its arrows, so its name is the
+        // only thing that tells VoiceOver what it offers. A new render's name must replace the old.
+        let picker = HostedPicker(choices: ["tts-1"], selection: RecordedSelection("tts-1"), testCase: self)
+        XCTAssertEqual(picker.button?.accessibilityLabel(), "Test suggestions")
+
+        picker.render(choices: ["tts-1"], label: "Renamed suggestions")
+
+        XCTAssertEqual(picker.button?.accessibilityLabel(), "Renamed suggestions")
+    }
+
     func testPickerKeepsItsRowsThirtyPointSlotBesideTheField() {
         // WHY: A pop-up button left to size itself takes the width of its longest title, and in the
         // row's 30-point slot it then spreads across the text field it sits beside. The row has
@@ -138,8 +149,14 @@ final class SuggestionPickerTests: XCTestCase {
     func testPickerOfferedNoWidthKeepsTheWidthItsTitlesNeed() {
         // WHY: SwiftUI asks for a view's ideal size by offering no width. The picker must then report
         // its natural width rather than none, or a layout measuring it would collapse it.
-        let host = NSHostingView(rootView: SuggestionPicker(choices: ["tts-1", "tts-1-hd"], selection: .constant("tts-1"))
-            .fixedSize())
+        let host = NSHostingView(
+            rootView: SuggestionPicker(
+                choices: ["tts-1", "tts-1-hd"],
+                accessibilityLabel: "Test suggestions",
+                selection: .constant("tts-1")
+            )
+            .fixedSize()
+        )
         host.frame.size = host.fittingSize
         host.layoutSubtreeIfNeeded()
 
@@ -178,7 +195,9 @@ private final class HostedPicker {
 
     init(choices: [String], selection: RecordedSelection, testCase: XCTestCase) {
         self.selection = selection
-        let host = NSHostingView(rootView: SuggestionPicker(choices: choices, selection: selection.binding))
+        let host = NSHostingView(
+            rootView: SuggestionPicker(choices: choices, accessibilityLabel: "Test suggestions", selection: selection.binding)
+        )
         host.frame = NSRect(x: 0, y: 0, width: 200, height: 40)
         self.host = host
         testCase.addTeardownBlock {
@@ -190,9 +209,9 @@ private final class HostedPicker {
 
     /// Renders the picker again, as SwiftUI does when its inputs change, over the same selection
     /// unless another is given.
-    func render(choices: [String], selection newSelection: RecordedSelection? = nil) {
+    func render(choices: [String], selection newSelection: RecordedSelection? = nil, label: String = "Test suggestions") {
         if let newSelection { selection = newSelection }
-        host?.rootView = SuggestionPicker(choices: choices, selection: selection.binding)
+        host?.rootView = SuggestionPicker(choices: choices, accessibilityLabel: label, selection: selection.binding)
         settleHostedView(host, file: #filePath, line: #line)
     }
 

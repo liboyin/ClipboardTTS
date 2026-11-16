@@ -13,8 +13,13 @@ import SwiftUI
 /// item writes that choice to `selection`; nothing else does. In particular, updating the view never
 /// writes the binding, so a row observing its value with `onChange` runs once per edit, whichever
 /// control made it.
+///
+/// The row draws the button 30 points wide, showing only its arrows, so nothing visible says what
+/// it offers; `accessibilityLabel` is what names it to assistive technology.
 struct SuggestionPicker: NSViewRepresentable {
     let choices: [String]
+    /// What the button offers suggestions for. It has no default, so no picker can be left unnamed.
+    let accessibilityLabel: String
     @Binding var selection: String
 
     func makeCoordinator() -> Coordinator {
@@ -31,6 +36,7 @@ struct SuggestionPicker: NSViewRepresentable {
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         let coordinator = context.coordinator
         coordinator.selection = $selection
+        button.setAccessibilityLabel(accessibilityLabel)
         if coordinator.choices != choices {
             coordinator.choices = choices
             button.removeAllItems()
