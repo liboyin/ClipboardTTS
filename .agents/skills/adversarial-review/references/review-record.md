@@ -1,24 +1,41 @@
 # Review Record
 
-Use this compact template for the [review procedure](../SKILL.md#procedure). Keep one record per task or cohesive group, updating it for follow-up candidates; it MAY contain the reviewer report and main-agent addendum. Reference supporting artifacts instead of duplicating their contents, and omit conditional sections when they do not apply. Record decisions and results, not a chronological transcript. Retain failure excerpts only when they establish the behavioral outcome or explain a finding; full passing logs are unnecessary.
+Use this template for the working record of a [review](../SKILL.md#procedure). [Evidence Retention](../SKILL.md#evidence-retention) says where the record lives and what it keeps.
 
-This is the working evidence record. When closing TODO tasks, the main agent preserves its essential contents under [TODO's completion-record procedure](../../../../tasks/README.md#maintaining-tasks), linking shared evidence when several tasks used one review record.
+- Update the record for each follow-up candidate.
+- Record decisions and results, not a transcript.
+- Refer to supporting artifacts. Do not copy their contents.
+- Omit a section that does not apply.
+- Keep a failure excerpt only if it establishes the behavioral outcome or explains a finding.
+- At closure, the main agent preserves the essential contents in the completion record, under the [task rules](../../../../tasks/README.md#close-a-task).
 
-- **Boundary:** intent, dependencies, implementation direction, affected compatibility surface, non-goals, validation, acceptance and done criteria for each task; write the accepted boundary here or link its sole owning location. State shared group constraints once and give each task distinct acceptance criteria. Distinguish existing caller contracts from new runtime validation requirements.
-- **Target:** starting and candidate revisions/range, in-scope paths and uncommitted inputs; full or follow-up scope and prior target when applicable.
-- **Reviewer:** agent/session ID, model/effort; replacement reason and transferred findings when applicable.
-- **Checks:** commands, results, relevant non-secret environment summary, and baseline selection rationale. Include the integration-coverage decision when deciding whether a further group review is needed.
-- **Findings:** reviewer report and verdict, main-agent validation and dispositions, reasons/revisit triggers for deferrals, and any user decisions.
-- **Integrity and cleanup:** snapshot comparison outcome, cleanup performed, retained artifact locations and lifetime limitations. Summarize a successful comparison once; detailed temporary snapshots need retention only for reuse or investigation.
+## Fields
 
-## Mutation evidence, when required or performed
+- **Boundary:** a link to the accepted boundary, as the [task rules](../../../../tasks/README.md#two-kinds-of-work) describe. Distinguish the existing contracts of callers from new requirements for runtime validation.
+- **Target:** the starting revision and the candidate revision or range, the in-scope paths and the uncommitted inputs. For a follow-up, add the earlier target.
+- **Reviewer:** the session ID, the model and the effort. If the reviewer was replaced, add the reason and the transferred findings.
+- **Checks:** the commands, the results, a summary of the relevant environment without secrets, and the reason for the choice of baseline.
+- **Coverage decision:** for a group, whether a further group review is needed, and why.
+- **Findings:** the reviewer's report and verdict, the main agent's validation and dispositions, and the user's decisions. For each deferral, add the reason and the revisit trigger.
+- **Integrity and cleanup:** the result of the snapshot comparison, the cleanup performed, and the location and lifetime of each retained artifact.
 
-Name the primary evidence producer and any reviewer additions. Record shared candidate identity, bootstrap, isolation and execution settings once, with per-case differences where needed. For each protected invariant, provide or reference the tested candidate (revision plus patch or equivalent for uncommitted inputs), build/test-bundle provenance, mutant definition, relevant test, exact command and runner settings, and behavioral failure. Explain why the chosen mutation probes the risk; cover the locally required revert, plausible-regression and over-restriction categories where applicable, explaining any inapplicability. Multiple assertions may share evidence. For removed/weakened coverage, identify the retained test that still rejects the broken behavior. Report invalid runs separately from behavioral failures. Identify which evidence a candidate, test or probe change invalidates and why unchanged cases remain applicable. The reviewer records the evidence checks and any reason for rerunning or extending a case; do not duplicate the producer's evidence in the reviewer report.
+## Mutation evidence
 
-## Additional provenance for evidence reuse
+Fill this section if mutation evidence was required or performed.
 
-Record the original tested revision, commands/results and evidence location. Compare relevant implementation, tests, call-path dependencies, configuration, file modes, symlink targets and environment. Include in-scope untracked inputs; never read ignored content or secrets to construct provenance. Record tested-input fingerprints and the non-secret environment evidence establishing equivalence, including tool/dependency versions where relevant. Changed or unknown relevant inputs invalidate reuse; rerun the affected checks instead. Revision-sensitive checks also require a new run when metadata changes.
+- Name the primary producer, and list what the reviewer added.
+- Record once the shared identity of the candidate, the bootstrap, the isolation and the execution settings. Add the differences of single cases where needed.
+- For each protected invariant, give or link these items:
+  - The tested candidate, and the provenance of the build and the test bundle.
+  - The mutant and the relevant test.
+  - The exact command with the runner settings, and the behavioral failure.
+- For uncommitted inputs, the tested candidate is the revision plus a patch.
+- Explain why the mutant probes the risk. Cover the categories that [AGENTS.md](../../../../AGENTS.md#tests) requires, and explain each category that does not apply.
+- For removed or weakened coverage, name the retained test that still rejects the broken behavior.
+- Report invalid runs separately from behavioral failures.
+- If the candidate, a test or a probe changed, state which evidence the change invalidates and why the other cases still apply.
+- The reviewer records the evidence checks and the reason for each rerun or added case. The reviewer's report does not repeat the producer's evidence.
 
-AGENTS and the skill's Review Scope limit reuse: baselines require the same unchanged revision and relevant environment, and fixes or rollback require full gates and a fresh reviewer verdict. This template supplies provenance fields, not permission to relax those requirements.
+## Evidence reuse
 
-Keep referenced evidence outside disposable scratch; detailed logs may be discarded once definitions, outcomes and provenance are sufficient.
+Fill this section only if results were reused. [Evidence reuse](evidence-reuse.md#what-to-record) lists what to record.

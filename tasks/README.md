@@ -102,7 +102,7 @@ These rules apply to the record:
 - Each task keeps its own record and its own acceptance evidence.
 - Link shared evidence by section, and do not repeat it. Identify the candidate that it applies to, and state any differences.
 - Tasks that are committed separately keep their own validation, mutation outcomes and review verdict.
-- A shared section does not make validation reusable. [Evidence reuse](../.agents/skills/adversarial-review/references/review-record.md#additional-provenance-for-evidence-reuse) owns that decision.
+- A shared section does not make validation reusable. [Evidence reuse](../.agents/skills/adversarial-review/references/evidence-reuse.md) owns that decision.
 - Use stable headings for linked sections. Short fields may stay inline.
 
 ### Defer a task, or accept it without change
