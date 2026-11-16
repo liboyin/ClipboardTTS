@@ -51,11 +51,6 @@ These rules settle conflicts between documents:
 - Accepted decisions and the user's authorization persist. Do not ask again about a settled choice.
 - Record a superseding decision and its reasoning before you commit the affected change.
 
-**Delegation.**
-
-- A bounded subtask SHOULD use a subagent when independent work or investigation justifies the handoff cost.
-- The main agent remains accountable for the integration and the verification.
-
 **Committed records.** Other sessions and other agents share only the Git repository.
 
 - Boundaries, decisions, open review findings and completion evidence MUST live in committed files.
@@ -102,6 +97,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
   5. A governance file.
 - A lesson enters a governance file on its second occurrence. A lesson about safety or data loss enters at once.
 - If a tool takes over a rule, delete the rule's prose in the same change.
+- Keep the governance files general. If a rule becomes too specific or too restrictive, consider its removal before you add a constraint.
 - After each task group, report any governance rule shown to be duplicated, superseded, or fully enforced by tooling.
 - Record the evidence in the completion record. If no rule meets these conditions, no removal proposal is needed.
 
@@ -133,6 +129,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 - Each applicable mutant MUST fail a relevant test in an isolated scratch copy.
 - Mutants of code under XCTest run through the [`run-mutants.py` procedure](README.md#mutation-testing).
 - Explain each category that does not apply. The evidence belongs to the invariant, and several assertions MAY share it.
+- If no automated test can observe an invariant, a recorded manual check is a valid substitute.
 - Before you remove or weaken coverage, show that a mutant that breaks the protected property still fails a retained test.
 - A consolidation that keeps the same cases and assertions needs no separate evidence for each deleted function body.
 - A surviving mutant needs investigation. It is not a reason to remove coverage.
@@ -152,7 +149,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 **Baseline.**
 
 - Before you implement, establish a passing baseline at `HEAD`.
-- Reuse baseline evidence only for the same unchanged revision and the same relevant environment. Record its provenance.
+- Reuse baseline evidence only while no build input or test input has changed, in the same relevant environment. Record its provenance.
 - If the baseline fails, fix it first in a separate, authorized change.
 
 **Gates.**
@@ -167,7 +164,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 **Review.**
 
 - Every independently committed non-trivial change MUST pass the [review procedure](.agents/skills/adversarial-review/SKILL.md#procedure) before the commit.
-- The reviewer owns the classification and the verdict. The main agent owns the investigation, the fixes and the required dispositions by the user.
+- The reviewer owns the classification and the verdict. The main agent owns the investigation and the fixes.
 - After a fix or a rollback, repeat the full gates and obtain a fresh review.
 - Finish only when no Blocking finding remains and every surfaced finding has its required disposition.
 - Never discard or reclassify a finding silently.
@@ -177,7 +174,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 **Exemptions.** Documentation-only changes and read-only assessments are exempt from the gates, the formal review and the completion record. Governance files and skill instructions count as documentation.
 
 - Instead, verify the claims, the references, the completeness and the diff, and report what you checked.
-- For a governance edit, check that it preserves the accepted safeguards and authorization boundaries. The edit also needs the user's review under [Governance Files](#governance-files).
+- For a governance edit, check that it preserves the accepted safeguards and authorization boundaries.
 - Documentation that a build tool or a runtime tool consumes as executable input or configuration is not exempt.
 
 **Documentation check.** Every change that touches a Markdown file MUST pass the [documentation check](README.md#documentation-check) before the commit.
@@ -199,7 +196,7 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 
 **Developer state.**
 
-- Never point a development run or a test run at the developer's real preferences, Keychain or pasteboard.
+- Never point a development run at the developer's real preferences, Keychain or pasteboard.
 - `.env` holds local secrets. It is git-ignored. Do not commit it, and do not record its values.
 
 **Actions that need the user's explicit authorization.**

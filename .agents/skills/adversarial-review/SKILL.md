@@ -165,7 +165,7 @@ These rules apply to every disposition:
 - Honor the user's existing dispositions. A deferral is not acceptance without change.
 - Only the reviewer updates its verdict.
 - `Review blocked` is not a passing verdict.
-- If you change the candidate, apply [Review Scope](#review-scope) to the change.
+- If you change the candidate, apply [Review Scope](#review-scope) to the change. The closing of the task records is not such a change.
 
 ## Report
 

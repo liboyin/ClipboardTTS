@@ -397,6 +397,15 @@ These choices do not need to be asked again. Validate exact implementation detai
 | D41 | New tasks take IDs `T1`, `T2` and so on from one counter, and an ad-hoc completion record takes the next `T` ID. Existing `B`, `NB`, `N` and `S` IDs are never renamed, because commit messages and completion records refer to them. A class prefix would freeze a classification that can change, and the priority line already carries it. | Task IDs |
 | D42 | The documentation check, the review snapshot and the reviewer dispatch run from a checkout of the shared tools repository beside this one, at `../agent-workflow-common`. The repository holds no copy of them, because the project is developed on this machine only. That repository tests the tools, and they run on the Python that macOS provides. This supersedes the 2026-10-12 governance sync's choice of a manual snapshot contract. | Shared tools |
 
+### Accepted user decisions — 2026-11-17
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D43 | The governance files neither require nor recommend subagents for implementation. The user cited current Anthropic guidance, which discourages the explicit use of subagents. | AGENTS, grouped task execution skill |
+| D44 | If no automated test can observe an invariant, a recorded manual check is a valid substitute for its mutation evidence. | NB54, NB60, later work |
+| D45 | Governance files should not be overly specific or restrictive. If a rule becomes too specific or too restrictive, consider its removal before a new constraint. | Governance files |
+| D46 | Baseline evidence may be reused while no build input or test input has changed. A documentation-only commit does not make a baseline stale. This relaxes the same-revision rule. | Validation |
+
 ### Constraints that remain in force
 
 - Preserve the [product requirements](#product-requirements): the fixed menu icon, Settings-only voice selection, two-click Clear Buffer/Speak behavior, and the clipboard-only OpenAI input-length refusal.

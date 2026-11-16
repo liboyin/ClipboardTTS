@@ -41,7 +41,7 @@ The rules follow ASD-STE100 and ISO 24495-1 loosely. Full compliance with either
 - **Disposition:** the recorded decision on a finding: fix it, defer it, or accept it without change. The [review skill](.agents/skills/adversarial-review/SKILL.md#procedure) says who decides.
 - **Finding:** a defect that the reviewer reports. Its class is Blocking, Non-blocking or Nit.
 - **Freeze:** to stop editing a candidate, so that the gates and the review assess one fixed state.
-- **Gate:** one of the two required checks: `./check-coverage.sh`, and the Debug build of the app that runs strict SwiftLint.
+- **Gate:** one of the two required checks that [AGENTS.md](AGENTS.md#validation-and-review) names.
 - **Governance file:** a file that tells agents how to work. [AGENTS.md](AGENTS.md#governance-files) lists them.
 - **Handoff:** the main agent's final message to the user about a change.
 - **Main agent:** the agent that implements the change and reports to the user.

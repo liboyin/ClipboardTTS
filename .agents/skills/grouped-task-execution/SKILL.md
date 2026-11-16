@@ -1,6 +1,6 @@
 ---
 name: grouped-task-execution
-description: Select and implement a small group of related open tasks, delegating implementation and reviewing the integrated group. Use for grouped backlog execution in this repository.
+description: Select and implement a small group of related open tasks and review the integrated group. Use for grouped backlog execution in this repository.
 ---
 
 # Grouped Task Execution
@@ -8,36 +8,29 @@ description: Select and implement a small group of related open tasks, delegatin
 Use this workflow for a group of related backlog tasks.
 
 - [AGENTS.md](../../../AGENTS.md) owns the standards and the commit requirements. The [task rules](../../../tasks/README.md) own boundaries and closure.
-- The main agent owns the integration, the final validation and the commit boundaries.
+- The main agent owns the implementation, the integration, the final validation and the commit boundaries.
 - This skill does not turn a documentation audit or unrelated fixes into a task group.
 
 ## 1. Select and bound
 
 1. Choose a small, high-value group of tasks that share a behavior, an invariant or a dependency.
 2. Revalidate each task against the current code.
-3. Bound each task under the [task rules](../../../tasks/README.md#bound-a-task). Keep one authoritative boundary for each task in `tasks/open/<ID>.md`.
+3. Bound each task under the [task rules](../../../tasks/README.md#bound-a-task).
 4. Record the intended commit boundaries and their order before implementation.
 
 Grouping does not expand authorization, and it does not settle an unresolved material decision.
 
-## 2. Delegate by ownership
+## 2. Implement in dependency order
 
-- Use one implementation agent for coupled tasks that edit the same code.
-- Separate independent work only if the edit boundaries are compatible.
-- Start each implementation agent through the harness's own subagent mechanism, without the main agent's conversation, unless the user selects otherwise.
-- The fixed reviewer model and the Codex CLI dispatch belong only to the [reviewer](../adversarial-review/SKILL.md#reviewer-session).
-- Supply the repository path, the path of the boundary, the edit ownership, the relevant documentation and the unrelated work to preserve.
-- State who is responsible for the validation and for the evidence.
-- Do not repeat the contracts that the boundary states.
-- Implement foundations before the behavior that depends on them. Run focused checks between stages.
+- Implement foundations before the behavior that depends on them.
+- Run focused checks between stages.
 
 ## 3. Integrate and freeze
 
-1. The implementation agents report that their repository edits are complete, and they name the remaining evidence work that needs only scratch copies.
-2. Resolve the integration issues.
-3. Compare the work with the plan from step 1, and record each deviation.
-4. Confirm the commit boundaries. [Review Scope](../adversarial-review/SKILL.md#review-scope) says when tasks may share one review.
-5. Freeze the candidate and run the final gates. Isolated evidence work MAY run at the same time.
+1. Resolve the integration issues.
+2. Compare the work with the plan from step 1, and record each deviation.
+3. Confirm the commit boundaries. [Review Scope](../adversarial-review/SKILL.md#review-scope) says when tasks may share one review.
+4. Freeze the candidate and run the final gates. Isolated evidence work MAY run at the same time.
 
 These rules also apply:
 
@@ -46,8 +39,7 @@ These rules also apply:
 
 ## 4. Review and resolve
 
-- Apply the [review procedure](../adversarial-review/SKILL.md#procedure) to every accepted boundary, acceptance criterion, retained behavior and integration path.
-- [Review Scope](../adversarial-review/SKILL.md#review-scope) says what the review covers, and when tasks that were already reviewed need a further review.
+Apply the [review procedure](../adversarial-review/SKILL.md#procedure) to the integrated group. [Review Scope](../adversarial-review/SKILL.md#review-scope) says what the review covers.
 
 ## 5. Close
 

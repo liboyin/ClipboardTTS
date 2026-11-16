@@ -22,8 +22,7 @@ These rules apply to an ad-hoc change:
 
 - A new task takes the next unused `T` number, starting at `T1`. Never reuse an ID, and never rename one.
 - The ID does not give the class of the task. The priority line and TODO's index give it.
-- Tasks recorded before 2026-11-16 keep their IDs. Their prefix gave the class: `B` for a Blocking finding, `NB` for a Non-blocking finding and `N` for a Nit.
-- The prefix `S` marked streamlining work that the user requested, and simplification proposals.
+- Tasks recorded before 2026-11-16 keep their IDs. The prefix gave the class: `B` Blocking, `NB` Non-blocking, `N` Nit, and `S` streamlining or simplification.
 - [project-reviews.md](../project-reviews.md#task-ids) records where the earlier IDs came from.
 
 ## Maintaining tasks
@@ -44,8 +43,7 @@ Before implementation, expand the task's file in place into a full boundary. Use
 
 - The boundary adds four parts to the boundary that [AGENTS.md](../AGENTS.md#scope-and-decisions) requires: the implementation direction, the assumptions, the compatibility surface and the required mutation evidence.
 - The compatibility surface names every affected contract of the menu, Settings, Services, the clipboard, persistence, provider requests and audio sessions. It states which of them are preserved.
-- The boundary MUST be in a committed file or in the candidate, because the working record is not committed.
-- The working record links to the boundary and does not copy it. Give the boundary's path to the implementing agents and to the reviewer.
+- The working record links to the boundary and does not copy it.
 - If a group of tasks shares a constraint, state it once and link to it. Put it in TODO's shared constraints or in the first task's file.
 - Each task keeps its own acceptance criteria.
 
@@ -70,30 +68,16 @@ Do these steps in the closing commit:
 2. Remove the task's line from TODO's index.
 3. Replace the priority line under the title with a one-line `**Outcome:**`.
 4. Append the remaining sections of the [closed record](#closed-record).
-5. Fix the links that the move changed:
-   - Inside the record, a sibling open task becomes `../open/<ID>.md`, and a closed task becomes `<ID>.md`.
-   - Fix every link to the record from other files.
+5. Fix each link that the move broke, inside the record and in other files.
 6. Update the documents that the task made stale:
    - DESIGN, for the source layout, the architecture, the design assumptions and the test harness.
    - README, for the operating sections. Current operations belong in README.
    - TODO's recommended order and shared constraints.
    - Each open task that names the closed task.
 
-The record preserves these items. Omit an item that does not apply.
-
-- The task's origin, the accepted boundary and each superseding decision.
-- The revalidation of the task against the code.
-- The implementation, or another disposition.
-- The validation commands and their results, with the revision and the environment.
-- The mutation evidence that was required or performed.
-- The review findings, with their validation and dispositions.
-- The limitations and the cleanup.
-
 These rules apply to the record:
 
 - If a check or the review was not performed, state that and the reason. A review waiver is not a passed review.
-- The record MUST be self-contained, because other sessions see only committed files.
-- The record MAY link other committed files.
 - Keep essential evidence in the record or in a durable linked artifact, under the [evidence-retention rules](../.agents/skills/adversarial-review/SKILL.md#evidence-retention). Temporary paths alone are not an archive.
 
 ### If several tasks share evidence
@@ -142,13 +126,14 @@ Check that the dependencies between the tasks are still consistent. The [documen
 
 ## Closed record
 
-At closing, the file gains the `**Outcome:**` line and these sections after its boundary:
+At closing, the file gains the `**Outcome:**` line and these sections after its boundary. Omit a section that does not apply.
 
-- Implementation.
-- Validation.
-- Mutation evidence.
-- Review.
+- Revalidation: the check of the task against the code, and each superseding decision.
+- Implementation, or another disposition.
+- Validation: the commands and their results, with the revision and the environment.
+- Mutation evidence: what was required and what was performed.
+- Review: the findings, with their validation and dispositions.
 - Manual checks.
-- Limitations.
+- Limitations, and the cleanup.
 
 The records closed before 2026-11-16 keep their earlier layout. Their Outcome lines come from the former index of dispositions.
