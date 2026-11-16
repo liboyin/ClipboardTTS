@@ -74,7 +74,11 @@ Those checks have not been run by the agent that introduced the exclusions; they
 
 ### Isolation
 
-The runner adds no isolation of its own, so a mutant that weakens the tests' own [isolation](DESIGN.md#test-harness) — the hosted startup graph, the secret store, the preference domain, or network routing — must not be run through it as it stands; record that category as not applicable for that reason unless the user approves an isolation for it. For network routing, TODO's D24 approves one: every request the selected tests issue targets a loopback literal, and the spec and its selectors are inspected first.
+The runner adds no isolation of its own.
+
+- A mutant that weakens the tests' own [isolation](DESIGN.md#test-harness) must not run through the runner as it stands. That isolation is the hosted startup graph, the secret store, the preference domain and network routing.
+- Record that category as not applicable for that reason, unless the user approves an isolation for it.
+- For network routing, D24 in [DESIGN](DESIGN.md#accepted-decisions) approves one. Every request that the selected tests issue targets a loopback literal, and the main agent inspects the spec and its selectors first.
 
 ### Run mutations
 
