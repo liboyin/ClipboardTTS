@@ -1,6 +1,37 @@
 # Clipboard TTS Design
 
-This document owns the app's current architecture, design assumptions, and test-harness design. [README](README.md) owns installation, build, test, and operating procedures; [USER_STORIES](USER_STORIES.md) owns product behavior. Where a rule names a declaration, that declaration's doc comment carries the detailed reasoning; `Dnn` and task IDs point to the decisions and records in [TODO](TODO.md) and [completed_work/](completed_work/).
+This document owns the product requirements, the app's current architecture, design assumptions, test-harness design, and the user's accepted decisions. [README](README.md) owns installation, build, test, and operating procedures. Where a rule names a declaration, that declaration's doc comment carries the detailed reasoning; `Dnn` points to [Accepted Decisions](#accepted-decisions), and task IDs point to the records in [tasks/](tasks/).
+
+## Product Requirements
+
+Clipboard TTS is an improved macOS text-to-speech service. This section owns the user-visible behavior.
+
+### App Appearance
+
+- The app should reside in the menu bar, with a macOS native look and feel (built using Native Swift/SwiftUI).
+- Clicking on the app button in the menu bar should open a drop-down menu with the following options:
+    - Speak Copied Text/Clear Buffer
+    - A progress slider representing the currently buffered audio. Its maximum length grows as more audio arrives dynamically.
+    - Pause/Resume
+    - Playback Speed, adjusted with a continuous slider from 0.5x to 2.5x (0.1x increments)
+    - Settings (Model Selection, Voice Selection, API Key, Local/Online API Base URL, Test Voice, About, etc.). The provider list is a left sidebar with About below it, and the configuration pane fills the window at any window size.
+- Voice selection lives only in Settings, alongside the model and API key it belongs with. The drop-down is for playback control; it neither offers nor displays the configured voice.
+- The menu bar icon is a fixed `waveform.circle` and does not reflect playback state. The stateful-icon requirement was withdrawn on 2026-08-03 and is not planned.
+
+### Starting Playback
+
+- The user should be able to select text in any application and right-click -> Services -> click "Speak Selected Text with Clipboard TTS" to send to TTS engine for playback. Note that Services is not available in all applications, so there is also the next item.
+- The user should be able to copy text in any application and click "Speak Copied Text" from the menu bar app to send to TTS engine for playback.
+- The app should start streaming audio within 2 seconds after the user clicks the button.
+- When OpenAI is the selected provider and the copied text is longer than the 4,096 characters the app sends OpenAI in one request, the click starts no request and shows a pop-up naming that maximum and how long the copied text is, so the user learns what is wrong instead of waiting for a generic failure. Text within the limit, Gemini and Custom requests, the Services entry point, and Settings' Test Voice are unaffected.
+- While audio is streaming or buffered, the "Speak Copied Text" button becomes "Clear Buffer": clicking it stops playback and discards the buffer. Speaking new text is a second click of "Speak Copied Text" — the app deliberately does not interrupt-and-replace in one click.
+
+### Control and Navigation During Playback
+
+- The user should be able to pause and resume the currently playing audio from the menu bar.
+- The user should be able to stop playback entirely from the menu bar to cancel a read and discard content that has yet to be sent to the TTS engine.
+- The user should be able to change the playback speed anywhere from 0.5x to 2.5x (continuous slider, 0.1x increments) during playback.
+- The user should be able to drag the slider thumb to jump to a precise point in the buffered audio.
 
 ## Architecture Overview
 
@@ -245,3 +276,127 @@ Every `AudioPlayerManager` a test builds comes from `makeOwnedAudioPlayer` ([Tes
 Audio-manager tests wait for the manager's explicit audio-queue processing or state-publication hook, or assert directly where the operation is synchronous. Progress-tick tests state the rendered position the manager reads and keep its progress timer out of every run loop, so they fire that timer where they want a tick, and hold the prebuffer's deferred start until they release it themselves. They must assert the queued callback before running it; do not use a sleep or a real deadline as a synchronization boundary. This keeps packet ordering, cancellation, and delayed-start tests deterministic.
 
 Menu tests that must own when the deferred clipboard read runs inject a `DeferredClipboardAction` scheduler and assert the delay it was asked for rather than waiting it out. They also inject a `MenuAlertPresenting` recorder: no test may take the production presenter, which activates the app and runs a modal panel nothing in a test would dismiss, so `makeMenu` defaults to the recorder and `MenuBarView` itself declares no default. A menu test that must prove exactly one request started counts the manager's request generation, drained until it settles, rather than mock-handler invocations, because a duplicate request can replace the first before its handler runs and a start deferred during publication is re-queued onto the main queue. `AppKitMenuAlertPresenter` is consequently the one production type the suite never executes; the coverage gate excludes its `presentAlert`, and what it would show is asserted where the message is built, in `MenuBarView`.
+
+## Accepted Decisions
+
+This section records the user's accepted decisions with their rationale and the tasks that they affect. Only the decisions recorded here authorize a product change. The task rules say how a decision is [recorded and superseded](tasks/README.md#record-decisions). Decisions made before 2026-11-16 were recorded in the former single plan file, which their wording calls TODO.
+
+### Accepted user decisions — 2026-09-06
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D1 | Introduce one speech-session coordinator incrementally before fixing underruns. It owns start/cancel, the selected audio format, and ordered completion. | NB19, B2, NB9 |
+| D2 | Applying a changed live PCM format clears the buffer and cancels its paired network request. Do not defer the change until the next session. | NB9 |
+| D3 | Discard a trailing partial PCM byte silently when complete frames exist. Empty and single-byte responses still fail. | NB2 |
+| D4 | OpenAI-compatible endpoints may omit Content-Type or use a generic type; reject explicitly unsupported formats. Validate Gemini's native PCM declaration. | NB1 |
+| D5 | Refuse cross-origin credential-bearing redirects. Preserve credentials deliberately only on permitted same-origin redirects, subject to the transport rule. | NB4 |
+| D6 | Use an explicit ephemeral policy with no persistent cache, shared cookie store, or credential store. | NB5 |
+| D7 | Expand the 85% aggregate coverage gate to application logic outside Managers, with narrow documented platform UI/integration exceptions. | NB16 |
+| D8 | Remove the unused clipboard-presence console messages. | NB24 |
+| D9 | Keep AGENTS concise and principle-based, the review skill procedural, and TODO focused on future work with its own maintenance rules. This separates stable working policy from review operations and evolving plans. | Documentation ownership |
+
+### Accepted user decisions — 2026-09-17
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D10 | An audio configuration change pauses the session at its position: restart the engine on the new output, keep the buffer and the running request, and cancel any pending automatic start or underrun resume. Play resumes from that position. Speech never moves to a different output device unasked. | NB11 |
+| D11 | A new speech attempt (menu, Services, Test Voice) retries starting a stopped engine instead of silently refusing. Success clears the stale failure and starts speech; failure keeps "Couldn't start audio playback. Try again." visible and starts no request. | NB11 |
+
+### Accepted user decisions — 2026-09-18
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D12 | Raise `ClipboardTTSApp`'s deployment target to macOS 14, the version the gates actually exercise, rather than keep a macOS 13 claim evidenced only by manual smoke checks. macOS 13 support is dropped. | NB29 |
+| D13 | Cap one Gemini SSE event at 64 MiB before it ends, and fail a stream that exceeds it on the existing no-playable-audio path. The largest documented event is about 42 MB, which leaves roughly 50% headroom. That figure comes from each Gemini TTS model's 16,384-token output limit at the 25 audio tokens per second Google bills, as 24-kHz 16-bit mono PCM, base64-encoded. | NB6 |
+| D14 | A request-state publication that an observer triggers while another publication is still running takes effect as soon as the outermost one finishes, in order and in the same main-queue turn, instead of inside it or on a later main-queue turn. State is then correct when the outer call returns, and main-queue work queued earlier cannot see a stopped request still marked as streaming. | NB8 |
+
+### Accepted user decisions — 2026-09-20
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D15 | Expanding the gate must not weaken the floor it already has. `Sources/Managers/` keeps its own 85% verdict beside the new 85% verdict over all gated application logic, because a single combined aggregate would let Managers fall to roughly 78% before the combined number dipped, absorbed by the high-coverage views. | NB16 |
+| D16 | Exclusions name symbols, not files or directories. Moving production code so that an exclusion could cover a whole file is refused: the adapters share their files with real logic, and per-function coverage records make the narrower arithmetic exact. | NB16 |
+| D17 | Each exclusion's end-to-end smoke check is written down and run by the user rather than by the agent, and TODO records until then that the agent has not performed it. | NB16 |
+
+### Accepted user decisions — 2026-09-21
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D18 | NB20 lands as two independent extractions with a commit and gates each: the pure provider catalogs and the OpenAI-compatible discovery contract first, then the manager's resolved request configuration. | NB20 |
+| D19 | Superseded by D38. The static catalogs keep being published through the guarded metadata token path. The provider identity each published list carries is what lets a Settings form refuse the previous provider's list on the render before `onChange` resynchronizes the manager, so moving that protection into the form is not part of NB20. | NB20 |
+| D20 | NB21 is accepted without change. Both layers it names carry behavior with no cheaper owner at this baseline, and replacing the hosted control presses with command-level tests would need its own boundary. | NB21 |
+
+### Accepted user decisions — 2026-09-24
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D21 | `TTSNetworkManager` always builds its session from `productionSessionConfiguration()`, and a caller may inject only a routing layer applied on top of it, in place of a whole session configuration. Tests route through that layer, so every mock-routed test runs on the production policy, and startup built for a hosted test run passes a layer that fails every request locally. This supersedes NB26's shape, the `.productionDefault` token and `.provided` mode, because no test then needs a way to reach an unrouted manager; it trades a test-only parameter in production code for one session policy under test and the fix NB31 needs. | NB31, NB26 |
+
+### Accepted user decisions — 2026-09-27
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D22 | Implement S3 and S4 alongside the mutation runner's open findings, one task per commit in this order: S3, NB39, NB40, NB41, NB34, S4. S3 goes first because it reshapes the acquisition-to-report structure NB39's restoration case tests, and S4 goes last so its case names cover the cases the others add. | S3, S4, NB39, NB40, NB41, NB34 |
+| D23 | A failed run's named failures include the tests Xcode's `Failing tests:` summary names, so a test that crashes, exits, or exceeds an enabled execution allowance reads as `KILLED` by that test. `FAILED-UNNAMED` remains only for a finished failure that names no test at all, and it becomes unjudged (exit 1) instead of a verdict. The reading is verified against real Xcode 27.0 logs before it lands. | NB34 |
+
+### Accepted user decisions — 2026-10-13
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D24 | Mutants that weaken network routing in tests may run through `run-mutants.py` when every request the selected tests issue targets a loopback literal and the main agent has inspected the spec and its selectors before the run. This is a standing approval of that isolation, replacing per-task approvals: the 2026-10-12 approval was given for NB31 alone, and NB46 had reused it without asking. Removing the test factory's mock routing stays excluded, because it would unroute every network suite, and those suites send to non-loopback mock hosts. | NB31, NB46, NB49, later routing work |
+
+### Accepted user decisions — 2026-10-27
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D25 | Keep D8's removal by a strict SwiftLint rule that refuses a free `print`, `debugPrint` or `NSLog` call in `Sources/`, leaving `Tests/` free to print. No test can observe a reinstated print, because stdout is shared with the test runner, so the guard is lint rather than XCTest. | NB24 |
+
+### Accepted user decisions — 2026-11-02
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D26 | Migrate the OpenAI provider from the retiring `/v1/audio/speech` models (`tts-1`, `tts-1-hd`, and the dated `gpt-4o-mini-tts` snapshots, reported retiring 2027-01-06) to the Realtime API over WebSocket, with `gpt-realtime-2.1-mini` as the default. Custom keeps the OpenAI-compatible HTTP speech contract, because local engines such as Kokoro-FastAPI do not speak Realtime. | OpenAI Realtime migration |
+| D27 | Offer a fixed OpenAI model catalog, `gpt-realtime-2.1-mini` then `gpt-realtime-2.1`, instead of `/v1/models` discovery, whose list also names Realtime models that cannot speak. | OpenAI Realtime migration, NB50 |
+| D28 | Keep `alloy` as the OpenAI default voice. On launch, rewrite a saved `fable`, `nova`, or `onyx` (rejected by the Realtime API) to `alloy`, and a saved model naming a `tts` speech model to the default Realtime model; keep every other saved value, including a model the catalog does not list. | OpenAI Realtime migration |
+| D29 | Keep the 4,096-character OpenAI clipboard cap, reworded as the app's own cap. This supersedes the same day's choice to raise it: live trials then showed `gpt-realtime-2.1-mini` going silent partway through responses at every tested length (NB51), so no evidence supports a higher cap. | OpenAI Realtime migration, NB51 |
+| D30 | Keep `gpt-realtime-2.1-mini` as the default despite NB51, documenting the silent-gap defect as a known limitation, with `gpt-realtime-2.1` selectable in Settings. | NB51 |
+| D31 | Remove model discovery rather than offer it to Custom endpoints: after D27 no Settings path reached it. Settings' suggestion lists are now the providers' fixed catalogs, and a key edit refreshes nothing. | NB50 |
+
+### Accepted user decisions — 2026-11-03
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D32 | The app does not support Intel Macs; it is distributed for Apple silicon only. | NB57 |
+| D33 | Superseded by D35. Settings saves an API key with a Save button instead of on every keystroke. | NB59 |
+| D35 | Supersedes D33: Settings keeps saving an API key on every keystroke, because that leaves the user no decision to make and therefore nothing to be confused about. A Save button would raise whether an unsaved draft reaches requests and what an unsaved field shows after Settings closes. | NB59 |
+| D34 | Custom's default endpoint is the native Kokoro server on the Apple GPU, `127.0.0.1:8881`, replacing the OpenAI speech fallback. | N13, S6 |
+
+### Accepted user decisions — 2026-11-14
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D36 | B5 takes direction (a): Settings' model and voice suggestion pickers and the menu's position and speed sliders render through `NSViewRepresentable` wrappers over `NSPopUpButton` and `NSSlider`, and SwiftUI's `Picker` and `Slider` are no longer used there. The user asked for the approach recommended for macOS 27 and later and for execution to start. The recommendation's reasoning: a representable's AppKit view is part of the hosting view's tree by construction, so hosted tests depend only on views the app owns. macOS 27 showed that whether SwiftUI backs its own controls with AppKit is an implementation detail that changes between releases. The scratch probes found no public in-process route to SwiftUI's self-drawn controls (subviews, accessibility children, navigation order, and hit tests all return only the host). Direction (b) would leave the form's wiring (which provider's catalog a section renders, and whether a picker writes its binding) with no automated check. The accepted cost is production code for two control types and AppKit's drawing of these controls in place of SwiftUI's. | B5, NB62 |
+| D37 | Guard D36 with a strict SwiftLint rule that refuses SwiftUI's `Picker` and `Slider` type names in `Sources/`, so a picker or slider is built from `SuggestionPicker` or `MenuSlider`, which hosted tests can see. The user chose this over an accessibility-driven UI-test target, after the main agent explained that the menu test's lookup cannot see a SwiftUI `Picker` on macOS 27. | NB63 |
+
+These choices do not need to be asked again. Validate exact implementation details against the repository and version-appropriate APIs. Raise a newly discovered material trade-off before changing the boundary; do not reinterpret an accepted decision silently.
+
+### Accepted user decisions — 2026-11-15
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D38 | Supersedes D19: Settings reads each provider's model and voice suggestions straight from `ProviderMetadataCatalog` for the provider the form renders, and the token-based path that publishes the catalogs through `TTSNetworkManager` is removed. Request-generation and speech callback-authority guards stay. The user accepted this when choosing S5 for grouped execution. The main agent's reasoning, given before that choice: D19 kept the token path because each published list named its provider, which let a form refuse the previous provider's list on the render before `onChange`; a form that names its own catalog by its own provider can never hold another provider's list, so that protection no longer needs the manager. | S5 |
+
+### Accepted user decisions — 2026-11-16
+
+| ID | Decision | Applies to |
+|---|---|---|
+| D39 | A strict SwiftLint rule, not an accepted surviving mutant, keeps a `KeychainSecretStore` default from returning once NB56 removes the two initializer defaults, because a reinstated default passes every test. The user chose it from the two options NB56 recorded, on the main agent's recommendation that it matches the existing settings-store rule. | NB56 |
+| D40 | The repository mirrors the structure and the governance files of the reference project, with local adaptations. Tasks live under `tasks/`, with one file for each open task and for each completion record. DESIGN owns the product requirements and the accepted decisions, STYLE.md owns documentation style, and TESTING.md owns the test conventions. This supersedes D9's rule that TODO holds its own maintenance rules, and the document-ownership deviation of the [2026-10-12 governance sync](tasks/closed/governance-sync-2026-10-12.md). | Documentation ownership |
+| D41 | New tasks take IDs `T1`, `T2` and so on from one counter, and an ad-hoc completion record takes the next `T` ID. Existing `B`, `NB`, `N` and `S` IDs are never renamed, because commit messages and completion records refer to them. A class prefix would freeze a classification that can change, and the priority line already carries it. | Task IDs |
+
+### Constraints that remain in force
+
+- Preserve the [product requirements](#product-requirements): the fixed menu icon, Settings-only voice selection, two-click Clear Buffer/Speak behavior, and the clipboard-only OpenAI input-length refusal.
+- Preserve DESIGN's immutable request snapshots, ordered generation-authorized callbacks, synchronous cancellation authority, and single bounded Gemini HTTP 500 retry. Completion cannot overtake accepted PCM; published isStreaming is not an end-of-stream signal.
+- Preserve the 0.1-second initial prebuffer, 0.2-second deferred clipboard policy, exact-end seek/replay, and finite Custom sample rates from 8000 through 48000, including fractions.
+- Tests state settings through storage they own (`makeOwnedDefaults`), never the developer's preferences. Do not reintroduce snapshot/clear/restore of the app's own domain, and do not seed real preferences to prove that tests avoid them; a scratch checkout alone does not isolate macOS preferences.

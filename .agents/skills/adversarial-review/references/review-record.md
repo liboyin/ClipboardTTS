@@ -2,7 +2,7 @@
 
 Use this compact template for the [review procedure](../SKILL.md#procedure). Keep one record per task or cohesive group, updating it for follow-up candidates; it MAY contain the reviewer report and main-agent addendum. Reference supporting artifacts instead of duplicating their contents, and omit conditional sections when they do not apply. Record decisions and results, not a chronological transcript. Retain failure excerpts only when they establish the behavioral outcome or explain a finding; full passing logs are unnecessary.
 
-This is the working evidence record. When closing TODO tasks, the main agent preserves its essential contents under [TODO's completion-record procedure](../../../../TODO.md#maintaining-this-plan), linking shared evidence when several tasks used one review record.
+This is the working evidence record. When closing TODO tasks, the main agent preserves its essential contents under [TODO's completion-record procedure](../../../../tasks/README.md#maintaining-tasks), linking shared evidence when several tasks used one review record.
 
 - **Boundary:** intent, dependencies, implementation direction, affected compatibility surface, non-goals, validation, acceptance and done criteria for each task; write the accepted boundary here or link its sole owning location. State shared group constraints once and give each task distinct acceptance criteria. Distinguish existing caller contracts from new runtime validation requirements.
 - **Target:** starting and candidate revisions/range, in-scope paths and uncommitted inputs; full or follow-up scope and prior target when applicable.

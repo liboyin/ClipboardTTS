@@ -4,7 +4,7 @@
 
 Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text aloud through OpenAI's Realtime API, an OpenAI-compatible TTS endpoint, or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
-[DESIGN.md](DESIGN.md) describes the architecture, design assumptions, and test-harness rules; [USER_STORIES.md](USER_STORIES.md) describes product behavior.
+[DESIGN.md](DESIGN.md) describes the product requirements, architecture, design assumptions, and test-harness rules. [tasks/](tasks/) holds the open tasks and the completion records.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ xcodegen generate
 3. Click the gear button to open **Settings** and select a provider in the sidebar. For OpenAI or Gemini, enter your API key and choose a model and voice. For Custom, configure your server's full speech URL, model, voice, key if required, and PCM sample rate; [Local Kokoro Server](#local-kokoro-server) gives a local setup.
 4. Click **Test Voice** to check the configuration. Then copy text, open the menu-bar icon, and click **Speak Copied Text**. If the button says **Clear Buffer**, click it first to discard the previous speech, then click **Speak Copied Text**.
 
-See [USER_STORIES](USER_STORIES.md) for playback behavior and provider-specific limits, and [Packaging](#packaging) to enable the selected-text service.
+See [DESIGN](DESIGN.md#product-requirements) for playback behavior and provider-specific limits, and [Packaging](#packaging) to enable the selected-text service.
 
 ## Build
 
@@ -43,7 +43,7 @@ Both targets remain in Swift 5 language mode, but `project.yml` enables complete
 
 The `ClipboardTTSApp` target builds `ClipboardTTS.app`; its target, scheme, Swift module, and bundle identifier keep the `ClipboardTTSApp` name, so saved preferences and Keychain items carry over.
 
-The app and its unit-test bundle both have a macOS 14 deployment target. Tests run on the host macOS version; a gate run on macOS 27.2.1 does not demonstrate runtime compatibility with macOS 14. [N12](completed_work/N12.md) records the `vtool` inspection of Xcode 27.2's XCTest libraries at revision `69e5e29` on Darwin 25.6.0: their minimum is macOS 14.
+The app and its unit-test bundle both have a macOS 14 deployment target. Tests run on the host macOS version; a gate run on macOS 27.2.1 does not demonstrate runtime compatibility with macOS 14. [N12](tasks/closed/N12.md) records the `vtool` inspection of Xcode 27.2's XCTest libraries at revision `69e5e29` on Darwin 25.6.0: their minimum is macOS 14.
 
 The generated project has one `ClipboardTTSApp` scheme, whose test action runs that bundle, so the coverage script selects it and the current host architecture explicitly to avoid a multiple-destination warning. Xcode 27.2 invokes AppIntents metadata extraction for both targets even though neither links AppIntents; its “Metadata extraction skipped, no AppIntents.framework dependency found” warning is benign tool metadata, not a source warning. Do not suppress compiler or lint diagnostics to hide it.
 
@@ -68,7 +68,7 @@ Each symbol the coverage gate excludes carries an end-to-end check to run by han
 - **About panel** (`StandardAboutPanelPresenter`): Open Settings and click **About Clipboard TTS** in the sidebar footer, and confirm the panel shows the application's name and version.
 - **Keychain** (`KeychainSecretStore`): Save an API key in Settings, quit, relaunch and confirm the key is still there, then clear that field, quit, relaunch and confirm it is gone — clearing a key is what reaches `deleteSecret`, which is excluded alongside the read and the write.
 
-Those checks have not been run by the agent that introduced the exclusions; they are recorded as outstanding in TODO.
+Those checks have not been run by the agent that introduced the exclusions; they are recorded as outstanding in [TODO](tasks/TODO.md#shared-constraints).
 
 ## Mutation Testing
 
@@ -127,7 +127,7 @@ Verdicts come from the log's last standalone terminal marker ([classify](run-mut
 - `FAILED-UNNAMED` means a finished failure that names no test, such as a crash in a suite's class-level `setUp` or `tearDown`, and leaves its mutant unjudged.
 - `NO-VERDICT` means no terminal marker, or a run its deadline stopped.
 
-Test logs are read as UTF-8 with undecodable bytes replaced by U+FFFD ([read_log](run-mutants.py)). Tool output the runner reads as text, such as Git's paths and the host architecture, is captured as bytes and decoded as UTF-8 whatever the locale, so a repository path outside ASCII is found under any locale, and a failed tool's stderr gets the same replacement ([describe](run-mutants.py); [NB64](completed_work/NB64.md)).
+Test logs are read as UTF-8 with undecodable bytes replaced by U+FFFD ([read_log](run-mutants.py)). Tool output the runner reads as text, such as Git's paths and the host architecture, is captured as bytes and decoded as UTF-8 whatever the locale, so a repository path outside ASCII is found under any locale, and a failed tool's stderr gets the same replacement ([describe](run-mutants.py); [NB64](tasks/closed/NB64.md)).
 
 The [runner entry point](run-mutants.py) (`__main__`) configures stdout to escape characters the locale's encoding cannot carry, so printing a verdict line does not fail for that reason. `results.json` keeps the exact test name.
 
