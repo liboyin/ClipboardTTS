@@ -1,6 +1,6 @@
 # Scratch Testing Recipe
 
-Use this recipe when the [review procedure](../SKILL.md#procedure) requires writable execution. [AGENTS](../../../../AGENTS.md#test-guidelines) owns test safety and mutation requirements; [README](../../../../README.md) owns Xcode generation and the [`run-mutants.py` procedure](../../../../README.md#mutation-testing); [DESIGN](../../../../DESIGN.md#test-harness) owns hosted-test isolation.
+Use this recipe when the [review procedure](../SKILL.md#procedure) requires writable execution. [AGENTS](../../../../AGENTS.md#tests) owns test safety and mutation requirements; [README](../../../../README.md) owns Xcode generation and the [`run-mutants.py` procedure](../../../../README.md#mutation-testing); [DESIGN](../../../../DESIGN.md#test-harness) owns hosted-test isolation.
 
 Create a scratch copy only when writable execution is needed. Reuse an owned copy for focused checks of a fixed candidate where practical, restoring the candidate between probes and using fresh test processes. Do not share writable scratch between agents. Retain evidence outside disposable scratch. Evidence inspection alone needs no copy.
 

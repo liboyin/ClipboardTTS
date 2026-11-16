@@ -34,7 +34,7 @@ No Blocking finding is open, and no Nit is open. No open task is bounded for imp
 
 - The user runs the [manual smoke checks](../README.md#manual-smoke-checks) of the symbols that the coverage gate excludes (D17). No agent has performed them.
 - Physical switching of audio devices remains unverified.
-- A check against a live provider needs the user's authorization, under the [safety rules](../AGENTS.md).
+- A check against a live provider needs the user's authorization, under the [safety rules](../AGENTS.md#safety).
 - Record evidence at its actual revision.
 
 ## Open tasks

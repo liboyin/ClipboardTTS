@@ -4,7 +4,7 @@
 
 Native macOS menu bar app (Swift/SwiftUI, macOS 14+) that reads clipboard text aloud through OpenAI's Realtime API, an OpenAI-compatible TTS endpoint, or Google Gemini's own streaming speech endpoint. No external Swift dependencies; uses only Apple frameworks (AVAudioEngine, URLSession, NSPasteboard).
 
-[DESIGN.md](DESIGN.md) describes the product requirements, architecture, design assumptions, and test-harness rules. [tasks/](tasks/) holds the open tasks and the completion records.
+[DESIGN.md](DESIGN.md) describes the product requirements, architecture, design assumptions, and test-harness rules. [TESTING.md](TESTING.md) describes how tests are written, and [tasks/](tasks/) holds the open tasks and the completion records.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 # Tasks
 
-This directory owns the state of tasks. This file owns how a task is recorded, bounded and closed.
+This directory owns the state of tasks. This file owns how a task is recorded, bounded and closed. [STYLE.md](../STYLE.md#glossary) defines the terms.
 
 - [TODO.md](TODO.md) holds the recommended order, the constraints that several tasks share, and the index of open tasks.
 - [open/](open/) holds one file for each open task.

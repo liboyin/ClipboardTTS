@@ -198,7 +198,7 @@ For streaming requests, accept, parse, and account for provider data while holdi
 
 ## Test Harness
 
-These are the isolation, ownership, and synchronization rules every test follows; [AGENTS](AGENTS.md#test-guidelines) owns the requirements they implement. The test helpers named below carry the detailed reasoning in their doc comments.
+These are the isolation, ownership, and synchronization rules every test follows; [AGENTS](AGENTS.md#tests) owns the requirements they implement. The test helpers named below carry the detailed reasoning in their doc comments.
 
 ### Hosted startup
 
