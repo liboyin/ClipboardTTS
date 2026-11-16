@@ -161,7 +161,6 @@ The governance files are this file, [STYLE.md](STYLE.md), [TESTING.md](TESTING.m
 - The final candidate of every non-trivial change MUST pass the two gates. [README Test](README.md#test) and [README Build](README.md#build) describe them.
 - The gates are `./check-coverage.sh`, and a Debug build of the app with complete strict concurrency and with signing disabled.
 - Every build runs strict SwiftLint over `Sources` and `Tests`, and it fails without SwiftLint.
-- A configuration-only change needs the gates too.
 - Inspect the per-file coverage and the warnings. Resolve new source warnings, and explain each accepted tooling warning.
 - Keep the generated Xcode project consistent with its configuration and its inputs. Follow README's regeneration procedure, and do not commit generated project files.
 
